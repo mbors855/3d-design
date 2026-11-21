@@ -1,0 +1,122 @@
+<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Digital Denture CAD 4.0 – Project & export</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0d1720;color:#ecf5fc;font:14px -apple-system,BlinkMacSystemFont,system-ui}header{padding:12px 14px;background:#1a3345;font-weight:700}.bar{display:flex;gap:7px;padding:9px;flex-wrap:wrap;background:#172b3a}button,.filebtn{border:1px solid #48798f;background:#1b607e;color:white;border-radius:9px;padding:11px 13px;font:inherit;min-height:43px;cursor:pointer;flex:1;text-align:center}.filebtn{background:#237f83}input[type=file]{display:none}#viewport{height:72dvh;min-height:390px;position:relative;overflow:hidden;background:radial-gradient(circle at center,#263c4c,#0c1720);touch-action:none}canvas{width:100%;height:100%;display:block;touch-action:none}#overlay{position:absolute;top:10px;left:12px;right:12px;color:#c6d8e4;pointer-events:none;font-size:12px}#status{padding:11px 13px;background:#193447;color:#b9efff;min-height:42px;overflow-wrap:anywhere}#info{padding:12px;color:#b9cbd6;line-height:1.55}#controls{padding:10px;display:flex;gap:8px;flex-wrap:wrap}#controls button{flex:1}small{display:block;padding:0 12px 18px;color:#aab9c4}@media(orientation:landscape){#viewport{height:75dvh;min-height:250px}}#setup{position:fixed;inset:0;z-index:20;background:#0c1720;overflow-y:auto;padding:18px 16px 32px}#setup h2{margin:8px 0 6px}#setup p{color:#a9c2d1;line-height:1.45}fieldset{border:1px solid #36596a;border-radius:12px;margin:13px 0;padding:12px}legend{font-weight:700;color:#bce9fb;padding:0 5px}.choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.choices label{padding:13px 8px;background:#1b3547;border:2px solid transparent;border-radius:10px;text-align:center;cursor:pointer}.choices label:has(input:checked){border-color:#59d4df;background:#20566a}.choices input{position:absolute;opacity:0;width:1px;height:1px}#start{width:100%;background:#087f84;font-weight:700;font-size:16px}#projectbar{padding:8px 12px;background:#24465b;display:flex;align-items:center;gap:8px;flex-wrap:wrap}#projectname{flex:1;font-size:12px}#newproject{flex:0 0 auto;padding:8px}#setup[hidden]{display:none}#warning{font-size:12px;color:#e8c88d;margin:12px 0} 
+#modulebar{display:flex;gap:5px;padding:8px;overflow-x:auto;background:#142a3b}#modulebar button{white-space:nowrap;flex:0 0 auto;padding:9px 12px;font-size:12px}#modulebar button.active{background:#0c858e;border-color:#8cebf2}#toolbox{padding:8px;background:#1a3545;display:flex;gap:6px;flex-wrap:wrap}#toolbox button{flex:0 0 auto;padding:8px;font-size:12px}#toolbox button.active{background:#117f83}#annotate{position:absolute;inset:0;width:100%;height:100%;z-index:2;touch-action:none;display:none}#viewport.annotating #annotate{display:block}#viewport.annotating #overlay{display:none}#moduleHelp{padding:9px 12px;color:#b6cddd;background:#1b2c39}#viewport{height:68dvh}#layerbar{padding:8px 12px;background:#1a2d3c;font-size:12px}#layerbar label{margin-right:12px}#layerbar input{vertical-align:middle} 
+</style></head><body>
+<section id="setup">
+<h2>🦷 Nieuw CAD-project</h2><p>Kies eerst je werkstuk, de kaak en de beschikbare scans. Daarna opent het grote 3D-werkvenster.</p>
+<fieldset><legend>1 · Wat wil je maken?</legend><div class="choices">
+<label><input type="radio" name="work" value="Individuele lepel" checked>🥄 Individuele lepel</label>
+<label><input type="radio" name="work" value="Beetplaat">📐 Beetplaat</label>
+<label><input type="radio" name="work" value="Volledige prothese">🦷 Volledige prothese</label>
+<label><input type="radio" name="work" value="Partiële prothese">🦷 Partiële prothese</label>
+</div></fieldset>
+<fieldset><legend>2 · Welke kaak?</legend><div class="choices">
+<label><input type="radio" name="jaw" value="Bovenkaak" checked>⬆️ Bovenkaak</label>
+<label><input type="radio" name="jaw" value="Onderkaak">⬇️ Onderkaak</label>
+<label><input type="radio" name="jaw" value="Beide kaken">↕️ Beide kaken</label>
+</div></fieldset>
+<fieldset><legend>3 · Tegenmodel / antagonist?</legend><div class="choices">
+<label><input type="radio" name="antagonist" value="Zonder antagonist" checked>Zonder antagonist</label>
+<label><input type="radio" name="antagonist" value="Met antagonist">Met antagonist</label>
+</div></fieldset>
+<fieldset id="teethSection"><legend>4 · Welke elementen vervangen?</legend><p>Vink de ontbrekende of te vervangen elementen aan (FDI-notatie).</p><div style="display:flex;gap:8px;margin-bottom:9px"><button type="button" id="allTeeth">Alles selecteren</button><button type="button" id="clearTeeth">Selectie wissen</button></div><div id="teethGrid" class="choices"></div></fieldset>
+<fieldset><legend>5 · Uitvoer voor printer of freescentrum</legend><div class="choices">
+<label><input type="checkbox" name="outputs" value="monoblock" checked>Monoblock STL</label>
+<label><input type="checkbox" name="outputs" value="basis" checked>Basis STL</label>
+<label><input type="checkbox" name="outputs" value="elementen" checked>Elementen STL</label>
+<label><input type="checkbox" name="outputs" value="individuele_elementen">Losse elementen STL</label>
+</div><p>Bestandspaden worden voorbereid; STL's kunnen pas worden gegenereerd wanneer de 3D-ontwerpen daadwerkelijk bestaan.</p></fieldset>
+<fieldset><legend>6 · Projectnaam (optioneel)</legend><input id="caseName" placeholder="Bijv. patiëntcode / opdracht" style="width:100%;padding:12px;border-radius:8px;background:#102637;border:1px solid #4a7485;color:white;font-size:16px"></fieldset>
+<div id="warning">Bij prothesen zonder antagonist kan de software geen occlusie of intermaxillaire relatie controleren. Deze versie bevat een modulaire werkruimte met 2D-markeringen; automatische 3D-CAD en productieklare STL-export zijn nog in ontwikkeling.</div>
+<button id="start">Project starten →</button>
+</section>
+<header>🦷 Digital Denture CAD 4.0 — Project & export</header>
+<div id="projectbar"><span id="projectname">Nog geen project</span><button id="newproject">⚙️ Nieuw project</button></div>
+<nav id="modulebar"><button data-module="scan" class="active">1 Scan</button><button data-module="analyse">2 Analyse</button><button data-module="lepel">3 Lepel</button><button data-module="beetplaat">4 Beetplaat</button><button data-module="tanden">5 Elementen</button><button data-module="basis">6 Basis</button><button data-module="controle">7 Controle</button><button data-module="productie">8 Productie</button></nav>
+<div id="moduleHelp">Scanmodule · STL importeren, bekijken en roteren.</div>
+<div id="toolbox"><button id="drawMode">✏️ Teken op beeld</button><button id="pointTool">• Punt</button><button id="lineTool">╱ Lijn</button><button id="brushTool">🖌 Brush</button><button id="eraseTool">⌫ Gum</button><button id="undo">↶ Undo</button><button id="redo">↷ Redo</button><button id="clearMarks">Wis laag</button><button id="saveMarks">↓ Markeringen JSON</button></div>
+<div id="layerbar">Laag: <label><input type="radio" name="layer" value="lepel" checked> Lepel (blauw)</label><label><input type="radio" name="layer" value="beetplaat"> Beetplaat (oranje)</label><label><input type="radio" name="layer" value="steg"> Steg (rood)</label></div>
+<div class="bar"><label class="filebtn" for="file">📂 Open STL-scan</label><input id="file" type="file" accept=".stl,model/stl,application/sla,application/octet-stream"><button id="demo">Test 3D</button><button id="fit">⌖ Pas beeld aan</button></div>
+<div id="viewport"><canvas id="canvas"></canvas><canvas id="annotate"></canvas><div id="overlay">Sleep met één vinger om te draaien · knijp met twee vingers om te zoomen</div></div>
+<div id="status">Klaar. Open een STL-scan of kies Test 3D.</div>
+<div class="bar"><button id="exportPlan">📦 Download exportplan (JSON)</button></div><div id="controls"><button id="left">↶ Links</button><button id="right">↷ Rechts</button><button id="zoomIn">＋ Zoom</button><button id="zoomOut">－ Zoom</button></div>
+<div id="info">Deze versie is een zelfstandige STL-viewer zonder externe 3D-bibliotheken. Binaire en ASCII-STL worden ondersteund. De originele scan wordt niet aangepast.</div>
+<small>Voor grote scans wordt een deel van de driehoeken getoond om de iPhone soepel te houden. Dit is een diagnose- en weergaveversie; CAD-bewerkingen uit 3.2 zijn hier nog niet geïntegreerd.</small>
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const annotate=$('annotate'),ac=annotate.getContext('2d');
+let marks=[],future=[],mode='point',drawing=false,active=null,drawEnabled=false,mod='scan';
+const colors={lepel:'#49bfff',beetplaat:'#ffb44e',steg:'#ff6974'};
+function resizeMarks(){const r=annotate.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);annotate.width=Math.round(r.width*d);annotate.height=Math.round(r.height*d);ac.setTransform(d,0,0,d,0,0);paint()}
+function paint(){const r=annotate.getBoundingClientRect();ac.clearRect(0,0,r.width,r.height);for(const mark of [...marks,...(active?[active]:[])]){const pts=mark.points;if(!pts.length)continue;ac.strokeStyle=colors[mark.layer];ac.fillStyle=colors[mark.layer];ac.lineWidth=mark.tool==='brush'?6:2.5;ac.lineCap='round';ac.lineJoin='round';if(mark.tool==='point'){for(const p of pts){ac.beginPath();ac.arc(p[0]*r.width,p[1]*r.height,5,0,Math.PI*2);ac.fill()}}else{ac.beginPath();pts.forEach((p,i)=>i?ac.lineTo(p[0]*r.width,p[1]*r.height):ac.moveTo(p[0]*r.width,p[1]*r.height));ac.stroke()}}}
+function point(e){const r=annotate.getBoundingClientRect();return [(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]}
+function commit(m){marks.push(m);future=[];paint()}
+annotate.addEventListener('pointerdown',e=>{if(!drawEnabled)return;annotate.setPointerCapture(e.pointerId);const p=point(e),layer=document.querySelector('input[name="layer"]:checked').value;drawing=true;
+if(mode==='erase'){let best=-1,dist=.035;marks.forEach((m,i)=>m.points.forEach(q=>{let d=Math.hypot((q[0]-p[0])*annotate.clientWidth,(q[1]-p[1])*annotate.clientHeight)/Math.min(annotate.clientWidth,annotate.clientHeight);if(d<dist){dist=d;best=i}}));if(best>=0){future=[];marks.splice(best,1);paint()}drawing=false;return}
+if(mode==='line'){const last=marks[marks.length-1];if(last&&last.tool==='line'&&last.layer===layer){last.points.push(p);future=[];paint();drawing=false;return}}
+active={tool:mode,layer,points:[p]};if(mode==='point'||mode==='line'){commit(active);active=null;drawing=false}});
+annotate.addEventListener('pointermove',e=>{if(!drawing||!active||mode!=='brush')return;active.points.push(point(e));paint()});
+function end(){if(active){commit(active);active=null}drawing=false}annotate.addEventListener('pointerup',end);annotate.addEventListener('pointercancel',end);
+$('drawMode').onclick=()=>{drawEnabled=!drawEnabled;$('viewport').classList.toggle('annotating',drawEnabled);$('drawMode').classList.toggle('active',drawEnabled);$('drawMode').textContent=drawEnabled?'👆 Draaien (tekenen uit)':'✏️ Teken op beeld';resizeMarks()};
+for(const [id,m] of [['pointTool','point'],['lineTool','line'],['brushTool','brush'],['eraseTool','erase']])$(id).onclick=()=>{mode=m;for(const x of ['pointTool','lineTool','brushTool','eraseTool'])$(x).classList.remove('active');$(id).classList.add('active');if(!drawEnabled)$('drawMode').click()};
+$('undo').onclick=()=>{if(marks.length){future.push(marks.pop());paint()}};
+$('redo').onclick=()=>{if(future.length){marks.push(future.pop());paint()}};
+$('clearMarks').onclick=()=>{const layer=document.querySelector('input[name="layer"]:checked').value;const removed=marks.filter(m=>m.layer===layer);if(removed.length){marks=marks.filter(m=>m.layer!==layer);future=[];paint()}};
+$('saveMarks').onclick=()=>{const payload={version:'4.0',coordinate_system:'normalized_screen_overlay_NOT_3D_MESH',marks,project:window.projectConfig||null};const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='markeringen_2D.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+const descriptions={scan:'Scan · STL importeren en roteren. Tekenmodus maakt 2D-aantekeningen over het beeld.',analyse:'Analyse · handmatig lepelgrens, beetplaatgrens en steg markeren. Automatische herkenning is nog niet beschikbaar.',lepel:'Lepel · teken de voorgestelde grens in de blauwe laag. Nog geen productie-STL.',beetplaat:'Beetplaat · teken de grens in de oranje laag. Nog geen productie-STL.',tanden:'Elementen · FDI-keuze staat in het projectmenu. Automatische opstelling nog niet beschikbaar.',basis:'Basis · module voorbereid. 3D-basisgeneratie nog niet beschikbaar.',controle:'Controle · visuele inspectie; klinische en mesh-validatie nog niet beschikbaar.',productie:'Productie · download het exportplan; er worden nog geen gefabriceerde STL-bestanden gemaakt.'};
+for(const b of document.querySelectorAll('#modulebar button'))b.onclick=()=>{mod=b.dataset.module;for(const x of document.querySelectorAll('#modulebar button'))x.classList.remove('active');b.classList.add('active');$('moduleHelp').textContent=descriptions[mod]};
+window.addEventListener('resize',resizeMarks);setTimeout(resizeMarks,100);
+})();
+</script>
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id);
+const selection=name=>document.querySelector('input[name="'+name+'"]:checked')?.value||'';
+const grid=$('teethGrid');
+const toothIds=[18,17,16,15,14,13,12,11,21,22,23,24,25,26,27,28,48,47,46,45,44,43,42,41,31,32,33,34,35,36,37,38];
+for(const id of toothIds){const label=document.createElement('label');label.innerHTML='<input type="checkbox" class="tooth" value="'+id+'"><span>'+id+'</span>';grid.appendChild(label)}
+$('allTeeth').onclick=()=>{for(const e of document.querySelectorAll('.tooth'))e.checked=true};
+$('clearTeeth').onclick=()=>{for(const e of document.querySelectorAll('.tooth'))e.checked=false};
+function updateTeeth(){const jaw=selection('jaw');for(const e of document.querySelectorAll('.tooth')){let upper=+e.value<30;let allowed=jaw==='Beide kaken'||(jaw==='Bovenkaak'?upper:!upper);e.parentElement.style.display=allowed?'':'none';e.disabled=!allowed;if(!allowed)e.checked=false}const w=selection('work');$('teethSection').style.display=w.includes('prothese')?'':'none'}
+for(const e of document.querySelectorAll('input[name="jaw"],input[name="work"]'))e.addEventListener('change',updateTeeth);
+updateTeeth();
+function plan(){const cfg=window.projectConfig||{werkstuk:selection('work'),kaak:selection('jaw'),antagonist:selection('antagonist'),naam:$('caseName').value.trim(),elementen:[...document.querySelectorAll('.tooth:checked')].map(e=>+e.value),outputs:[...document.querySelectorAll('input[name="outputs"]:checked')].map(e=>e.value)};
+const safe=(cfg.naam||'project').replace(/[^a-z0-9_-]+/gi,'_').slice(0,48);
+const jaws=cfg.kaak==='Beide kaken'?['bovenkaak','onderkaak']:[cfg.kaak==='Bovenkaak'?'bovenkaak':'onderkaak'];
+let paths=[];for(const jaw of jaws){const dir=safe+'/'+jaw+'/';for(const kind of cfg.outputs){if(kind==='individuele_elementen'){for(const id of cfg.elementen.filter(id=>(id<30)===(jaw==='bovenkaak')))paths.push(dir+'elementen/element_'+id+'.stl')}else paths.push(dir+kind+'.stl')}}
+return {project:cfg,geplande_bestandspaden:paths,status:'PLANNING_ONLY_GEEN_STL_GEGENEREERD',waarschuwing:'De STL-bestanden bestaan nog niet. Dit JSON-bestand bevat uitsluitend de gewenste exportstructuur.'}}
+$('exportPlan').onclick=()=>{const blob=new Blob([JSON.stringify(plan(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='denture_exportplan.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+
+$('start').onclick=()=>{
+ const config={werkstuk:selection('work'),kaak:selection('jaw'),antagonist:selection('antagonist'),naam:$('caseName').value.trim(),elementen:[...document.querySelectorAll('.tooth:checked')].map(e=>+e.value),outputs:[...document.querySelectorAll('input[name="outputs"]:checked')].map(e=>e.value)};
+ $('projectname').textContent=[config.naam,config.werkstuk,config.kaak,config.antagonist].filter(Boolean).join(' · ');
+ $('setup').hidden=true; window.projectConfig=config;
+ setTimeout(()=>{window.dispatchEvent(new Event('resize'))},50);
+};
+$('newproject').onclick=()=>{$('setup').hidden=false};
+const canvas=$('canvas'),ctx=canvas.getContext('2d',{alpha:false}),status=t=>$('status').textContent=t;
+let tris=[],bounds=null,rx=-.45,ry=.25,zoom=1,renderQueued=false,originalCount=0;
+function frame(){if(renderQueued)return;renderQueued=true;requestAnimationFrame(()=>{renderQueued=false;draw()})}
+function setTriangles(t,n){tris=t;originalCount=n;let min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];for(const a of t)for(let i=0;i<9;i+=3)for(let j=0;j<3;j++){const v=a[i+j];if(v<min[j])min[j]=v;if(v>max[j])max[j]=v}
+if(!t.length)throw Error('Geen bruikbare driehoeken gevonden.');let center=min.map((v,i)=>(v+max[i])/2),size=Math.max(...max.map((v,i)=>v-min[i]));if(!Number.isFinite(size)||size<=0)throw Error('Ongeldige STL-afmetingen.');bounds={center,size,dimensions:max.map((v,i)=>v-min[i])};rx=-.45;ry=.25;zoom=1;frame();status('Scan geladen: '+n.toLocaleString('nl-NL')+' driehoeken. Getoond: '+t.length.toLocaleString('nl-NL')+'.');$('info').textContent='Afmetingen (STL-eenheden, meestal mm): '+bounds.dimensions.map(x=>x.toFixed(1)).join(' × ')+'. Bestand bevat '+n.toLocaleString('nl-NL')+' driehoeken.'}
+function parseSTL(buffer){const dv=new DataView(buffer),len=buffer.byteLength,arr=[];if(len>=84){let count=dv.getUint32(80,true);if(count>0&&84+count*50===len){let step=Math.max(1,Math.ceil(count/11000));for(let i=0;i<count;i+=step){let o=84+i*50+12,a=[];for(let j=0;j<9;j++)a.push(dv.getFloat32(o+j*4,true));if(a.every(Number.isFinite))arr.push(a)}return {arr,count}}}
+let txt=new TextDecoder('utf-8').decode(buffer),reg=/vertex\s+([+\-\d.eE]+)\s+([+\-\d.eE]+)\s+([+\-\d.eE]+)/gi,m,verts=[];while((m=reg.exec(txt))!==null){verts.push(+m[1],+m[2],+m[3]);if(verts.length===9){if(verts.every(Number.isFinite))arr.push(verts);verts=[];if(arr.length>120000)throw Error('ASCII STL is te groot voor deze mobiele viewer.')}}if(!arr.length)throw Error('Geen geldige STL herkend. Exporteer opnieuw als binary STL.');let count=arr.length,step=Math.max(1,Math.ceil(count/11000));return {arr:arr.filter((_,i)=>i%step===0),count}}
+function rotate(v){let x=v[0],y=v[1],z=v[2],cy=Math.cos(ry),sy=Math.sin(ry),cx=Math.cos(rx),sx=Math.sin(rx);let X=x*cy+z*sy,Z=-x*sy+z*cy;return [X,y*cx-Z*sx,y*sx+Z*cx]}
+function draw(){let rect=canvas.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2),w=Math.max(1,Math.round(rect.width*dpr)),h=Math.max(1,Math.round(rect.height*dpr));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h}ctx.fillStyle='#101c27';ctx.fillRect(0,0,w,h);if(!bounds){ctx.fillStyle='#8ba8b8';ctx.textAlign='center';ctx.font=`${15*dpr}px system-ui`;ctx.fillText('Open een STL-scan om deze hier te bekijken',w/2,h/2);return}
+let scale=Math.min(w,h)*.75/bounds.size*zoom,projected=[];for(let a of tris){let p=[];for(let i=0;i<9;i+=3){let r=rotate([a[i]-bounds.center[0],a[i+1]-bounds.center[1],a[i+2]-bounds.center[2]]);p.push([w/2+r[0]*scale,h/2-r[1]*scale,r[2]])}
+let ux=p[1][0]-p[0][0],uy=p[1][1]-p[0][1],vx=p[2][0]-p[0][0],vy=p[2][1]-p[0][1];let area=ux*vy-uy*vx;if(Math.abs(area)<.01)continue;let z=(p[0][2]+p[1][2]+p[2][2])/3;let light=Math.max(.28,Math.min(.95,.53+area/(scale*scale+1)*.10));projected.push({p,z,light})}
+projected.sort((a,b)=>a.z-b.z);for(let t of projected){let c=Math.round(145+t.light*85);ctx.fillStyle=`rgb(${Math.round(c*.81)},${Math.round(c*.93)},${c})`;ctx.beginPath();ctx.moveTo(t.p[0][0],t.p[0][1]);ctx.lineTo(t.p[1][0],t.p[1][1]);ctx.lineTo(t.p[2][0],t.p[2][1]);ctx.closePath();ctx.fill()}
+}
+$('file').addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;status('STL wordt ingelezen: '+f.name);try{let b=await f.arrayBuffer();let result=parseSTL(b);setTriangles(result.arr,result.count)}catch(err){status('Importfout: '+err.message)}finally{e.target.value=''}});
+$('demo').onclick=()=>{let t=[];const p=[[0,0,20],[-22,-17,-15],[22,-17,-15],[0,22,-15]];for(let face of [[0,1,2],[0,2,3],[0,3,1],[1,3,2]])t.push(face.flatMap(i=>p[i]));setTriangles(t,4);status('Test 3D zichtbaar? Dan werkt de viewer. Open nu je STL.')};
+$('fit').onclick=()=>{zoom=1;rx=-.45;ry=.25;frame()};
+$('left').onclick=()=>{ry-=.2;frame()};$('right').onclick=()=>{ry+=.2;frame()};$('zoomIn').onclick=()=>{zoom=Math.min(15,zoom*1.25);frame()};$('zoomOut').onclick=()=>{zoom=Math.max(.1,zoom/1.25);frame()};
+let pointers=new Map(),lastDist=0,last=null;
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,[e.clientX,e.clientY]);last=[e.clientX,e.clientY];lastDist=0});
+canvas.addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;let old=pointers.get(e.pointerId);pointers.set(e.pointerId,[e.clientX,e.clientY]);if(pointers.size===1){ry+=(e.clientX-old[0])*.012;rx+=(e.clientY-old[1])*.012;frame()}else if(pointers.size===2){let a=[...pointers.values()],dist=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]);if(lastDist>0){zoom=Math.max(.1,Math.min(15,zoom*dist/lastDist));frame()}lastDist=dist}});
+function end(e){pointers.delete(e.pointerId);lastDist=0}canvas.addEventListener('pointerup',end);canvas.addEventListener('pointercancel',end);
+window.addEventListener('resize',frame);frame();
+})();
+</script></body></html>
