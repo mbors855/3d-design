@@ -5,6 +5,7 @@
 import { parseOFF } from './off.js';
 import { listZip, readZipEntry } from './unzip.js';
 import { edgeMap, boundaryLoops, fillHoles, weld } from './mesh.js';
+import { toothDimensions } from './teeth.js';
 
 // ---------- inlezen ----------
 const TOOTH_RE = /(?:^|\/)([^/]+)\/(upper|lower)jaw\/([1-8])\.(eoff|off|stl)$/i;
@@ -129,14 +130,23 @@ export function registerSet(s) { cache.set(setKey(s.name), s); } // voor tests e
 // ---------- kroon → element ----------
 // Lokale assen van de app (zelfde als crowns.js): x = mesiodistaal, y = tandas (hals 0 → occlusaal +), z = buccaal.
 const crownCache = new Map();
-export function prepareCrown(raw) {
+export function prepareCrown(raw, fdi = 11) {
   // exocad (x mesiaal, y buccaal, z occlusaal) → app (x, y = occlusaal, z = buccaal)
   const p = raw.positions, n = p.length / 3, pos = new Float32Array(p.length);
   for (let i = 0; i < n; i++) { pos[i * 3] = p[i * 3]; pos[i * 3 + 1] = p[i * 3 + 2]; pos[i * 3 + 2] = p[i * 3 + 1]; }
   let mesh = { positions: pos, indices: raw.indices.slice() };
   // kleine gaatjes dicht, de hals (grootste rand) blijft open
-  mesh = fillHoles(mesh, { keepLargest: true, maxEdges: 400 }).mesh;
-  const { loops } = boundaryLoops(mesh, edgeMap(mesh));
+  let { loops } = boundaryLoops(mesh, edgeMap(mesh));
+  if (!loops.length) {
+    // gesloten tand met wortel: afsnijden op de geschatte glazuur-cementgrens (top − kroonhoogte uit de tabel)
+    let top = -Infinity; for (let i = 1; i < pos.length; i += 3) top = Math.max(top, pos[i]);
+    mesh = cutBelow(mesh, top - toothDimensions(fdi, 1).height);
+    loops = boundaryLoops(mesh, edgeMap(mesh)).loops;
+  } else {
+    // kleine gaatjes dicht, de hals (grootste rand) blijft open
+    mesh = fillHoles(mesh, { keepLargest: true, maxEdges: 400 }).mesh;
+    loops = boundaryLoops(mesh, edgeMap(mesh)).loops;
+  }
   if (!loops.length) throw Error('Kroon heeft geen open hals.');
   const len = l => { let s = 0; for (let i = 0; i < l.length; i++) { const a = l[i] * 3, b = l[(i + 1) % l.length] * 3; s += Math.hypot(mesh.positions[a] - mesh.positions[b], mesh.positions[a + 1] - mesh.positions[b + 1], mesh.positions[a + 2] - mesh.positions[b + 2]); } return s; };
   const loop = loops.reduce((a, b) => len(b) > len(a) ? b : a);
@@ -151,12 +161,37 @@ export function prepareCrown(raw) {
   return { mesh, loop, occlusalY: top, md: maxX - minX, bl: maxZ - minZ, offset: [cx, cy, cz] };
 }
 
+// Alles onder y = c wegsnijden (driehoeken op de snijlijn exact gesplitst; snijpunten per ribbe gedeeld).
+export function cutBelow(mesh, c) {
+  const P = mesh.positions, I = mesh.indices, out = Array.from(P), tri = [], cache = new Map();
+  const cut = (a, b) => {
+    const k = a < b ? a + ',' + b : b + ',' + a; if (cache.has(k)) return cache.get(k);
+    const ya = P[a * 3 + 1], yb = P[b * 3 + 1], t = (c - ya) / (yb - ya), id = out.length / 3;
+    out.push(P[a * 3] + t * (P[b * 3] - P[a * 3]), c, P[a * 3 + 2] + t * (P[b * 3 + 2] - P[a * 3 + 2]));
+    cache.set(k, id); return id;
+  };
+  for (let f = 0; f < I.length; f += 3) {
+    const v = [I[f], I[f + 1], I[f + 2]], up = v.map(i => P[i * 3 + 1] >= c), n = up.filter(Boolean).length;
+    if (n === 3) { tri.push(...v); continue; }
+    if (n === 0) continue;
+    // roteer zodat het patroon begint bij de afwijkende hoek
+    let r = 0; while (up[r] === (n === 1 ? false : true)) r++;
+    const a = v[r], b = v[(r + 1) % 3], d = v[(r + 2) % 3];
+    if (n === 1) tri.push(a, cut(a, b), cut(a, d));               // alleen a boven
+    else { const ab = cut(b, a), ad = cut(d, a); tri.push(b, d, ad, b, ad, ab); } // a onder, b en d boven
+  }
+  // ongebruikte hoekpunten opruimen
+  const used = new Int32Array(out.length / 3).fill(-1), pos = [];
+  const idx = tri.map(i => { if (used[i] < 0) { used[i] = pos.length / 3; pos.push(out[i * 3], out[i * 3 + 1], out[i * 3 + 2]); } return used[i]; });
+  return { positions: Float32Array.from(pos), indices: Uint32Array.from(idx) };
+}
+
 export function crownFor(set, jaw, type) {
   const key = setKey(set.name) + '|' + jaw + '|' + type;
   if (!crownCache.has(key)) {
     const raw = set.teeth[jaw]?.[type];
     if (!raw) return null;
-    crownCache.set(key, prepareCrown(raw));
+    crownCache.set(key, prepareCrown(raw, (jaw === 'upper' ? 10 : 30) + type));
   }
   return crownCache.get(key);
 }

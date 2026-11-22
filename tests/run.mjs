@@ -311,12 +311,13 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
   const L = await import(J + 'library.js');
   const { edgeMap } = await import(J + 'mesh.js');
   // open 'kroon': halve bol, hals open in het vlak z = 0 (exocad-lokaal: z = occlusaal)
-  function crownOFF(rx = 4, ry = 3.5, rz = 5, seg = 24, rings = 10) {
+  function crownOFF(rx = 4, ry = 3.5, rz = 5, seg = 24, rings = 10, closed = false) {
     const V = [], F = [];
     for (let r = 0; r <= rings; r++) { const t = r / rings * Math.PI / 2; for (let k = 0; k < seg; k++) { const a = k / seg * 2 * Math.PI; V.push([rx * Math.cos(t) * Math.cos(a), ry * Math.cos(t) * Math.sin(a), rz * Math.sin(t) - 1]); } }
     const top = V.length; V.push([0, 0, rz - 1]);
     for (let r = 0; r < rings; r++) for (let k = 0; k < seg; k++) { const a = r * seg + k, b = r * seg + (k + 1) % seg, c = a + seg, d = b + seg; F.push([a, b, d], [a, d, c]); }
     for (let k = 0; k < seg; k++) F.push([rings * seg + k, rings * seg + (k + 1) % seg, top]);
+    if (closed) { const bot = V.length; V.push([0, 0, -8]); for (let k = 0; k < seg; k++) F.push([(k + 1) % seg, k, bot]); } // 'wortel': gesloten tand
     const head = new TextEncoder().encode('OFF BINARY\n'), buf = new ArrayBuffer(head.length + 12 + V.length * 12 + F.length * 14), dv = new DataView(buf);
     new Uint8Array(buf).set(head); let p = head.length;
     dv.setInt32(p, V.length, true); dv.setInt32(p + 4, F.length, true); dv.setInt32(p + 8, 0, true); p += 12;
@@ -364,6 +365,15 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
       assert.ok(L.signedVolume(t.mesh.positions, t.mesh.indices) > 0, `${fdi} volume positief`);
       assert.ok(t.occlusalY > 3 && t.md > 5, `${fdi} maten`);
     }
+  });
+  await test('v65 bibliotheek: gesloten tand met wortel wordt op de halslijn afgesneden en krijgt een stomp', async () => {
+    const files = [{ name: '1.eoff', webkitRelativePath: 'X/teeth/Wortel/upperjaw/1.eoff', arrayBuffer: async () => crownOFF(4, 3.5, 11, 24, 10, true).buffer }];
+    const [ws] = await L.readLibraryFiles(files);
+    const t = L.libraryTooth(ws, 11, { rootLength: 3 });
+    const e = edgeMap(t.mesh); let open = 0; for (const v of e.values()) if (v.count !== 2 || v.sameDir) open++;
+    assert.equal(open, 0, 'gesloten en manifold'); assert.ok(t.height > 8 && t.height < 12, `kroonhoogte ${t.height.toFixed(1)}`);
+    let minY = Infinity; for (let i = 1; i < t.mesh.positions.length; i += 3) minY = Math.min(minY, t.mesh.positions[i]);
+    assert.ok(minY > -4.5, `wortel ingekort tot de stomp (${minY.toFixed(1)})`);
   });
   await test('v65 bibliotheek: ideale standen (tip/torque/niveau) uit de ToothBow', () => {
     const id = L.bowIdeal(set, 'upper');
