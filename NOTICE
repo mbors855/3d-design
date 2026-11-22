@@ -9,3 +9,10 @@ Licensed under the MIT License or the Apache License, Version 2.0, at your optio
 De vormen volgen Nelson & Ash, Wheeler's Dental Anatomy, Physiology and Occlusion, 9th ed., 2010.
 
 vendor/: three.js (MIT), three-mesh-bvh (MIT), manifold-3d (Apache-2.0).
+
+Tandenbibliotheken van derden
+-----------------------------
+De app kan een tandenbibliotheek in exocad-indeling inlezen die de gebruiker zelf bezit en mag gebruiken.
+Zulke bibliotheken (bijv. commerciële sets) worden alleen lokaal in de browser van de gebruiker bewaard
+(IndexedDB) en maken geen deel uit van deze repository. Gebruik ze alleen in overeenstemming met de licentie
+van de maker.

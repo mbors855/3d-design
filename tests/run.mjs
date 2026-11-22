@@ -301,4 +301,121 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
   w.undo(); assert.equal(w.stats().points, st.points, 'ongedaan maken');
   assert.deepEqual(Array.from(w.soup.slice(0, 30)), Array.from(soup.slice(0, 30)), 'scan onveranderd');
 });
+
+// ---------- v65: tandenbibliotheek, opstelling, articulator, inslijpen ----------
+{
+  const THREE = await import('three');
+  const BVH = await import('../vendor/three-mesh-bvh.module.js');
+  THREE.BufferGeometry.prototype.computeBoundsTree = BVH.computeBoundsTree; THREE.Mesh.prototype.raycast = BVH.acceleratedRaycast;
+  const { parseOFF } = await import(J + 'off.js');
+  const L = await import(J + 'library.js');
+  const { edgeMap } = await import(J + 'mesh.js');
+  // open 'kroon': halve bol, hals open in het vlak z = 0 (exocad-lokaal: z = occlusaal)
+  function crownOFF(rx = 4, ry = 3.5, rz = 5, seg = 24, rings = 10) {
+    const V = [], F = [];
+    for (let r = 0; r <= rings; r++) { const t = r / rings * Math.PI / 2; for (let k = 0; k < seg; k++) { const a = k / seg * 2 * Math.PI; V.push([rx * Math.cos(t) * Math.cos(a), ry * Math.cos(t) * Math.sin(a), rz * Math.sin(t) - 1]); } }
+    const top = V.length; V.push([0, 0, rz - 1]);
+    for (let r = 0; r < rings; r++) for (let k = 0; k < seg; k++) { const a = r * seg + k, b = r * seg + (k + 1) % seg, c = a + seg, d = b + seg; F.push([a, b, d], [a, d, c]); }
+    for (let k = 0; k < seg; k++) F.push([rings * seg + k, rings * seg + (k + 1) % seg, top]);
+    const head = new TextEncoder().encode('OFF BINARY\n'), buf = new ArrayBuffer(head.length + 12 + V.length * 12 + F.length * 14), dv = new DataView(buf);
+    new Uint8Array(buf).set(head); let p = head.length;
+    dv.setInt32(p, V.length, true); dv.setInt32(p + 4, F.length, true); dv.setInt32(p + 8, 0, true); p += 12;
+    for (const v of V) for (const c of v) { dv.setFloat32(p, c, true); p += 4; }
+    for (const f of F) { dv.setUint16(p, 3, true); p += 2; for (const i of f) { dv.setInt32(p, i, true); p += 4; } }
+    return new Uint8Array(buf);
+  }
+  const bowXML = jaw => { const q = jaw === 'upper' ? [1, 2] : [4, 3]; let x = '<ToothBow>';
+    for (const qq of q) for (let t = 1; t <= 8; t++) { const side = (qq === 1 || qq === 4) ? -1 : 1, s = (t - 0.5) * 8, a = s / 40;
+      x += `<ModelTooth><Number>${qq * 10 + t}</Number><Position><x>${side * 30 * Math.sin(a)}</x><y>${30 * Math.cos(a)}</y><z>0</z></Position><AxisOcclusal><x>0</x><y>${t <= 3 ? 0.17 : -0.1}</y><z>0.98</z></AxisOcclusal><AxisMesial><x>${-side * Math.cos(a)}</x><y>${Math.sin(a)}</y><z>0</z></AxisMesial></ModelTooth>`; }
+    return x + '</ToothBow>'; };
+  const fakeFiles = () => { const out = []; const add = (path, bytes) => out.push({ name: path.split('/').pop(), webkitRelativePath: path, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
+    for (const j of ['upperjaw', 'lowerjaw']) { for (let t = 1; t <= 8; t++) add(`Lib/teeth/Test Set/${j}/${t}.eoff`, crownOFF(3 + t * 0.2)); add(`Lib/teeth/Test Set/${j}/1-reduced-thimble.eoff`, crownOFF()); add(`Lib/metadata/Test Set/${j}.xml`, new TextEncoder().encode(bowXML(j === 'upperjaw' ? 'upper' : 'lower'))); }
+    return out; };
+
+  await test('v65 OFF BINARY (exocad, 16-bits aantallen) inlezen', () => {
+    const m = parseOFF(crownOFF());
+    assert.equal(m.indices.length % 3, 0); assert.ok(m.positions.length / 3 > 200);
+    assert.ok(Math.max(...m.indices) < m.positions.length / 3);
+  });
+  await test('v65 AES: FIPS-197-vectoren + WinZip-AES ontsleutelen met wachtwoord', async () => {
+    const { expandKey, encryptBlock, ctrWinZip, decryptWinZip } = await import(J + 'aes.js');
+    const o = new Uint32Array(4); encryptBlock(expandKey(Uint8Array.from({ length: 32 }, (_, i) => i)), 0x00112233, 0x44556677, 0x8899aabb, 0xccddeeff, o);
+    assert.equal([...o].map(x => x.toString(16).padStart(8, '0')).join(''), '8ea2b7ca516745bfeafc49904b496089');
+    const salt = crypto.getRandomValues(new Uint8Array(16)), pw = 'geheim';
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']);
+    const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 1000, hash: 'SHA-1' }, base, 66 * 8));
+    const plain = new TextEncoder().encode('elementen '.repeat(50)), enc = ctrWinZip(bits.subarray(0, 32), plain.slice());
+    const blob = new Uint8Array(16 + 2 + enc.length + 10); blob.set(salt); blob.set(bits.subarray(64, 66), 16); blob.set(enc, 18);
+    assert.equal(new TextDecoder().decode(await decryptWinZip(blob, pw, 3)), 'elementen '.repeat(50));
+    await assert.rejects(() => decryptWinZip(blob, 'fout', 3), /wachtwoord/);
+  });
+  let set;
+  await test('v65 bibliotheek: sets herkennen, thimble-varianten negeren, ToothBow lezen', async () => {
+    const sets = await L.readLibraryFiles(fakeFiles());
+    assert.equal(sets.length, 1); set = sets[0];
+    assert.equal(set.name, 'Test Set'); assert.equal(Object.keys(set.teeth.upper).length, 8); assert.equal(set.bow.upper.length, 16);
+    L.registerSet(set);
+  });
+  await test('v65 bibliotheek: kroon wordt gesloten, manifold element met wortelstomp (ook gespiegeld)', () => {
+    for (const [fdi, mirror] of [[11, false], [21, true], [36, false], [46, true]]) {
+      const t = L.libraryTooth(set, fdi, { rootLength: 4, mirror });
+      const e = edgeMap(t.mesh); let open = 0, bad = 0; for (const v of e.values()) { if (v.count === 1) open++; else if (v.count > 2 || v.sameDir) bad++; }
+      assert.equal(open, 0, `${fdi} open randen`); assert.equal(bad, 0, `${fdi} niet-manifold`);
+      assert.ok(L.signedVolume(t.mesh.positions, t.mesh.indices) > 0, `${fdi} volume positief`);
+      assert.ok(t.occlusalY > 3 && t.md > 5, `${fdi} maten`);
+    }
+  });
+  await test('v65 bibliotheek: ideale standen (tip/torque/niveau) uit de ToothBow', () => {
+    const id = L.bowIdeal(set, 'upper');
+    assert.ok(id[11] && id[26]); assert.ok(id[11].torque > 5, `front torque ${id[11].torque}`); assert.ok(id[16].torque < -1, `molaar torque ${id[16].torque}`); assert.ok(Math.abs(id[11].level) < 5);
+  });
+
+  const { ArchRow, packRow, extents, moveAlong, rowState, morph } = await import(J + 'arrange.js');
+  const frame = { O: [0, 0, 0], X: [1, 0, 0], Y: [0, 1, 0], N: [0, 0, 1] };
+  const curve = t => [t * 25, 30 - 25 * t * t];
+  const box = (w = 8) => { const g = new THREE.BoxGeometry(w, 8, 7); g.translate(0, 4, 0); const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial()); m.userData.dims = { height: 8 }; return m; };
+  const placeAt = (row, m, s) => { const f = row.at(s), p = row.to3D(f.p[0], f.p[1], 5); m.position.set(...p); const tx = new THREE.Vector3(f.t[0], f.t[1], 0), up = new THREE.Vector3(0, 0, 1); m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(tx, up, new THREE.Vector3().crossVectors(tx, up))); m.updateMatrix(); m.updateMatrixWorld(); };
+  await test('v65 rij: aansluiten op de middellijn (≤ 0,05 mm), slepen herschikt de buren', async () => {
+    const row = new ArchRow(frame, curve), teeth = [-30, -18, -6, 7, 20, 33].map(s => { const m = box(); placeAt(row, m, s); return m; });
+    packRow(row, teeth);
+    const e = teeth.map(t => extents(row, t)).sort((a, b) => a.s - b.s);
+    const { gapBetween } = await import(J + 'arrange.js');
+    const ord = () => teeth.map(t => ({ t, s: rowState(row, t).s })).sort((x, y) => x.s - y.s).map(x => x.t);
+    let o = ord(); for (let i = 1; i < o.length; i++) { const g = gapBetween(row, o[i - 1], o[i]); assert.ok(Math.abs(g) < 0.05, `contact ${i}: ${g.toFixed(3)} mm`); }
+    assert.ok(Math.abs(e[2].s + e[3].s) < 0.1, `middellijn symmetrisch (${e[2].s.toFixed(2)} / ${e[3].s.toFixed(2)})`);
+    // element 0 (meest rechts) over zijn buur heen slepen → volgorde wisselt, rij blijft gesloten
+    const a = teeth[2], st = rowState(row, a); moveAlong(row, a, st.s - 12); packRow(row, teeth, { float: a }); packRow(row, teeth);
+    const e2 = teeth.map(t => ({ t, ...extents(row, t) })).sort((x, y) => x.s - y.s);
+    assert.equal(e2[1].t, a, 'versleept element staat nu op de tweede plek');
+    o = ord(); for (let i = 1; i < o.length; i++) assert.ok(Math.abs(gapBetween(row, o[i - 1], o[i])) < 0.05, 'rij gesloten na slepen');
+    // morphen maakt het element breder; aansluiten schuift de buren op
+    const before = extents(row, teeth[5]).s; morph(teeth[3], 1.2, 1, 1); packRow(row, teeth);
+    assert.ok(extents(row, teeth[5]).s > before + 1, 'buren schuiven op na morph');
+  });
+
+  const { articulatorPoints, mandiblePose } = await import(J + 'articulator.js');
+  await test('v65 articulator: protrusie naar voren/omlaag, laterotrusie zijwaarts, starre beweging', () => {
+    const fr = { O: [0, 0, 0], X: [1, 0, 0], Y: [0, 1, 0], N: [0, 0, -1] }, pts = articulatorPoints(fr, [0, 45, -10], 'upper'); // bovenkaak: N omlaag, U = +z
+    const I = pts.I.clone(), mv = (k, a) => { const M = mandiblePose(pts, k, a); return { i: I.clone().applyMatrix4(M), cl: pts.CL.clone().applyMatrix4(M), cr: pts.CR.clone().applyMatrix4(M) }; };
+    const p = mv('protrusion', 4); assert.ok(p.i.y - I.y > 3 && p.i.z < I.z, 'protrusie');
+    assert.ok(Math.abs(p.cl.distanceTo(p.cr) - pts.CL.distanceTo(pts.CR)) < 1e-6, 'condylusafstand blijft');
+    const r = mv('right', 4); assert.ok(I.x - r.i.x > 3, 'naar rechts = −X'); assert.ok(r.cl.y > pts.CL.y + 2, 'balanscondylus naar voren');
+    const l = mv('left', 4); assert.ok(l.i.x - I.x > 3, 'naar links = +X');
+    const o = mv('open', 10); assert.ok(o.i.z < I.z - 10, 'openen: incisaal omlaag');
+  });
+
+  const { grindStep } = await import(J + 'grind.js');
+  const { contactsFor } = await import(J + 'contacts.js');
+  await test('v65 inslijpen: penetratie verdwijnt tot contact, alleen het doelelement verandert', () => {
+    const mk = (y) => { let g = new THREE.SphereGeometry(4, 48, 32); g.deleteAttribute('uv'); g.deleteAttribute('normal'); g = (g.index ? g : g); const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial()); m.userData.dims = { height: 1 }; m.position.set(0, y, 0); m.updateMatrixWorld(); g.computeBoundsTree(); return m; };
+    const a = mk(0), b = mk(7.4); // 0,6 mm overlap
+    const before = contactsFor(a, [b], { color: false, max: 2 }).min;
+    assert.ok(before < -0.3, `start penetratie ${before}`);
+    const bPos = b.geometry.getAttribute('position').array.slice();
+    const r = grindStep([a], [b], { cervicalProtect: -10, maxTotal: 2 });
+    const after = contactsFor(a, [b], { color: false, max: 2 }).min;
+    assert.ok(r.verts > 10 && after > -0.03, `na slijpen ${after.toFixed(3)}`);
+    assert.deepEqual(Array.from(b.geometry.getAttribute('position').array), Array.from(bPos), 'antagonist onveranderd');
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

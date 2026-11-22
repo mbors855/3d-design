@@ -175,3 +175,20 @@ details summary { cursor: pointer; margin: 10px 0 4px; color: #8fc3cf; font-weig
 .wtool[aria-pressed=true], #waxEdit[aria-pressed=true] { outline: 2px solid var(--accent); }
 .inline-field { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
 .inline-field input { width: 52px; }
+/* v65: opstelgereedschap */
+.seg { display: flex; gap: 0; margin: 6px 0; border-radius: 8px; overflow: hidden; border: 1px solid #38556a; }
+.seg button { flex: 1; border-radius: 0; border: 0; border-right: 1px solid #38556a; padding: 8px 4px; font-size: 12px; }
+.seg button:last-child { border-right: 0; }
+.morph { display: grid; grid-template-columns: auto 44px 44px auto 44px 44px; gap: 4px 6px; align-items: center; margin: 6px 0; font-size: 12px; }
+.morph button { padding: 7px 0; touch-action: manipulation; }
+.libbox { margin: 8px 0; padding: 6px 8px; border: 1px solid #38556a; border-radius: 8px; }
+.libbox summary, #placeBox summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+label.button { display: inline-flex; justify-content: center; align-items: center; padding: 8px 10px; border-radius: 7px; border: 1px solid #3a5a6f; background: #24404f; cursor: pointer; }
+label.button.primary { background: var(--accent-strong); border-color: #3dc3d0; }
+.liblist .librow { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid #2a4556; font-size: 12px; }
+.liblist .grow { flex: 1; }
+.placelist .placerow { flex-wrap: nowrap; }
+.placelist .tooth.placed { background: #3b6e4f; }
+.placelist .tooth[aria-pressed="true"] { background: #d28a36; color: #111d26; font-weight: 800; }
+.mono { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+#viewport canvas { touch-action: none; }

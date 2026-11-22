@@ -1,4 +1,4 @@
-// Minimale ZIP-lezer (stored + deflate) via de ingebouwde DecompressionStream, met ZIP64.
+// Minimale ZIP-lezer (stored + deflate) via de ingebouwde DecompressionStream, met ZIP64 en WinZip-AES (methode 99).
 // Leest stukje voor stukje uit een bron, zodat ook een zip van honderden MB op een telefoon werkt.
 // bron: File/Blob, ArrayBuffer of { size, read(offset, length) → Promise<ArrayBuffer> }.
 export function zipSource(src) {
@@ -28,25 +28,34 @@ export async function listZip(input) {
     const nl = v.getUint16(p + 28, true), xl = v.getUint16(p + 30, true), cl = v.getUint16(p + 32, true);
     const raw = new Uint8Array(v.buffer, v.byteOffset + p + 46, nl);
     const name = (flags & 0x800 ? utf8 : latin).decode(raw);
+    let aes = null;
     for (let x = p + 46 + nl; x < p + 46 + nl + xl;) {
       const id = v.getUint16(x, true), sz = v.getUint16(x + 2, true);
+      if (id === 0x9901 && sz >= 7) aes = { strength: v.getUint8(x + 8), method: v.getUint16(x + 9, true) };
       if (id === 1) { let q = x + 4; if (usize === 0xffffffff) { usize = Number(v.getBigUint64(q, true)); q += 8; } if (csize === 0xffffffff) { csize = Number(v.getBigUint64(q, true)); q += 8; } if (local === 0xffffffff) local = Number(v.getBigUint64(q, true)); }
       x += 4 + sz;
     }
-    if (!name.endsWith('/') && !/(^|\/)(__MACOSX|\.DS_Store)/.test(name)) entries.push({ name, method, csize, usize, local });
+    if (!name.endsWith('/') && !/(^|\/)(__MACOSX|\.DS_Store)/.test(name)) entries.push({ name, method, csize, usize, local, encrypted: !!(flags & 1), aes });
     p += 46 + nl + xl + cl;
   }
   return entries;
 }
 
-export async function readZipEntry(input, e) {
+export async function readZipEntry(input, e, { password = null } = {}) {
   const src = zipSource(input);
   const head = new DataView(await src.read(e.local, 30));
   if (head.getUint32(0, true) !== 0x04034b50) throw Error(`${e.name}: lokale kop beschadigd.`);
   const start = e.local + 30 + head.getUint16(26, true) + head.getUint16(28, true);
-  const data = await src.read(start, e.csize);
-  if (e.method === 0) return data;
-  if (e.method !== 8) throw Error(`${e.name}: compressiemethode ${e.method} niet ondersteund.`);
+  let data = await src.read(start, e.csize), method = e.method;
+  if (e.encrypted) {
+    if (!e.aes) throw Error(`${e.name}: oude ZIP-versleuteling (ZipCrypto) wordt niet ondersteund; pak het bestand eerst uit.`);
+    if (password == null) { const err = Error('Deze ZIP is versleuteld: wachtwoord nodig.'); err.code = 'PASSWORD'; throw err; }
+    const { decryptWinZip } = await import('./aes.js');
+    data = (await decryptWinZip(new Uint8Array(data), password, e.aes.strength)).buffer;
+    method = e.aes.method;
+  }
+  if (method === 0) return data;
+  if (method !== 8) throw Error(`${e.name}: compressiemethode ${method} niet ondersteund.`);
   const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   return await new Response(stream).arrayBuffer();
 }

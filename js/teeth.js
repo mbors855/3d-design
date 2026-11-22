@@ -156,7 +156,7 @@ export function formArch({ width, depth, form = 'oval' }) { return t => archPoin
 
 // Plaatst tanden langs de boog op basis van cumulatieve mesiodistale breedte vanaf de middellijn.
 // Geeft per tand de positie in het boogvlak en de mesiale richting. opts.arch: eigen boogfunctie (t → [x, y]).
-export function layoutArch(ids, { jaw = 'upper', width = 50, depth = 40, form = 'oval', scale = 1, gap = 0.15, arch = null } = {}) {
+export function layoutArch(ids, { jaw = 'upper', width = 50, depth = 40, form = 'oval', scale = 1, gap = 0.15, arch = null, widthOf = null } = {}) {
   const N = 400, pts = [], curve = arch ?? formArch({ width, depth, form });
   for (let i = 0; i <= N; i++) pts.push(curve(-1 + 2 * i / N));
   const cum = [0];
@@ -176,7 +176,7 @@ export function layoutArch(ids, { jaw = 'upper', width = 50, depth = 40, form = 
     let s = 0;
     for (let type = 1; type <= 8; type++) {
       const id = (right ? quadrant.right : quadrant.left) * 10 + type;
-      const w = toothDimensions(id, scale).md, centerS = s + w / 2;
+      const w = widthOf?.(id) ?? toothDimensions(id, scale).md, centerS = s + w / 2;
       if (ids.includes(id)) {
         const { p, tangent } = at(right ? mid - centerS : mid + centerS);
         result.push({ fdi: id, position: p, mesial: right ? tangent : [-tangent[0], -tangent[1]], distance: centerS });

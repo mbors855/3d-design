@@ -1,4 +1,4 @@
-// Digital Denture CAD 60 — hoofdmodule: koppelt interface, 3D-werkruimte en rekenmodules.
+// Digital Denture CAD 65 — hoofdmodule: koppelt interface, 3D-werkruimte en rekenmodules.
 import * as THREE from 'three';
 import { Viewer, makePolyline, makeDots, makeMesh, COLORS } from './viewer.js';
 import { parseSTL, writeSTL, soupBounds, toBase64, fromBase64, concatSoups } from './stl.js';
@@ -18,9 +18,11 @@ import { Sculpt, TOOLS } from './sculpt.js';
 import { analyzeScan, repairScan, extendBorder, keepComponentNear } from './prep.js';
 import { trimByOutline } from './trim.js';
 import { WaxLayer } from './wax.js';
+import { initSetupTools, geometrySoup } from './setup-tools.js';
+import { bowIdeal } from './library.js';
 import { analyseArch, proposeOutline, tissueZones, idealizeScan, ZONE_LABEL, RULES, crestArch, setupArch, occlusalPlaneRule, staticsReport } from './anatomy.js';
 
-const VERSION = '64.0';
+const VERSION = '65.0';
 const $ = id => document.getElementById(id);
 const num = id => { const v = $(id).valueAsNumber; return Number.isFinite(v) ? v : Number($(id).value); };
 const fmt = (v, d = 1) => Number(v).toLocaleString('nl-NL', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -39,7 +41,7 @@ const workSteps = () => WORK_STEPS[$('work').value === 'partieel' ? 'prothese' :
 const isDenture = () => ['prothese', 'partieel'].includes($('work').value);
 const LM_COLORS = { R: 0xff6b6b, M: 0xffd166, L: 0x4dabf7 };
 const MARK_COLORS = { boundary: 0x55d8f5, bar: 0xff6877, reference: 0xffce72 };
-const MODE_TEXT = { wax: 'Was bewerken: sleep over scan of was · buiten de scan draaien · Shift keert toevoegen/wegnemen om', contourHint: ' · slepen = draaien, knijpen/scrollen = zoomen', sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Omtrek tekenen: tik punten op de scan, tik op het eerste punt om te sluiten', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
+const MODE_TEXT = { grind: 'Inslijpen: sleep over een element (kleur = contact met de tegenkaak) · buiten de elementen draaien', wax: 'Was bewerken: sleep over scan of was · buiten de scan draaien · Shift keert toevoegen/wegnemen om', contourHint: ' · slepen = draaien, knijpen/scrollen = zoomen', sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Omtrek tekenen: tik punten op de scan, tik op het eerste punt om te sluiten', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
 
 const S = {
   scan: null, scanName: 'scan.stl', history: [], future: [],
@@ -52,7 +54,8 @@ const S = {
 };
 
 const viewer = new Viewer($('viewport'));
-window.ddcad = { S, viewer, get buildBasis() { return buildBasis; } }; // voor ontwikkeling en tests
+let tools = null; // opstelgereedschap (v65), wordt onderaan gestart
+window.ddcad = { S, viewer, get buildBasis() { return buildBasis; }, get tools() { return tools; } }; // voor ontwikkeling en tests
 
 // ---------- algemene hulpmiddelen ----------
 let toastTimer;
@@ -104,6 +107,7 @@ function showStep(id) {
   $('contourBar').classList.toggle('hide', !CONTOUR_KINDS.includes(id));
   if (S.mode !== 'orbit' && !(S.mode === 'contour' && CONTOUR_KINDS.includes(id)) && !(S.mode === 'sculpt' && id === 'bewerken') && !(S.mode === 'wax' && id === 'analyse')) setMode('orbit');
   if (id !== 'opstelling') selectTooth(null);
+  tools?.onStep(id);
   applyLayers();
   if (id === 'productie') renderOutputs();
   if (id === 'controle') runChecks();
@@ -295,6 +299,7 @@ function applyLayers() {
     let on = $('layer' + id).checked;
     if (g === 'teeth') on = on && isDenture() && !(['basis', 'controle', 'productie'].includes(S.step) && (S.plates.monoblock || S.plates.basis));
     group.visible = on; setGroupOpacity(group, num('op' + id) / 100);
+    if (g === 'teeth' && viewer.groups.oppTeeth) { viewer.groups.oppTeeth.visible = $('layerTeeth').checked && isDenture() && (S.step === 'opstelling' || on); setGroupOpacity(viewer.groups.oppTeeth, num('opTeeth') / 100); }
   }
   viewer.render();
 }
@@ -426,6 +431,7 @@ function handleTap(e, type) {
     if (hit) { S.marks.push({ kind: 'reference', points: [hit.point.toArray()] }); S.marksRedo = []; updateMarkInfo(); refreshOverlay(); }
     return;
   }
+  if (tools?.handleTap(e)) return;
   if (S.teeth.length && viewer.groups.teeth.visible) {
     const hit = viewer.pick(e.clientX, e.clientY, S.teeth);
     if (hit) { if (S.step !== 'opstelling') showStep('opstelling'); selectTooth(hit.object); return; }
@@ -701,9 +707,9 @@ $('beetBuild').onclick = () => busy('Beetplaat berekenen…', buildBeet);
 
 // ---------- tandopstelling ----------
 const toothMaterial = () => new THREE.MeshStandardMaterial({ color: COLORS.tooth, roughness: 0.32, metalness: 0 });
-function clearTeeth() { selectTooth(null); viewer.clearGroup('teeth'); S.teeth = []; S.teethHistory = []; S.teethFuture = []; S.teethInitial = null; renderToothList(); }
-function teethSnapshot() { return S.teeth.map(t => ({ fdi: t.userData.fdi, p: t.position.toArray(), q: t.quaternion.toArray() })); }
-function applyTeethSnapshot(snap) { for (const s of snap) { const t = S.teeth.find(o => o.userData.fdi === s.fdi); if (t) { t.position.fromArray(s.p); t.quaternion.fromArray(s.q); t.updateMatrixWorld(); } } viewer.render(); }
+function clearTeeth() { selectTooth(null); tools?.centric(); tools?.clearOpp(); viewer.clearGroup('teeth'); S.teeth = []; S.teethHistory = []; S.teethFuture = []; S.teethInitial = null; S.grindHistory = []; tools?.resetRows(); renderToothList(); }
+function teethSnapshot() { return tools ? tools.snapshot() : S.teeth.map(t => ({ fdi: t.userData.fdi, p: t.position.toArray(), q: t.quaternion.toArray() })); }
+function applyTeethSnapshot(snap) { if (tools) return tools.applySnapshot(snap); for (const s of snap) { const t = S.teeth.find(o => o.userData.fdi === s.fdi); if (t) { t.position.fromArray(s.p); t.quaternion.fromArray(s.q); t.updateMatrixWorld(); } } viewer.render(); }
 function pushTeethHistory() { S.teethHistory.push(teethSnapshot()); if (S.teethHistory.length > 60) S.teethHistory.shift(); S.teethFuture = []; invalidateTeethDependents(); }
 function invalidateTeethDependents() { if (S.plates.monoblock || S.plates.basis) { delete S.plates.monoblock; delete S.plates.basis; delete S.plates.elementen; showPlate('basis', null); showPlate('basisTeeth', null); $('basisResult').innerHTML = '<span class="err">Opstelling gewijzigd: genereer de prothese opnieuw.</span>'; } }
 function syncConceptUI() { $('customConcept').classList.toggle('hide', $('concept').value !== 'custom'); }
@@ -722,7 +728,7 @@ function currentArchFn() {
   if ($('archForm').value === 'crest' && S.anatomy?.soup === S.scan && S.anatomy.arch) return S.anatomy.arch;
   return formArch({ width: f.width, depth: f.depth, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value });
 }
-function buildTeeth() {
+async function buildTeeth() {
   // zonder keuze in de opdrachtbon: 7–7 (14 elementen, geen verstandskiezen), daarna wat niet op de kam past weglaten
   const explicit = S.selectedTeeth.size > 0;
   let ids = explicit ? [...S.selectedTeeth] : (jaw() === 'upper' ? FDI_UPPER : FDI_LOWER).filter(id => id % 10 !== 8);
@@ -730,8 +736,11 @@ function buildTeeth() {
   if (!frame) { if (S.scan) throw Error('Zet eerst de drie referentiepunten op de kam (stap Analyse → Automatisch).'); frame = S.frame = defaultFrame(jaw()); }
   const rs = ruleSetup(), useRule = $('planeMode').value === 'rule' && rs?.rule;
   if (rs && S.anatomy) S.anatomy.arch = rs.arch;
+  const lib = await tools.librarySetting(), mode = $('setupMode').value;
+  const ideal = lib.librarySet && mode === 'ideal' ? bowIdeal(lib.librarySet, frame.jaw) : null;
+  if (mode === 'manual') ids = [];
   let placed = placeTeeth(ids, frame, {
-    form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, scale: num('toothScale') / 100, shape: $('anteriorShape').value, concept: $('concept').value, library: $('toothLib').value,
+    form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, scale: num('toothScale') / 100, shape: $('anteriorShape').value, concept: $('concept').value, library: lib.library, librarySet: lib.librarySet, ideal,
     occlusalHeight: useRule ? rs.rule.at : num('occlHeight'), gap: num('basisGap'), wall: num('basisWall'),
     custom: { spee: num('cSpee'), wilson: num('cWilson'), labial: num('cLabial'), cusp: num('cCusp') },
   }, viewer.scanMesh);
@@ -744,35 +753,36 @@ function buildTeeth() {
     placed = placed.filter(t => !dropped.includes(t.fdi));
   }
   clearTeeth();
-  for (const t of placed) {
-    const mesh = new THREE.Mesh(Viewer.geometryFromSoup(t.soup), toothMaterial());
-    mesh.geometry.computeBoundsTree();
-    mesh.position.copy(t.position); mesh.quaternion.copy(t.quaternion);
-    mesh.userData = { fdi: t.fdi, dims: t.dims, root: t.root, soup: t.soup, mesial: t.mesial, buccal: t.buccal };
-    mesh.name = 'tand_' + t.fdi;
-    viewer.groups.teeth.add(mesh); S.teeth.push(mesh);
-  }
+  const curve = rs?.arch ?? formArch({ width: frame.width, depth: frame.depth, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value });
+  S.teethPlan = { ...(S.teethPlan || {}), curve, plane: useRule ? null : num('occlHeight') };
+  for (const t of placed) { const mesh = tools.makeToothMesh(t, toothMaterial()); viewer.groups.teeth.add(mesh); S.teeth.push(mesh); }
+  // externe bibliotheek: exacte approximale contacten met de echte kronen
+  if (lib.librarySet && S.teeth.length) tools.packMain();
+  if ($('bothJaws').checked && S.teeth.length) await tools.buildOpp({ silent: true });
+  tools.renderLists();
   S.teethInitial = teethSnapshot();
   invalidateTeethDependents();
   renderToothList(); refreshOverlay();
   const planeTxt = useRule ? `occlusievlak volgens plooiregel: voor ${fmt(rs.rule.front)} / achter ${fmt(rs.rule.back)} mm boven de kam${rs.rule.notes.length ? ' (' + rs.rule.notes.join('; ') + ')' : ''}` : `occlusievlak ${fmt(num('occlHeight'))} mm boven de kam${$('planeMode').value === 'rule' ? ' (plooiregel vraagt een scan)' : ''}`;
   $('teethInfo').textContent = `${placed.length} elementen opgesteld${dropped.length ? ` (${dropped.sort((a, b) => a - b).join(', ')} weggelaten: geen ruimte op de kam, kantelgevaar)` : ''} · ${$('concept').selectedOptions[0].text} · ${rs ? 'boog op de gemeten kamlijn' : `boog ${fmt(frame.width)} × ${fmt(frame.depth)} mm`} · ${planeTxt}.`;
-  S.teethPlan = { rule: useRule ? rs.rule : null, crest: rs?.arch?.crest ?? null };
-  status('Tanden opgesteld. Tik op een tand om hem aan te passen.'); updateDone();
+  S.teethPlan = { ...S.teethPlan, rule: useRule ? rs.rule : null, crest: rs?.arch?.crest ?? null };
+  if (mode === 'manual') { $('teethInfo').textContent = 'Handmatig opstellen: kies hieronder een element en tik op de kam waar het moet staan. Het volgende element wordt automatisch voorgesteld.'; tools.renderLists(); }
+  if (S.liveContacts) tools.refreshContacts();
+  status(mode === 'manual' ? 'Handmatig: kies een element en tik op de kam.' : `Tanden opgesteld${lib.librarySet ? ' met ' + lib.librarySet.name + (ideal ? ' (ideale standen uit de bibliotheek)' : '') : ''}${S.opp.length ? ', tegenkaak ook' : ''}. Tik een element om te selecteren, houd vast en sleep om te verplaatsen.`); updateDone();
 }
 $('teethBuild').onclick = () => busy('Tanden opstellen…', async () => buildTeeth());
 function renderToothList() {
   const host = $('toothList'); host.innerHTML = '';
-  for (const t of [...S.teeth].sort((a, b) => a.userData.fdi - b.userData.fdi)) {
-    const b = document.createElement('button'); b.textContent = t.userData.fdi; b.classList.toggle('selected', S.selected === t);
+  for (const t of [...S.teeth, ...(S.opp || [])].sort((a, b) => a.userData.fdi - b.userData.fdi)) {
+    const b = document.createElement('button'); b.textContent = t.userData.fdi; b.classList.toggle('selected', S.sel ? S.sel.has(t) : S.selected === t);
     b.onclick = () => selectTooth(S.selected === t ? null : t); host.appendChild(b);
   }
   if (!S.teeth.length) host.innerHTML = '<span class="sub">Nog geen opstelling.</span>';
 }
-function selectTooth(obj) {
-  if (S.selected) S.selected.material.emissive?.setHex(0x000000);
+function selectTooth(obj) { if (tools) tools.select(obj ? tools.expand(obj) : []); else setPrimary(obj); }
+function setPrimary(obj) {
   S.selected = obj;
-  if (obj) { obj.material.emissive.setHex(0x5a3a00); viewer.attachGizmo(S.gizmoMode ? obj : null, S.gizmoMode || 'translate'); status(`Element ${obj.userData.fdi} geselecteerd · kroon ${fmt(obj.userData.dims.md)} × ${fmt(obj.userData.dims.bl)} × ${fmt(obj.userData.dims.height)} mm.`); }
+  if (obj) { viewer.attachGizmo(S.gizmoMode ? obj : null, S.gizmoMode || 'translate'); status(`Element ${obj.userData.fdi} geselecteerd${S.sel?.size > 1 ? ` (+${S.sel.size - 1})` : ''} · kroon ${fmt(obj.userData.dims.md * obj.scale.x)} × ${fmt(obj.userData.dims.bl * obj.scale.z)} × ${fmt(obj.userData.dims.height * obj.scale.y)} mm.`); }
   else viewer.attachGizmo(null);
   renderToothList(); viewer.render();
 }
@@ -786,15 +796,19 @@ function setGizmo(mode) {
 $('gizmoMove').onclick = () => setGizmo('translate');
 $('gizmoRotate').onclick = () => setGizmo('rotate');
 $('toothDeselect').onclick = () => selectTooth(null);
-viewer.addEventListener('gizmo', e => { if (e.detail.dragging) pushTeethHistory(); else clearContactMap(S.teeth); });
+viewer.addEventListener('gizmo', e => { if (e.detail.dragging) pushTeethHistory(); else if (S.liveContacts && S.selected) tools.refreshContacts([S.selected]); });
 for (const b of document.querySelectorAll('[data-nudge]')) b.onclick = () => {
-  const t = S.selected; if (!t) return status('Selecteer eerst een element.', true);
-  const N = new THREE.Vector3(...S.frame.N), d = { mesial: t.userData.mesial, distal: t.userData.mesial.clone().negate(), buccal: t.userData.buccal, lingual: t.userData.buccal.clone().negate(), up: N, down: N.clone().negate() }[b.dataset.nudge];
-  pushTeethHistory(); t.position.addScaledVector(d, 0.25); t.updateMatrixWorld(); clearContactMap([t]); viewer.render();
+  const list = S.sel?.size ? [...S.sel] : S.selected ? [S.selected] : []; if (!list.length) return status('Selecteer eerst een element.', true);
+  pushTeethHistory();
+  for (const t of list) {
+    const N = new THREE.Vector3(...S.frame.N).multiplyScalar(t.userData.opp ? -1 : 1), d = { mesial: t.userData.mesial, distal: t.userData.mesial.clone().negate(), buccal: t.userData.buccal, lingual: t.userData.buccal.clone().negate(), up: N, down: N.clone().negate() }[b.dataset.nudge];
+    t.position.addScaledVector(d, num('nudgeStep') || 0.25); t.updateMatrixWorld();
+  }
+  if (S.liveContacts) tools.refreshContacts(); viewer.render();
 };
 $('teethUndo').onclick = () => { const h = S.teethHistory.pop(); if (!h) return; S.teethFuture.push(teethSnapshot()); applyTeethSnapshot(h); };
 $('teethRedo').onclick = () => { const h = S.teethFuture.pop(); if (!h) return; S.teethHistory.push(teethSnapshot()); applyTeethSnapshot(h); };
-$('teethReset').onclick = () => { if (!S.teethInitial) return; pushTeethHistory(); applyTeethSnapshot(S.teethInitial); clearContactMap(S.teeth); };
+$('teethReset').onclick = () => { if (!S.teethInitial) return; pushTeethHistory(); applyTeethSnapshot(S.teethInitial); };
 $('autoOcclude').onclick = () => autoOccludeClick();
 const autoOccludeClick = () => busy('Occlusie zoeken…', async () => {
   if (!S.teeth.length) throw Error('Stel eerst de tanden op.');
@@ -816,7 +830,8 @@ $('exportSetup').onclick = () => {
   if (!S.teeth.length) return status('Stel eerst de tanden op.', true);
   download(JSON.stringify({ software: 'Digital Denture CAD ' + VERSION, type: '3D_SETUP', concept: $('concept').value, archForm: $('archForm').value, jaw: jaw(), frame: S.frame, teeth: S.teeth.map(t => ({ fdi: t.userData.fdi, matrix: t.matrixWorld.toArray(), dims: t.userData.dims })) }, null, 2), `opstelling_${safe($('caseName').value)}.json`, 'application/json');
 };
-function teethWorldSoups() { return S.teeth.map(t => { t.updateMatrixWorld(); return { fdi: t.userData.fdi, soup: applyMatrixToSoup(t.userData.soup, t.matrixWorld.elements) }; }); }
+function freshSoup(t) { if (t.userData.soupDirty || !t.userData.soup) { t.userData.soup = geometrySoup(t.geometry); t.userData.soupDirty = false; } return t.userData.soup; }
+function teethWorldSoups(list = S.teeth) { tools?.centric(); return list.map(t => { freshSoup(t); t.updateMatrixWorld(); return { fdi: t.userData.fdi, soup: applyMatrixToSoup(t.userData.soup, t.matrixWorld.elements) }; }); }
 
 // ---------- prothesebasis ----------
 async function buildBasis() {
@@ -911,7 +926,7 @@ $('runChecks').onclick = runChecks;
 // ---------- productie ----------
 function outputList() {
   const P = S.plates, list = [], w = isDenture() ? 'prothese' : $('work').value;
-  const forWork = { lepel: ['lepel', 'scan'], beetplaat: ['beetplaat', 'scan'], prothese: ['monoblock', 'basis', 'elementen', 'losse', 'scan', 'antagonist'] }[w];
+  const forWork = { lepel: ['lepel', 'scan'], beetplaat: ['beetplaat', 'scan'], prothese: ['monoblock', 'basis', 'elementen', 'losse', 'tegenkaak', 'scan', 'antagonist'] }[w];
   const add = (key, label, available, files) => { if (forWork.includes(key) && (available || !['monoblock', 'basis'].includes(key) || !(P.monoblock || P.basis))) list.push({ key, label, available, files }); };
   add('lepel', 'Lepel.stl', !!P.lepel, () => [[`Lepel.stl`, P.lepel.soup]]);
   add('beetplaat', 'Beetplaat.stl', !!P.beetplaat, () => [[`Beetplaat.stl`, P.beetplaat.soup]]);
@@ -919,6 +934,7 @@ function outputList() {
   add('basis', 'Basis.stl (met sockets)', !!P.basis, () => [[`Basis.stl`, P.basis.soup]]);
   add('elementen', 'Elementen.stl (alle tanden)', !!P.elementen, () => [[`Elementen.stl`, P.elementen.soup]]);
   add('losse', 'Losse elementen per FDI', !!P.elementen, () => P.elementen.parts.map(p => [`elementen/element_${p.fdi}.stl`, p.soup]));
+  add('tegenkaak', 'Elementen tegenkaak.stl (opstelling ' + (S.frame?.jaw === 'lower' ? 'BK' : 'OK') + ')', !!S.opp?.length, () => [[`Elementen_tegenkaak.stl`, concatSoups(teethWorldSoups(S.opp).map(t => t.soup))]]);
   add('scan', 'Scan (referentie).stl', !!S.scan, () => [[`Scan_referentie.stl`, S.scan]]);
   add('antagonist', 'Antagonist (referentie).stl', !!S.antagonist, () => [[`Antagonist_referentie.stl`, S.antagonist]]);
   return list;
@@ -980,7 +996,8 @@ $('exportZip').onclick = () => busy('Productiepakket samenstellen…', async () 
 function projectData(includeScan = true) {
   return {
     format: 'ddcad-project', version: VERSION, saved: new Date().toISOString(), settings: settings(), selectedTeeth: [...S.selectedTeeth],
-    landmarks: S.landmarks, axis: S.axis, marks: S.marks, contours: S.contours.toJSON(), teeth: S.teeth.length ? teethSnapshot() : null, step: S.step,
+    landmarks: S.landmarks, axis: S.axis, marks: S.marks, contours: S.contours.toJSON(), teeth: S.teeth.length ? teethSnapshot() : null, oppTeeth: S.opp?.length > 0, step: S.step,
+    ground: [...S.teeth, ...(S.opp || [])].filter(t => t.userData.ground).map(t => ({ fdi: t.userData.fdi, opp: !!t.userData.opp, pos: toBase64(new Uint8Array(t.geometry.getAttribute('position').array.buffer.slice(0))) })),
     scanName: S.scanName, scan: includeScan && S.scan ? toBase64(writeSTL(S.scan)) : null,
     antagonistName: S.antagonistName, antagonist: includeScan && S.antagonist ? toBase64(writeSTL(S.antagonist)) : null,
   };
@@ -995,7 +1012,14 @@ $('openProject').addEventListener('change', e => { const f = e.target.files?.[0]
   S.landmarks = d.landmarks || {}; S.axis = d.axis || null; S.marks = d.marks || [];
   S.contours.reset(); for (const c of d.contours || []) { const s = S.contours.ensure(c.kind); s.points = c.points; s.closed = !!c.closed && !!c.axis; s.axis = c.axis ?? null; }
   computeFrame(); updateLandmarkInfo(); updateAxisInfo(); updateMarkInfo();
-  if (d.teeth && (S.frame || !S.scan)) { buildTeeth(); applyTeethSnapshot(d.teeth); }
+  if (d.teeth && (S.frame || !S.scan)) {
+    const both = $('bothJaws').checked; $('bothJaws').checked = !!d.oppTeeth || d.teeth.some(t => t.opp);
+    const mode = $('setupMode').value; if (mode === 'manual') $('setupMode').value = 'ideal';
+    try { await buildTeeth(); } finally { $('bothJaws').checked = both; $('setupMode').value = mode; }
+    // elementen die bij het opslaan niet bestonden weg, ontbrekende blijven (opnieuw plaatsen)
+    applyTeethSnapshot(d.teeth);
+    for (const g of d.ground || []) { const t = (g.opp ? S.opp : S.teeth).find(o => o.userData.fdi === g.fdi); if (t) { const a = new Float32Array(fromBase64(g.pos)); const pa = t.geometry.getAttribute('position'); if (a.length === pa.array.length) { pa.array.set(a); const { finishGeometry } = await import('./grind.js'); finishGeometry(t); t.userData.ground = true; } } }
+  }
   showStep(STEPS.some(s => s[0] === d.step) ? d.step : 'opdracht');
   status(d.scan ? 'Project geopend. Omtrekken zijn heropend: sluit ze opnieuw voordat je werkstukken genereert.' : 'Instellingen geladen. Open de STL-scan opnieuw.');
 }); });
@@ -1305,6 +1329,11 @@ const syncRimFields = () => $('rimFields').classList.toggle('hide', !$('rimOn').
 $('rimOn').addEventListener('change', syncRimFields);
 
 // ---------- start ----------
+tools = initSetupTools({
+  S, viewer, $, num, fmt, status, toast, busy, jaw, currentArchFn, setPrimary, toothMaterial, setMode,
+  pushHistory: pushTeethHistory, dropHistory: () => { S.teethHistory.pop(); }, invalidate: invalidateTeethDependents,
+  layers: () => applyLayers(), afterTeethChange: () => { renderToothList(); updateDone(); },
+});
 buildSteps(); buildToothMap();
 try { const saved = JSON.parse(localStorage.getItem(STORE) || 'null'); if (saved) { if (!saved.v61 && saved.settings) saved.settings.rimOn = false; if (!saved.v63 && saved.settings) { delete saved.settings.archForm; delete saved.settings.planeMode; } applySettings(saved.settings); S.selectedTeeth = new Set(saved.teeth || []); } } catch { /* geen opslag */ }
 updateTeethMap(); syncConceptUI(); updateAxisInfo(); updateLandmarkInfo(); updateMarkInfo(); renderToothList();
