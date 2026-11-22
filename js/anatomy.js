@@ -15,7 +15,7 @@
 //
 // Alles werkt in het boogassenstelsel (frame: O, X = patiënt-links, Y = naar voren, N = occlusaal).
 // cast(origin, dir) → { point:[x,y,z] } | null  (eerste treffer op de scan; in de browser via de BVH van de scan).
-import { archPoint } from './teeth.js';
+import { archPoint, formArch, polylineArch, offsetArch, toothDimensions } from './teeth.js';
 import { framePoint, frameBuccal } from './setup.js';
 import { weld, toSoup, vertexNormals } from './mesh.js';
 
@@ -42,13 +42,14 @@ function surfaceAt(cast, frame, q, reach = 40) {
  * Analyseer de boog: kamlijn, buccale (en voor OK linguale) profielen, plooi, frenula, tubera/pads.
  * opts.form: boogvorm, opts.samples: aantal profielen.
  */
-export function analyseArch(cast, frame, { form = 'oval', samples = 60, maxReach = 22, stepD = 0.4 } = {}) {
+export function analyseArch(cast, frame, { form = 'oval', samples = 60, maxReach = 22, stepD = 0.4, arch = null } = {}) {
   const upper = frame.jaw === 'upper', H = p => dot(sub(p, frame.O), frame.N);
+  const curve = arch ?? formArch({ width: frame.width, depth: frame.depth, form: form === 'crest' ? 'oval' : form });
   const profiles = [];
   for (let i = 0; i <= samples; i++) {
     const t = -1 + 2 * i / samples;
-    const [x, y] = archPoint(t, { width: frame.width, depth: frame.depth, form });
-    const [x2, y2] = archPoint(Math.min(1, t + 1e-3), { width: frame.width, depth: frame.depth, form }), [x1, y1] = archPoint(Math.max(-1, t - 1e-3), { width: frame.width, depth: frame.depth, form });
+    const [x, y] = curve(t);
+    const [x2, y2] = curve(Math.min(1, t + 2e-3)), [x1, y1] = curve(Math.max(-1, t - 2e-3));
     const tl = Math.hypot(x2 - x1, y2 - y1) || 1, B = frameBuccal(frame, x, y, [(x2 - x1) / tl, (y2 - y1) / tl]);
     // kam: hoogste punt in een strook van ±4 mm loodrecht op de boog (de boogformule is een benadering)
     let crest = null;
@@ -88,17 +89,124 @@ export function analyseArch(cast, frame, { form = 'oval', samples = 60, maxReach
   const ends = [profiles.find(p => !p.missing), [...profiles].reverse().find(p => !p.missing)].map(p => {
     if (!p) return null;
     const back = frame.Y.map(v => -v);
-    let last = p.crest, lastH = p.h, drop = null;
+    let last = p.crest, lastH = p.h, drop = null, top = p.h;
     for (let d = 1; d <= 16; d += 0.5) {
       const q = surfaceAt(cast, frame, add(p.crest, back, d)); if (!q) break;
       if (upper && H(q) < lastH - 0.9 && !drop) drop = { d, p: q };   // insnoering achter het tuber (hamulus)
+      if (!drop) top = Math.max(top, H(q));
       last = q; lastH = Math.max(lastH - 0.3, H(q));
     }
-    return { t: p.t, crest: p.crest, hamular: drop?.p ?? add(p.crest, back, 4), hamularD: drop?.d ?? 4, padEnd: last };
+    // padTop: hoogste punt achter de kam (OK: retromolaire pad; BK: tuber), gemeten langs N
+    return { t: p.t, crest: p.crest, hamular: drop?.p ?? add(p.crest, back, 4), hamularD: drop?.d ?? 4, padEnd: last, crestH: p.h, padTop: top };
   });
   const sulcusDepths = profiles.filter(p => p.buccal?.sulcus).map(p => p.h - p.buccal.sulcus.h);
   return { frame, form, profiles, frena, ends, stats: { sulcusDepthMedian: median(sulcusDepths), profiles: profiles.length, missing: profiles.filter(p => p.missing).length, edge: profiles.filter(p => p.buccal?.edge).length } };
 }
+
+/**
+ * Gemeten kamlijn als boog: de kamtoppen uit de analyse, gladgestreken, in frame-coördinaten.
+ * Geeft een boogfunctie (t ∈ [-1, 1] → [x, y], t = 0 op de middellijn) met .heightAt(t) (kamhoogte langs N), of null.
+ */
+export function crestArch(an, { smooth = 3, extend = 0 } = {}) {
+  const f = an.frame, ok = an.profiles.filter(p => !p.missing);
+  if (ok.length < 10) return null;
+  let P = ok.map(p => { const d = sub(p.crest, f.O); return [dot(d, f.X), dot(d, f.Y), p.h]; });
+  for (let it = 0; it < smooth; it++) P = P.map((p, i) => i === 0 || i === P.length - 1 ? p : [0, 1, 2].map(k => (P[i - 1][k] + 2 * p[k] + P[i + 1][k]) / 4));
+  const arch = polylineArch(P.map(p => [p[0], p[1]]), { extend });
+  const hs = P.map(p => p[2]);
+  arch.heightAt = t => { const i = Math.max(0, Math.min(hs.length - 1, Math.round((t + 1) / 2 * (hs.length - 1)))); return hs[i]; };
+  return arch;
+}
+
+/**
+ * Buccolinguale positie van de tanden t.o.v. de kam (mm, + = buccaal/labiaal), als functie van de booglengte s vanaf
+ * de middellijn. Regels (o.a. Gysi/Gerber, Pound-lijn):
+ *  - BK front labiaal van de kam (resorptie verloopt naar palatinaal): centrale/laterale ~4 mm, hoektand ~2,5 mm;
+ *  - BK zijdelings: centrale fissuur boven de kam (lingualiseerd: palatinale knobbel boven de kam → +1 mm);
+ *  - OK front op of iets labiaal van de kam (~1 mm); OK zijdelings: centrale fissuur boven de kam (binnen de Pound-lijn).
+ */
+export function toothOffsetRule(jaw, { front = null, concept = 'gysi', scale = 1 } = {}) {
+  const upper = jaw === 'upper';
+  const q = upper ? 1 : 4, w = k => toothDimensions(q * 10 + k, scale).md;
+  const sFront = w(1) + w(2) * 0.5, sCanine = w(1) + w(2) + w(3) * 0.5, sPost = w(1) + w(2) + w(3) + w(4) * 0.5;
+  const fFront = front ?? (upper ? 4 : 1), fCanine = upper ? fFront * 0.65 : fFront * 0.8;
+  const fPost = upper ? (concept === 'lingual' || concept === 'gerber' ? 1 : 0) : 0;
+  const lerp = (a, b, u) => a + (b - a) * Math.max(0, Math.min(1, u));
+  return s => s <= sFront ? fFront : s <= sCanine ? lerp(fFront, fCanine, (s - sFront) / (sCanine - sFront)) : lerp(fCanine, fPost, (s - sCanine) / (sPost - sCanine));
+}
+
+/** Boog voor tanden/beetwal: gemeten kamlijn verschoven volgens toothOffsetRule. */
+export function setupArch(an, opts = {}) {
+  const crest = crestArch(an, { extend: opts.extend ?? 6 }); if (!crest) return null;
+  const arch = offsetArch(crest, toothOffsetRule(an.frame.jaw, opts));
+  arch.crest = crest;
+  return arch;
+}
+
+/**
+ * Hoogte van het occlusievlak volgens de plooiregel (beetwalhoogte uit de prothetiekliteratuur):
+ *  - BK: 22 mm vanaf de diepste plooi in het front, 18 mm in het tubergebied;
+ *  - OK: 18 mm vanaf de plooi in het front, achter op ⅔ van de hoogte van de retromolaire pad.
+ * Hoogtes langs N vanaf het boogvlak (frame), zodat ze direct bruikbaar zijn als 'kam → occlusievlak'.
+ * Geeft { front, back, at(s, sMax), notes[] }.
+ */
+export function occlusalPlaneRule(an, { upperFront = 22, upperBack = 18, lowerFront = 18, padFraction = 2 / 3 } = {}) {
+  const upper = an.frame.jaw === 'upper', notes = [];
+  const fold = sel => {
+    const v = an.profiles.filter(p => !p.missing && p.buccal?.pts?.length && sel(Math.abs(p.t))).map(p => ({ h: (p.buccal.sulcus ?? p.buccal.pts.at(-1)).h, edge: p.buccal.edge }));
+    if (!v.length) return null;
+    const hs = v.map(x => x.h).sort((a, b) => a - b);
+    // diepste plooi: BK ligt de plooi 'boven' de kam (kleinere h), OK eronder (ook kleinere h) → laag kwartiel
+    return { h: hs[Math.floor(hs.length * 0.25)], edge: v.filter(x => x.edge).length > v.length / 2 };
+  };
+  const ff = fold(t => t < 0.3), fb = fold(t => t > 0.7);
+  if (!ff) return null;
+  if (ff.edge || fb?.edge) notes.push('plooi niet volledig gescand: scanrand gebruikt');
+  // de plooi ligt aan de andere kant van de kam dan het occlusievlak: hoogte = plooihoogte + regelafstand
+  const front = ff.h + (upper ? upperFront : lowerFront);
+  let back;
+  if (upper) back = fb ? fb.h + upperBack : front - (upperFront - upperBack);
+  else {
+    const pads = an.ends.filter(e => e && e.padTop - e.crestH > 1);
+    if (pads.length) back = pads.reduce((s, e) => s + e.crestH + (e.padTop - e.crestH) * padFraction, 0) / pads.length;
+    else { back = front - 4; notes.push('retromolaire pad niet gevonden: achter 4 mm lager dan voor'); }
+  }
+  return { front, back, notes, at: (s, sMax) => front + (back - front) * Math.max(0, Math.min(1, s / (sMax || 1))) };
+}
+
+/**
+ * Statiek van de opstelling t.o.v. de gemeten kam. teeth: [{ fdi, x, y }] in frame-coördinaten (tandcentrum in het boogvlak).
+ * Regels: zijdelingse tanden met de centrale fissuur boven de kam (BK ≤ 2 mm ernaast; OK ≤ 1,5 mm: binnen de Pound-lijn),
+ * geen elementen voorbij het einde van de kam (BK tuber, OK retromolaire pad: kantelgevaar), front labiaal toegestaan.
+ */
+export function staticsReport(teeth, an) {
+  const crest = crestArch(an); if (!crest) return null;
+  const P = crest.points, upper = an.frame.jaw === 'upper';
+  const ys = P.map(p => p[1]), c = [0, Math.min(...ys) + 0.35 * (Math.max(...ys) - Math.min(...ys))];
+  return teeth.map(({ fdi, x, y }) => {
+    let best = Infinity, bi = 0, bu = 0;
+    for (let i = 1; i < P.length; i++) {
+      const a = P[i - 1], b = P[i], dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1;
+      const u = ((x - a[0]) * dx + (y - a[1]) * dy) / L2, uc = Math.max(0, Math.min(1, u));
+      const d = Math.hypot(x - a[0] - uc * dx, y - a[1] - uc * dy);
+      if (d < best) { best = d; bi = i; bu = u; }
+    }
+    // voorbij het uiteinde: projectie valt buiten het eerste/laatste segment
+    const segLen = i => Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
+    const beyond = bi === 1 && bu < 0 ? -bu * segLen(1) : bi === P.length - 1 && bu > 1 ? (bu - 1) * segLen(P.length - 1) : 0;
+    const a = P[bi - 1], b = P[bi], uc = Math.max(0, Math.min(1, bu)), q = [a[0] + uc * (b[0] - a[0]), a[1] + uc * (b[1] - a[1])];
+    const sign = Math.hypot(x - c[0], y - c[1]) >= Math.hypot(q[0] - c[0], q[1] - c[1]) ? 1 : -1;
+    const offset = sign * best, type = fdi % 10, posterior = type >= 4;
+    const limit = upper ? 2 : 1.5;
+    let level = 'ok', msg = '';
+    if (beyond > 2) { level = 'warn'; msg = `${fmt1(beyond)} mm voorbij het einde van de kam (${upper ? 'tuber' : 'retromolaire pad'}): kantelgevaar, weglaten of kleiner kiezen`; }
+    else if (posterior && Math.abs(offset) > limit) { level = 'warn'; msg = `${fmt1(Math.abs(offset))} mm ${offset > 0 ? 'buccaal' : 'linguaal'} van de kam (max ${fmt1(limit)}${upper ? '' : ', Pound-lijn'})`; }
+    else msg = posterior ? `${fmt1(Math.abs(offset))} mm ${offset >= 0 ? 'buccaal' : 'linguaal'} van de kam` : `${fmt1(offset)} mm labiaal van de kam`;
+    return { fdi, offset, beyond, level, msg };
+  });
+}
+const fmt1 = v => v.toFixed(1).replace('.', ',');
+
 const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
 
 /** Punt op het profiel waar de hoogte de plooidiepte + 'short' bereikt (vanaf de plooi terug naar de kam). */

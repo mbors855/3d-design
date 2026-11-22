@@ -18,6 +18,15 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 63
+
+- **⚡ Alles automatisch** (werkbalk): in één keer referentiepunten → anatomie → omtrek → werkstuk volgens de opdrachtbon (lepel, beetplaat, of opstelling + prothesebasis), daarna direct de controle. Ongeveer 2–5 s; elke stap blijft daarna los aan te passen.
+- **Boog op de gemeten kamlijn** (Boogvorm *Kamlijn*, nu standaard): tanden en beetwal volgen de echte kamtop in plaats van een standaardboog. Werkt ook bij scheve kaken (de analyse loopt in twee rondes langs de gemeten kam).
+  - BK-front ~4 mm labiaal van de kam, hoektand ~2,5 mm; zijdelings de centrale fissuur boven de kam (lingualiseerd/Gerber: palatinale knobbel, +1 mm). OK-front ~1 mm labiaal, zijdelings boven de kam (Pound-lijn). Instelbaar met *Front labiaal van de kam*.
+  - Zonder elementkeuze 7–7 (14 elementen); molaren die voorbij het einde van de kam (tuber/pad) zouden komen worden weggelaten, met melding.
+- **Occlusievlak volgens de plooiregel**: BK 22 mm (front) / 18 mm (tuber) vanaf de plooi, OK 18 mm vanaf de plooi en achter op ⅔ van de retromolaire pad. Geldt voor de opstelling en voor de beetwal (*Volgens de regels*); de gemeten waarden staan erbij.
+- **Statiekcontrole** in Controle: zijdelingse elementen ≤ 2 mm (BK) / ≤ 1,5 mm (OK, Pound-lijn) naast de kam, geen elementen voorbij het einde van de kam.
+
 ### Nieuw in 62
 
 - **Anatomie & weefsel** (stap *Analyse*): zoekt de plooi (vestibulum) en de plooidiepte, frenula (labiaal, buccaal, tongriem), A-lijn/hamulus (BK) of retromolaire pad (OK) en een torus palatinus. Kleurt de **weefselkaart**: drukdragend (primair/secundair), ontlasten, afsluiting (post-dam/pad) en plooi/rand.

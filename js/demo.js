@@ -45,18 +45,20 @@ export function demoAntagonist(z = 19) {
 // Anatomische testkaak (hoogteveld, occlusaal = +Z) met vestibulum + omslag, frenula, verhemelte (raphe, papil,
 // optioneel torus) of onderkaak (buccal shelf, linguale plooi, tongriem, retromolaire pads).
 // Geeft { soup, truth } met de bekende ligging van de structuren (voor tests en uitleg).
-export function anatomicJaw({ jaw = 'upper', step = 0.5, torus = false, frena = true } = {}) {
+// asym: scheve (asymmetrische) boog, ±4·asym mm kubische afwijking aan de uiteinden — een parabool door R/M/L past dan niet.
+export function anatomicJaw({ jaw = 'upper', step = 0.5, torus = false, frena = true, asym = 0 } = {}) {
   const upper = jaw === 'upper';
   const y0 = upper ? 32 : 30, k = upper ? 0.05 : 0.04, xEnd = upper ? 24 : 27;   // kamlijn y = y0 - k x², |x| ≤ xEnd
-  const archY = x => y0 - k * x * x;
+  const archY = x => y0 - k * x * x + asym * 4 * (x / xEnd) ** 3;
+  const endY = x => archY(Math.sign(x || 1) * xEnd);
   const sulcusD = upper ? 9 : 8, sulcusDepth = upper ? 9 : 8;                    // afstand en diepte van de buccale plooi
   const frenaT = frena ? (upper ? [0, -0.45, 0.45] : [0, -0.5, 0.5]) : [];        // labiaal midden + buccaal
   // dichtstbijzijnd punt op de kamlijn → signed afstand (+ = buccaal/labiaal), boogpositie t, achter het einde
   const nearest = (x, y) => {
     let best = Infinity, bx = 0;
     for (let t = -xEnd; t <= xEnd; t += 0.25) { const d = Math.hypot(x - t, y - archY(t)); if (d < best) { best = d; bx = t; } }
-    const out = y > archY(Math.max(-xEnd, Math.min(xEnd, x))) || Math.abs(x) > xEnd && y > archY(xEnd) ? 1 : -1;
-    const beyond = Math.abs(x) > xEnd ? Math.max(0, archY(xEnd) - y) * 0 + Math.max(0, (archY(xEnd) - y)) : 0;
+    const out = y > archY(Math.max(-xEnd, Math.min(xEnd, x))) || Math.abs(x) > xEnd && y > endY(x) ? 1 : -1;
+    const beyond = Math.abs(x) > xEnd ? Math.max(0, endY(x) - y) : 0;
     return { d: best * out, t: bx / xEnd, beyond };
   };
   const sq = v => v * v;
@@ -80,7 +82,7 @@ export function anatomicJaw({ jaw = 'upper', step = 0.5, torus = false, frena = 
     // achter de kamuiteinden: BK tuber + hamulus-insnoering, OK retromolaire pad
     const dx = Math.abs(x) - xEnd;
     if (dx > -3) {
-      const endY = archY(xEnd), behind = Math.max(0, endY - y);
+      const behind = Math.max(0, endY(x) - y);
       if (upper) h -= 6 * smooth(4, 9, behind) * Math.exp(-sq(d / 6));
       else h += 1.5 * Math.exp(-sq((behind - 5) / 4)) * Math.exp(-sq(d / 5));
     }
@@ -88,9 +90,9 @@ export function anatomicJaw({ jaw = 'upper', step = 0.5, torus = false, frena = 
   };
   const keep = (x, y) => {
     const { d } = nearest(x, y);
-    if (y < archY(xEnd) && Math.abs(x) > xEnd + 7) return false;
-    if (upper) return y > archY(xEnd) - 12 && d < sulcusD + 6;
-    return y > archY(xEnd) - 14 && d < sulcusD + 6 && d > -14;
+    if (y < endY(x) && Math.abs(x) > xEnd + 7) return false;
+    if (upper) return y > endY(x) - 12 && d < sulcusD + 6;
+    return y > endY(x) - 14 && d < sulcusD + 6 && d > -14;
   };
   const xs = [], ys = [];
   for (let x = -45; x <= 45 + 1e-9; x += step) xs.push(+x.toFixed(4));
@@ -101,6 +103,6 @@ export function anatomicJaw({ jaw = 'upper', step = 0.5, torus = false, frena = 
     const a = grid[i][j], b = grid[i + 1][j], c = grid[i + 1][j + 1], d = grid[i][j + 1];
     if (a && b && c && d) out.push(...a, ...b, ...c, ...a, ...c, ...d);
   }
-  const truth = { jaw, archY: { y0, k, xEnd }, sulcusD, sulcusDepth, frenaT, R: [-xEnd, archY(xEnd), 0], M: [0, y0, 0], L: [xEnd, archY(xEnd), 0], papilla: upper ? [0, y0 - 7] : null };
+  const truth = { jaw, archY: { y0, k, xEnd, asym }, crestY: archY, sulcusD, sulcusDepth, frenaT, R: [-xEnd, archY(-xEnd), 0], M: [0, y0, 0], L: [xEnd, archY(xEnd), 0], papilla: upper ? [0, y0 - 7] : null };
   return { soup: Float32Array.from(out), truth };
 }

@@ -157,4 +157,61 @@ for (const jawName of ['upper', 'lower']) {
     assert.equal(id.soup.length, soup.length, 'zelfde topologie');
   });
 }
+
+// ---------- v63: kamlijn, opstelling op de kam, plooiregel ----------
+const T = await import(J + 'teeth.js');
+const C = await import(J + 'construct.js');
+const { placeTeeth } = await import(J + 'setup.js');
+function crestSetup(jawName, asym = 1) {
+  const { soup, truth } = anatomicJaw({ jaw: jawName, asym });
+  const lm = autoLandmarks(soup, { ...occlusalAxis(soup), axis: [0, 0, 1] });
+  const frame = archFrame(lm, jawName, [0, 0, 1]), cast = verticalCaster(soup);
+  const an1 = A.analyseArch(cast, frame), an = A.analyseArch(cast, frame, { arch: A.crestArch(an1) });
+  const world = (x, y) => [0, 1].map(i => frame.O[i] + frame.X[i] * x + frame.Y[i] * y);
+  const dTruth = ([wx, wy]) => { let b = Infinity; for (let x = -truth.archY.xEnd; x <= truth.archY.xEnd; x += 0.1) b = Math.min(b, Math.hypot(wx - x, wy - truth.crestY(x))); return b; };
+  const err = arch => { const e = []; for (let t = -0.85; t <= 0.85; t += 0.05) { const w = world(...arch(t)); if (Math.abs(w[0]) < truth.archY.xEnd - 2) e.push(dTruth(w)); } return Math.max(...e); };
+  return { soup, truth, frame, cast, an, world, dTruth, err };
+}
+for (const jawName of ['upper', 'lower']) {
+  await test(`kamlijn ${jawName}: gemeten boog volgt een scheve kam (beter dan parabool)`, () => {
+    const { frame, an, err } = crestSetup(jawName);
+    const crest = A.crestArch(an), eC = err(crest), eP = err(T.formArch({ width: frame.width, depth: frame.depth }));
+    assert.ok(eC < 0.8, `kamlijn max ${eC.toFixed(2)} mm`);
+    assert.ok(eP > eC + 0.3, `parabool ${eP.toFixed(2)} vs kamlijn ${eC.toFixed(2)}`);
+  });
+  await test(`opstelling ${jawName}: zijdelingse tanden boven de kam, front labiaal, occlusievlak volgens plooiregel`, () => {
+    const { frame, an, world, dTruth, truth } = crestSetup(jawName);
+    const arch = A.setupArch(an, { concept: 'gysi' }), rule = A.occlusalPlaneRule(an);
+    const exp = jawName === 'upper' ? [-9 + 22, -9 + 18] : [-8 + 18, null];
+    assert.ok(Math.abs(rule.front - exp[0]) < 1.5, `voor ${rule.front.toFixed(1)} vs ${exp[0]}`);
+    if (exp[1] != null) assert.ok(Math.abs(rule.back - exp[1]) < 2, `achter ${rule.back.toFixed(1)}`);
+    assert.ok(rule.back < rule.front, 'occlusievlak achter lager dan voor (t.o.v. de kam)');
+    const ids = jawName === 'upper' ? T.FDI_UPPER.filter(i => i % 10 <= 7) : T.FDI_LOWER.filter(i => i % 10 <= 7);
+    const placed = placeTeeth(ids, frame, { arch, occlusalHeight: rule.at, concept: 'gysi' });
+    for (const t of placed) {
+      const w = world(...t.arch2d), d = dTruth(w), type = t.fdi % 10;
+      if (type >= 4 && type <= 6) assert.ok(d < (type === 4 ? 1.6 : 1.2), `${t.fdi} ${d.toFixed(2)} mm naast de kam`);
+      if (type === 1 && jawName === 'upper') assert.ok(d > 2.5 && d < 5.5 && w[1] > truth.crestY(w[0]), `${t.fdi} labiaal ${d.toFixed(2)} mm`);
+    }
+    const front = placed.find(t => t.fdi % 10 === 1).planeHeight, back = placed.find(t => t.fdi % 10 === 7).planeHeight;
+    assert.ok(Math.abs(front - rule.front) < 0.8 && back < front, `vlak ${front.toFixed(1)} → ${back.toFixed(1)}`);
+    // beetwal op dezelfde boog met plooiregel-hoogte: gesloten
+    const rim = C.biteRim(frame, { arch, height: t => rule.at(Math.abs(t), 1), width: 8, anteriorWidth: 5 });
+    assert.ok(quality(weld(rim, 1e-6)).watertight, 'beetwal gesloten');
+  });
+}
+
+await test('statiek: boven de kam ok, 3 mm buccaal en voorbij de kam worden gemeld', () => {
+  const { frame, an } = crestSetup('lower', 0);
+  const arch = A.setupArch(an), ids = T.FDI_LOWER;
+  const placed = placeTeeth(ids, frame, { arch, occlusalHeight: 10 });
+  const teeth = placed.map(t => ({ fdi: t.fdi, x: t.arch2d[0], y: t.arch2d[1] }));
+  const rep = A.staticsReport(teeth, an);
+  for (const r of rep.filter(r => [4, 5, 6].includes(r.fdi % 10))) assert.equal(r.level, 'ok', `${r.fdi}: ${r.msg}`);
+  assert.ok(rep.some(r => r.fdi % 10 === 8 && r.beyond > 2 && r.level === 'warn'), 'verstandskies voorbij de pad gemeld');
+  const t46 = placed.find(t => t.fdi === 46), ys = A.crestArch(an).points.map(p => p[1]); // verschuif 3 mm weg van het boogmidden
+  const c = [0, Math.min(...ys) + 0.35 * (Math.max(...ys) - Math.min(...ys))], v = [t46.arch2d[0] - c[0], t46.arch2d[1] - c[1]], l = Math.hypot(...v);
+  const moved = A.staticsReport([{ fdi: 46, x: t46.arch2d[0] + v[0] / l * 3, y: t46.arch2d[1] + v[1] / l * 3 }], an)[0];
+  assert.equal(moved.level, 'warn', moved.msg); assert.ok(moved.offset > 2, 'buccaal');
+});
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

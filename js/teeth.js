@@ -105,11 +105,59 @@ export function archPoint(t, { width, depth, form = 'oval' }) {
   return [x, y];
 }
 
+// Boog uit een polylijn (frame-coördinaten [x, y], van patiënt-rechts naar links). Geeft een functie t ∈ [-1, 1] → [x, y]
+// met t = 0 op de middellijn (x = 0) en t = ±1 aan de uiteinden; elk deel is naar booglengte geparametriseerd.
+// extend: zoveel mm lineair doortrekken langs de eindraaklijn (voor tanden die net voorbij de laatste meting vallen).
+export function polylineArch(points, { extend = 0 } = {}) {
+  let P = points.map(p => [p[0], p[1]]);
+  if (P.length < 3) throw Error('Te weinig punten voor een boog.');
+  if (P[0][0] > P.at(-1)[0]) P.reverse();
+  if (extend > 0) {
+    const e = (a, b) => { const d = [a[0] - b[0], a[1] - b[1]], l = Math.hypot(...d) || 1; return [a[0] + d[0] / l * extend, a[1] + d[1] / l * extend]; };
+    P = [e(P[0], P[1]), ...P, e(P.at(-1), P.at(-2))];
+  }
+  const cum = [0];
+  for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+  let sMid = cum.at(-1) / 2;
+  for (let i = 1; i < P.length; i++) if ((P[i - 1][0] <= 0) !== (P[i][0] <= 0)) { const f = P[i - 1][0] / ((P[i - 1][0] - P[i][0]) || 1); sMid = cum[i - 1] + f * (cum[i] - cum[i - 1]); break; }
+  const total = cum.at(-1);
+  const atS = s => {
+    s = Math.max(0, Math.min(total, s));
+    let lo = 1, hi = P.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] < s) lo = m + 1; else hi = m; }
+    const i = lo, f = (s - cum[i - 1]) / ((cum[i] - cum[i - 1]) || 1);
+    return [P[i - 1][0] + f * (P[i][0] - P[i - 1][0]), P[i - 1][1] + f * (P[i][1] - P[i - 1][1])];
+  };
+  const fn = t => atS(t <= 0 ? sMid * (1 + t) : sMid + t * (total - sMid));
+  fn.length_ = total; fn.points = P; fn.sMid = sMid;
+  return fn;
+}
+
+// Boog verschuiven loodrecht op zichzelf (positief = buccaal/labiaal, weg van het boogmidden).
+// offsetAt(s) krijgt de booglengte vanaf de middellijn (mm, altijd ≥ 0) en geeft de verschuiving in mm.
+export function offsetArch(arch, offsetAt, { samples = 200 } = {}) {
+  const pts = [], tt = [];
+  for (let i = 0; i <= samples; i++) { const t = -1 + 2 * i / samples; tt.push(t); pts.push(arch(t)); }
+  const ys = pts.map(p => p[1]), c = [0, Math.min(...ys) + 0.35 * (Math.max(...ys) - Math.min(...ys))];
+  const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const mid = cum[samples / 2];
+  const out = pts.map((p, i) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(samples, i + 1)], tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty) || 1;
+    let n = [ty / l, -tx / l]; if (n[0] * (p[0] - c[0]) + n[1] * (p[1] - c[1]) < 0) n = [-n[0], -n[1]];
+    const o = offsetAt(Math.abs(cum[i] - mid));
+    return [p[0] + n[0] * o, p[1] + n[1] * o];
+  });
+  return polylineArch(out);
+}
+
+// Standaardboog (parabool-achtig) als functie, zodat overal dezelfde boog-interface gebruikt kan worden.
+export function formArch({ width, depth, form = 'oval' }) { return t => archPoint(t, { width, depth, form }); }
+
 // Plaatst tanden langs de boog op basis van cumulatieve mesiodistale breedte vanaf de middellijn.
-// Geeft per tand de positie in het boogvlak en de mesiale richting.
-export function layoutArch(ids, { jaw = 'upper', width = 50, depth = 40, form = 'oval', scale = 1, gap = 0.1 } = {}) {
-  const N = 400, pts = [];
-  for (let i = 0; i <= N; i++) pts.push(archPoint(-1 + 2 * i / N, { width, depth, form }));
+// Geeft per tand de positie in het boogvlak en de mesiale richting. opts.arch: eigen boogfunctie (t → [x, y]).
+export function layoutArch(ids, { jaw = 'upper', width = 50, depth = 40, form = 'oval', scale = 1, gap = 0.1, arch = null } = {}) {
+  const N = 400, pts = [], curve = arch ?? formArch({ width, depth, form });
+  for (let i = 0; i <= N; i++) pts.push(curve(-1 + 2 * i / N));
   const cum = [0];
   for (let i = 1; i <= N; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
   const mid = cum[N / 2];
