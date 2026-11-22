@@ -151,3 +151,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .legend span { padding: 3px 8px; border-radius: 10px; }
 .legend .l-bad { background: #f2546180; } .legend .l-warn { background: #f7b84d80; } .legend .l-ok { background: #45c78c80; } .legend .l-lock { background: #8c9eae80; }
 #viewport.drawing canvas { cursor: crosshair; }
+
+.outputs .check .grow { flex: 1; }
+button.mini { padding: 3px 7px; font-size: 12px; }
+.note-inline:not(:empty) { background: var(--surface2); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; font-size: 12px; }
+
+.legend .z1 { background: #45c07380; } .legend .z2 { background: #9ed98c80; } .legend .z3 { background: #ee546180; } .legend .z4 { background: #5480f280; } .legend .z5 { background: #f7c04d80; }
+input.tiny { width: 58px; padding: 3px 5px; display: inline-block; margin: 0 2px; }
+.check.inline { display: inline-flex; margin: 0 0 0 8px; }
+details summary { cursor: pointer; margin: 10px 0 4px; color: #8fc3cf; font-weight: 600; }

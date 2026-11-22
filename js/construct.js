@@ -1,5 +1,5 @@
 // Parametrische constructies langs de tandboog: beetwal, gingivaband, handvat, perforaties, weefselstops.
-import { archPoint, toothType } from './teeth.js';
+import { archPoint, toothType, formArch } from './teeth.js';
 import { framePoint, frameBuccal } from './setup.js';
 import { vec } from './analysis.js';
 
@@ -42,12 +42,12 @@ function conformRings(rings, N, conform, { minHeight = 1.5, smooth = 3 } = {}) {
 
 // Profielring-sweep langs de boog. profile(t) geeft [{b, n}] (buccale offset, hoogte langs N) per hoek.
 // conform(punt, N) mag de onderste profielpunten op de scan laten aansluiten (zodat niets door het pasvlak steekt).
-function sweep(frame, profileAt, { tStart = -1, tEnd = 1, samples = 80, form = 'oval', conform = null } = {}) {
-  const rings = [];
+function sweep(frame, profileAt, { tStart = -1, tEnd = 1, samples = 80, form = 'oval', conform = null, arch = null } = {}) {
+  const rings = [], curve = arch ?? formArch({ width: frame.width, depth: frame.depth, form });
   for (let i = 0; i <= samples; i++) {
-    const t = tStart + (tEnd - tStart) * i / samples, dt = 1e-3;
-    const [x, y] = archPoint(t, { width: frame.width, depth: frame.depth, form });
-    const [x2, y2] = archPoint(Math.min(1, t + dt), { width: frame.width, depth: frame.depth, form }), [x1, y1] = archPoint(Math.max(-1, t - dt), { width: frame.width, depth: frame.depth, form });
+    const t = tStart + (tEnd - tStart) * i / samples, dt = 2e-3;
+    const [x, y] = curve(t);
+    const [x2, y2] = curve(Math.min(1, t + dt)), [x1, y1] = curve(Math.max(-1, t - dt));
     const tan = [x2 - x1, y2 - y1], l = Math.hypot(...tan) || 1;
     const B = frameBuccal(frame, x, y, [tan[0] / l, tan[1] / l]);
     const P = framePoint(frame, x, y);
@@ -74,16 +74,20 @@ function roundedRect(width, bottom, top, topWidth = width, r = 1) {
 }
 
 // Beetwal: wasvormige wal van de kam tot het occlusievlak.
-export function biteRim(frame, { width = 7, height = 10, embed = 1.5, form = 'oval', anteriorWidth = null, conform = null } = {}) {
+// height: vast getal of functie(t) → hoogte boven het boogvlak (bijv. volgens de plooiregel, voor hoger dan achter).
+// arch: eigen boogfunctie (bijv. de gemeten kamlijn, verschoven naar de toekomstige tandpositie).
+export function biteRim(frame, { width = 7, height = 10, embed = 1.5, form = 'oval', anteriorWidth = null, conform = null, arch = null } = {}) {
+  const hAt = typeof height === 'function' ? height : () => height;
   return sweep(frame, t => {
     const w = anteriorWidth ? anteriorWidth + (width - anteriorWidth) * Math.min(1, Math.abs(t) * 1.6) : width;
-    return roundedRect(w, -embed, height, w * 0.85, 1.2);
-  }, { form, tStart: -0.97, tEnd: 0.97, conform });
+    return roundedRect(w, -embed, hAt(t), w * 0.85, 1.2);
+  }, { form, tStart: -0.97, tEnd: 0.97, conform, arch });
 }
 
 // Gingivaband: verbindt de basis met de halslijn van de tanden.
-export function gingivaBand(frame, { width = 9, top = 4, embed = 1.5, form = 'oval', conform = null } = {}) {
-  return sweep(frame, t => roundedRect(width * (0.85 + 0.25 * Math.min(1, Math.abs(t) * 1.5)), -embed, top, width * 0.7, 1.5), { form, tStart: -0.97, tEnd: 0.97, conform });
+export function gingivaBand(frame, { width = 9, top = 4, embed = 1.5, form = 'oval', conform = null, arch = null } = {}) {
+  const topAt = typeof top === 'function' ? top : () => top;
+  return sweep(frame, t => roundedRect(width * (0.85 + 0.25 * Math.min(1, Math.abs(t) * 1.5)), -embed, topAt(t), width * 0.7, 1.5), { form, tStart: -0.97, tEnd: 0.97, conform, arch });
 }
 
 export function box(center, axes, size, conform = null) {
@@ -115,6 +119,11 @@ export function cylinder(start, end, radius, segments = 12) {
 
 // Handvat: verticale lip bij het midden, licht labiaal van de kam.
 export function trayHandle(frame, { base = 2, height = 14, width = 14, thickness = 3, labial = 2, conform = null } = {}) {
+  // Met conform: naar achteren schuiven tot alle vier onderhoeken boven de scan liggen (anders zweeft het handvat voor een smalle plaat).
+  if (conform) for (let l = labial; l >= -10; l -= 1) {
+    const corners = [-1, 1].flatMap(i => [-1, 1].map(j => framePoint(frame, i * width / 2, frame.depth + l + j * thickness / 2, 0)));
+    if (corners.every(q => conform(q, frame.N))) { labial = l; break; }
+  }
   const P = framePoint(frame, 0, frame.depth + labial, base + height / 2);
   return box(P, [frame.X, frame.Y, frame.N], [width, thickness, height + base], conform);
 }

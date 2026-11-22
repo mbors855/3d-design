@@ -2,12 +2,14 @@
 import { listZip, readZipEntry } from './unzip.js';
 import { decodeText, stlMetrics, analyseOrders, simulatePrint, PRINTERS, PRODUCTS, classifyGeometry, suggestedName, namingStyle } from './orders.js';
 import { putHandoff } from './handoff.js';
+import { parseSTL } from './stl.js';
 
 const $ = id => document.getElementById(id);
 const fmt = (v, d = 0) => Number(v).toLocaleString('nl-NL', { minimumFractionDigits: d, maximumFractionDigits: d });
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const today = new Date().toISOString().slice(0, 10);
 let R = null, SOURCES = new Map(), FILTER = 'all';
+const WHERE = /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'Bestanden → Downloads' : /Android/.test(navigator.userAgent) ? 'Mijn bestanden → Downloads' : 'map Downloads';
 
 function toast(text, error = false) { const t = $('toast'); t.textContent = text; t.classList.toggle('error', error); t.classList.remove('hide'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.add('hide'), error ? 6000 : 2800); }
 function progress(done, total, label) {
@@ -107,7 +109,7 @@ function orderHtml(o) {
     const canOpen = m && g !== 'fragment' && g !== 'provisorium';
     return `<div class="stl"><span class="file">${esc(s.file)}</span><span>${info}</span>
       ${canOpen ? `<button data-open="${esc(s.file)}" title="Open in CAD en haal de weefselzijde eruit">🦷 Nieuwe plaat hierop</button>` : ''}
-      <button data-download="${esc(s.file)}">↓</button></div>`;
+      <button data-view="${esc(s.file)}" title="Bekijk in 3D">👁</button><button data-download="${esc(s.file)}" title="Download">↓</button></div>`;
   }).join('');
   return `<div class="op-order"><div class="line"><span class="chip p-${esc(o.product)}">${esc(PRODUCTS[o.product] ?? o.product)}</span>
     ${o.jaw ? `<span class="chip jaw">${esc(o.jaw.toUpperCase())}</span>` : ''}
@@ -125,11 +127,13 @@ document.querySelector('.seg').addEventListener('click', e => {
 });
 $('search').addEventListener('input', renderPatients);
 $('patients').addEventListener('click', async e => {
+  const vw = e.target.closest('[data-view]');
+  if (vw) { const read = SOURCES.get(vw.dataset.view); if (read) showStl(vw.dataset.view, await read()); return; }
   const dl = e.target.closest('[data-download]'), op = e.target.closest('[data-open]');
   const name = (dl || op)?.dataset.download ?? (dl || op)?.dataset.open; if (!name) return;
   const read = SOURCES.get(name); if (!read) return toast('Bestand niet meer beschikbaar.', true);
   const buf = await read();
-  if (dl) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'model/stl' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); return; }
+  if (dl) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'model/stl' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast(`Opgeslagen: ${name} → ${WHERE}`); return; }
   const o = R.orders.find(x => x.stl.some(s => s.file === name));
   try {
     await putHandoff({ name, buffer: buf, extract: true, product: o?.product, jaw: o?.jaw, caseName: o ? suggestedName(o, R.patients.find(p => p.orders.includes(o))?.name ?? '') : name });
@@ -188,5 +192,33 @@ $('exportCsv').onclick = () => {
   download(`orders_${today}.csv`, '﻿' + rows.map(r => r.map(q).join(';')).join('\r\n'), 'text/csv');
 };
 $('exportJson').onclick = () => download(`orders_${today}.json`, JSON.stringify({ created: new Date().toISOString(), totals: R.totals, patients: R.patients.map(p => ({ orderNo: p.orderNo, name: p.name, jaws: p.jaws, orders: p.orders.map(o => ({ key: o.key, product: o.product, jaw: o.jaw, teeth: o.teeth, delivery: o.delivery, operator: o.operator, source: o.source, issues: o.issues, stl: o.stl.map(s => ({ file: s.file, ...s.metrics })) })) })) }, null, 1), 'application/json');
+
+// ---------- 3D-voorbeeld ----------
+let V = null;
+async function showStl(name, buffer) {
+  const THREE = await import('three'), { OrbitControls } = await import('../vendor/OrbitControls.js');
+  const host = $('stlView'); $('stlModal').classList.remove('hide'); $('stlTitle').textContent = name;
+  if (!V) {
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); renderer.setPixelRatio(Math.min(2, devicePixelRatio)); host.appendChild(renderer.domElement);
+    const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(35, 1, 0.1, 5000);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.6)); const sun = new THREE.DirectionalLight(0xffffff, 1.6); camera.add(sun); sun.position.set(0.5, 1, 1); scene.add(camera);
+    const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
+    V = { THREE, renderer, scene, camera, controls, mesh: null };
+    const size = () => { const r = host.getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix(); };
+    new ResizeObserver(size).observe(host);
+    const loop = () => { if (!$('stlModal').classList.contains('hide')) { controls.update(); renderer.render(scene, camera); } requestAnimationFrame(loop); }; loop();
+  }
+  if (V.mesh) { V.scene.remove(V.mesh); V.mesh.geometry.dispose(); }
+  const soup = parseSTL(buffer), g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(soup, 3)); g.computeVertexNormals(); g.computeBoundingBox();
+  const m = R.orders.flatMap(o => o.stl).find(x => x.file === name)?.metrics, cls = m && classifyGeometry(m);
+  const color = { beetwal: 0xc58be8, provisorium: 0xf4f0e6, fragment: 0xff7b86 }[cls] ?? (/lepel/i.test(name) ? 0xffb45c : 0x39c5ff);
+  V.mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0, side: THREE.DoubleSide })); V.scene.add(V.mesh);
+  const box = g.boundingBox, c = box.getCenter(new THREE.Vector3()), d = box.getSize(new THREE.Vector3()).length();
+  V.controls.target.copy(c); V.camera.position.copy(c).add(new THREE.Vector3(0, -0.9, 1.2).normalize().multiplyScalar(d * 1.5)); V.camera.up.set(0, 0, 1); V.controls.update();
+  $('stlInfo').textContent = m ? `${fmt(m.dims[0], 1)} × ${fmt(m.dims[1], 1)} × ${fmt(m.dims[2], 1)} mm · ${fmt(m.volume / 1000, 2)} ml · ${fmt(m.triangles)} driehoeken · ${m.watertight ? 'gesloten' : 'open'} · slepen = draaien, knijpen = zoomen` : '';
+}
+$('stlClose').onclick = () => $('stlModal').classList.add('hide');
+$('stlModal').addEventListener('click', e => { if (e.target === $('stlModal')) $('stlModal').classList.add('hide'); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('stlModal').classList.add('hide'); });
 
 window.ddorders = { get R() { return R; }, ingest, fromZip }; // voor tests

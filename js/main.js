@@ -7,16 +7,17 @@ import { shell } from './shell.js';
 import { ContourSet } from './contour.js';
 import { occlusalAxis, autoLandmarks, undercutMarks, vec } from './analysis.js';
 import { archFrame, defaultFrame, placeTeeth, autoOcclude, contactMap, clearContactMap, framePoint, archPoint } from './setup.js';
-import { FDI_UPPER, FDI_LOWER } from './teeth.js';
+import { FDI_UPPER, FDI_LOWER, formArch } from './teeth.js';
 import { biteRim, gingivaBand, trayHandle, perforations, tissueStops } from './construct.js';
 import { unionSoups, subtractSoups, loadManifold } from './csg.js';
-import { demoJaw, demoAntagonist } from './demo.js';
+import { demoJaw, demoAntagonist, anatomicJaw } from './demo.js';
 import { makeZip } from './zip.js';
 import { extractIntaglio } from './intaglio.js';
 import { takeHandoff } from './handoff.js';
 import { Sculpt, TOOLS } from './sculpt.js';
+import { analyseArch, proposeOutline, tissueZones, idealizeScan, ZONE_LABEL, RULES, crestArch, setupArch, occlusalPlaneRule, staticsReport } from './anatomy.js';
 
-const VERSION = '61.0';
+const VERSION = '63.0';
 const $ = id => document.getElementById(id);
 const num = id => { const v = $(id).valueAsNumber; return Number.isFinite(v) ? v : Number($(id).value); };
 const fmt = (v, d = 1) => Number(v).toLocaleString('nl-NL', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -26,7 +27,7 @@ const STEPS = [['opdracht', 'Opdrachtbon'], ['scan', 'Scan & mesh'], ['analyse',
 const CONTOUR_KINDS = ['lepel', 'beetplaat', 'basis'];
 const LM_COLORS = { R: 0xff6b6b, M: 0xffd166, L: 0x4dabf7 };
 const MARK_COLORS = { boundary: 0x55d8f5, bar: 0xff6877, reference: 0xffce72 };
-const MODE_TEXT = { sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Omtrek tekenen: tik punten op de scan, tik op het eerste punt om te sluiten', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
+const MODE_TEXT = { contourHint: ' · slepen = draaien, knijpen/scrollen = zoomen', sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Omtrek tekenen: tik punten op de scan, tik op het eerste punt om te sluiten', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
 
 const S = {
   scan: null, scanName: 'scan.stl', history: [], future: [],
@@ -55,11 +56,13 @@ async function busy(text, fn) {
   catch (e) { console.error(e); status(e.message, true); toast(e.message, true); return undefined; }
   finally { $('busy').classList.add('hide'); }
 }
+const WHERE = /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'Bestanden → Downloads' : /Android/.test(navigator.userAgent) ? 'Mijn bestanden → Downloads' : 'je map Downloads';
 function download(blobOrBuffer, name, type = 'application/octet-stream') {
   const blob = blobOrBuffer instanceof Blob ? blobOrBuffer : new Blob([blobOrBuffer], { type });
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast(`Opgeslagen: ${name} (${fmt(blob.size / 1048576, 1)} MB) → ${WHERE}`);
 }
 const safe = s => String(s || 'project').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 48);
 const jaw = () => $('jaw').value === 'onder' ? 'lower' : 'upper';
@@ -81,6 +84,7 @@ function buildSteps() {
 function wrapLi(b) { const li = document.createElement('li'); li.appendChild(b); return li; }
 function showStep(id) {
   if (S.sculpt && id !== 'bewerken') finishSculpt(true);
+  if (id !== 'productie') stopPreview();
   S.step = id;
   if (id === 'bewerken') fillSculptTargets();
   for (const p of document.querySelectorAll('.panel')) p.classList.toggle('active', p.dataset.panel === id);
@@ -134,7 +138,7 @@ $('clearTeeth').onclick = () => { S.selectedTeeth.clear(); updateTeethMap(); per
 const STORE = 'ddcad60-settings';
 function settings() { const o = {}; for (const e of document.querySelectorAll('[data-persist]')) o[e.id] = e.type === 'checkbox' ? e.checked : e.value; return o; }
 function applySettings(o) { for (const [id, v] of Object.entries(o || {})) { const e = $(id); if (!e || !e.hasAttribute('data-persist')) continue; if (e.type === 'checkbox') e.checked = !!v; else e.value = v; } syncConceptUI(); }
-function persist() { try { localStorage.setItem(STORE, JSON.stringify({ v61: true, settings: settings(), teeth: [...S.selectedTeeth] })); } catch { /* geen opslag */ } }
+function persist() { try { localStorage.setItem(STORE, JSON.stringify({ v61: true, v63: true, settings: settings(), teeth: [...S.selectedTeeth] })); } catch { /* geen opslag */ } }
 for (const e of document.querySelectorAll('[data-persist]')) e.addEventListener('change', () => { persist(); updateDone(); });
 
 // ---------- scan ----------
@@ -193,9 +197,9 @@ $('intaglioBtn').onclick = () => busy('Weefselzijde zoeken…', async () => {
 });
 $('fileScan').addEventListener('change', e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) loadScanFile(f); });
 $('demoBtn').onclick = () => busy('Demo-kaak maken…', async () => {
-  $('jaw').value = 'boven'; updateTeethMap();
-  setScan(demoJaw(), 'demo_bovenkaak.stl');
-  status('Synthetische tandeloze bovenkaak geladen. Ga naar Analyse voor de referentiepunten.');
+  const j = jaw(), { soup } = anatomicJaw({ jaw: j, torus: j === 'upper' });
+  setScan(soup, j === 'upper' ? 'demo_bovenkaak.stl' : 'demo_onderkaak.stl');
+  status(`Anatomische demo-${j === 'upper' ? 'bovenkaak (met torus)' : 'onderkaak'} geladen, met vestibulum en frenula. Kies Analyse → 🧭 Analyseer kaak, of bij Lepel/Beetplaat → 🧭 Automatisch.`);
 });
 // Slepen-en-neerzetten van STL-bestanden.
 $('viewport').addEventListener('dragover', e => e.preventDefault());
@@ -278,10 +282,11 @@ $('helpBtn').onclick = () => $('helpDialog').showModal();
 // ---------- modi en aanwijzen ----------
 function setMode(mode, arg = null) {
   S.mode = mode; S.modeArg = arg;
-  viewer.controls.enableRotate = mode === 'orbit' || mode === 'sculpt';
+  // Draaien blijft mogelijk tijdens tekenen/punten zetten: slepen = draaien, tikken = punt. Alleen markeren met slepen blokkeert draaien.
+  viewer.controls.enableRotate = !(mode === 'mark' && arg !== 'reference');
   $('viewport').classList.toggle('drawing', mode !== 'orbit');
   $('modeChip').classList.toggle('hide', mode === 'orbit');
-  $('modeText').textContent = mode === 'landmark' ? MODE_TEXT.landmark + ({ R: 'rechts distaal', M: 'midden (incisief)', L: 'links distaal' })[arg] : mode === 'mark' ? (arg === 'reference' ? MODE_TEXT.reference : MODE_TEXT.mark) : MODE_TEXT[mode] || '';
+  $('modeText').textContent = (mode === 'landmark' ? MODE_TEXT.landmark + ({ R: 'rechts distaal', M: 'midden (incisief)', L: 'links distaal' })[arg] : mode === 'mark' ? (arg === 'reference' ? MODE_TEXT.reference : MODE_TEXT.mark) : MODE_TEXT[mode] || '') + (['contour', 'landmark'].includes(mode) || (mode === 'mark' && arg === 'reference') ? MODE_TEXT.contourHint : '');
   $('contourToggle').setAttribute('aria-pressed', String(mode === 'contour'));
   $('contourToggle').textContent = mode === 'contour' ? '↻ Draaien' : '✏️ Teken omtrek';
   for (const b of document.querySelectorAll('[data-landmark]')) b.setAttribute('aria-pressed', String(mode === 'landmark' && b.dataset.landmark === arg));
@@ -369,8 +374,8 @@ function refreshOverlay() {
     }
   }
   if (S.frame && ['opstelling', 'beetplaat', 'analyse'].includes(S.step)) {
-    const f = S.frame, pts = [];
-    for (let i = 0; i <= 60; i++) { const [x, y] = archPoint(-1 + 2 * i / 60, { width: f.width, depth: f.depth, form: $('archForm').value }); pts.push(new THREE.Vector3(...framePoint(f, x, y))); }
+    const f = S.frame, pts = [], arch = currentArchFn();
+    for (let i = 0; i <= 60; i++) { const [x, y] = arch(-1 + 2 * i / 60); pts.push(new THREE.Vector3(...framePoint(f, x, y))); }
     const line = makePolyline(pts, 0x9fe3ea); line.material.opacity = 0.6; g.add(line);
   }
   viewer.render();
@@ -387,8 +392,9 @@ function refreshScanColors() {
     if (!s?.facets.length || kind !== S.step) continue;
     marks ??= new Uint8Array(n); for (const f of s.facets) marks[f] = i + 1;
   }
+  if (S.anatomy?.zones && S.step === 'analyse' && $('anaShow').checked && S.anatomy.soup === S.scan) { marks ??= new Uint8Array(n); for (let f = 0; f < n; f++) if (S.anatomy.zones[f]) marks[f] = 4 + S.anatomy.zones[f]; }
   if (S.undercut && S.step === 'analyse') { marks ??= new Uint8Array(n); for (let f = 0; f < n; f++) if (S.undercut[f]) marks[f] = 4; }
-  viewer.colorFaces(marks, [COLORS.lepel, COLORS.beetplaat, COLORS.basis, COLORS.undercut]);
+  viewer.colorFaces(marks, [COLORS.lepel, COLORS.beetplaat, COLORS.basis, COLORS.undercut, ...ZONE_COLORS]);
 }
 
 // ---------- analyse ----------
@@ -452,7 +458,7 @@ function addContourPoint(e, type) {
     if (s?.points.length >= 3) {
       const project = viewer.projector(), [px, py] = project(...s.points[0]), r = canvas.getBoundingClientRect();
       if (Math.hypot(px - (e.clientX - r.left), py - (e.clientY - r.top)) <= (type === 'touch' ? 22 : 13)) {
-        S.contours.close(kind, viewer); delete S.plates[kind];
+        closeContourFromAbove(kind); delete S.plates[kind];
         setMode('orbit'); updateContourUI(); refreshScanColors(); refreshOverlay(); return;
       }
     }
@@ -461,6 +467,15 @@ function addContourPoint(e, type) {
     S.contours.addPoint(kind, hit.point.toArray());
     updateContourUI(); refreshOverlay();
   } catch (err) { contourError(err.message); }
+}
+// Sluiten vanuit het occlusale aanzicht, zodat de hele omtrek zichtbaar is ook als er tussendoor gedraaid is.
+function closeContourFromAbove(kind) {
+  const cam = viewer.camera.position.clone(), target = viewer.controls.target.clone(), up = viewer.camera.up.clone();
+  try { S.contours.close(kind, viewer); }
+  catch (first) {
+    viewDir('occlusal'); viewer.fit(); viewer.render();
+    try { S.contours.close(kind, viewer); } catch { viewer.camera.position.copy(cam); viewer.controls.target.copy(target); viewer.camera.up.copy(up); viewer.controls.update(); viewer.render(); throw first; }
+  }
 }
 $('contourToggle').onclick = () => { if (!S.scan) return contourError('Laad eerst een scan.'); setMode(S.mode === 'contour' ? 'orbit' : 'contour'); };
 $('contourUndo').onclick = () => { S.contours.undo(S.step); updateContourUI(); refreshScanColors(); refreshOverlay(); };
@@ -509,13 +524,14 @@ function plateSummary(soup) {
   const state = q.watertight ? 'gesloten ✓'
     : q.open === 0 && q.flipped === 0 ? `gesloten, ${int(q.nonManifold)} niet-manifold rand${q.nonManifold === 1 ? '' : 'en'} (delen raken elkaar; controleer in de slicer)`
     : `⚠ niet volledig gesloten (${int(q.open)} open randen)`;
-  return { q, text: `${int(q.faces)} facetten · ${state} · volume ${fmt(Math.abs(q.volume))} mm³` };
+  const loose = q.components > 1 ? ` · ⚠ ${q.components} losse delen (raakt handvat of wal de plaat niet? verklein de afstand of schakel het onderdeel uit)` : '';
+  return { q, text: `${int(q.faces)} facetten · ${state}${loose} · volume ${fmt(Math.abs(q.volume))} mm³` };
 }
 function plateLink(kind, label) { return `<a class="download" href="#" data-download="${kind}">↓ ${label}</a>`; }
 document.addEventListener('click', e => { const a = e.target.closest('[data-download]'); if (!a) return; e.preventDefault(); const p = S.plates[a.dataset.download]; if (p) download(writeSTL(p.soup, p.name), p.file); });
 function needFrame(feature) { if (computeFrame() || S.frame) return true; toast(`${feature} overgeslagen: zet eerst de referentiepunten (stap Analyse).`); return false; }
 
-$('lepelBuild').onclick = () => busy('Lepel berekenen…', async () => {
+async function buildLepel() {
   const surface = surfaceFor('lepel'), gap = num('lepelGap'), wall = num('lepelWall'), reverse = $('lepelReverse').checked;
   const rep = {};
   let soup = shell(surface, { gap, wall, reverse }, rep);
@@ -534,14 +550,21 @@ $('lepelBuild').onclick = () => busy('Lepel berekenen…', async () => {
   showPlate('lepel', soup, COLORS.plate.lepel);
   result('lepelResult', `Lepel klaar: ${text}${rep.holesFilled ? ` · ${rep.holesFilled} gaten in de scan gedicht` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('lepel', 'Lepel-STL')}`);
   status('Lepel gegenereerd.'); updateDone();
-});
+}
+$('lepelBuild').onclick = () => busy('Lepel berekenen…', buildLepel);
 $('biteFit').addEventListener('change', () => { $('biteDraft').disabled = $('biteFit').value !== 'block'; });
-$('beetBuild').onclick = () => busy('Beetplaat berekenen…', async () => {
+async function buildBeet() {
   const surface = surfaceFor('beetplaat'), gap = num('beetGap'), wall = num('beetWall'), reverse = $('beetReverse').checked;
   const draft = $('biteFit').value === 'block' ? num('biteDraft') : null, rep = {};
   let soup = shell(surface, { gap, wall, reverse, draftAngle: draft }, rep);
   const extras = [], notes = [];
-  if ($('rimOn').checked && needFrame('Beetwal')) { extras.push(biteRim(S.frame, { width: num('rimWidth'), anteriorWidth: num('rimFrontWidth'), height: num('rimHeight'), embed: 3, form: $('archForm').value, conform: conformTo(gap + wall * 0.5) })); notes.push(`beetwal ${fmt(num('rimHeight'))} mm`); }
+  if ($('rimOn').checked && needFrame('Beetwal')) {
+    const rs = $('rimRule').checked ? ruleSetup({ forceCrest: true, extend: 0 }) : null;
+    const height = rs?.rule ? t => rs.rule.at(Math.abs(t), 1) : num('rimHeight');
+    if (rs && S.anatomy) S.anatomy.arch = rs.arch;
+    extras.push(biteRim(S.frame, { width: num('rimWidth'), anteriorWidth: num('rimFrontWidth'), height, embed: 3, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, conform: conformTo(gap + wall * 0.5) }));
+    notes.push(rs?.rule ? `beetwal volgens regels (kamlijn; hoogte voor ${fmt(rs.rule.front)} / achter ${fmt(rs.rule.back)} mm boven de kam${rs.rule.notes.length ? '; ' + rs.rule.notes.join('; ') : ''})` : `beetwal ${fmt(num('rimHeight'))} mm`);
+  }
   if ($('beetHandle').checked && needFrame('Handvat')) { extras.push(trayHandle(S.frame, { base: gap + wall, height: num('handleHeight'), width: num('handleWidth'), labial: 6, conform: conformTo(gap + wall * 0.5) })); notes.push('handvat'); }
   if (extras.length) {
     await loadManifold();
@@ -552,7 +575,8 @@ $('beetBuild').onclick = () => busy('Beetplaat berekenen…', async () => {
   showPlate('beetplaat', soup, COLORS.plate.beetplaat);
   result('beetResult', `Beetplaat klaar: ${text}${draft ? ` · uitblokken ${draft}° (${rep.changed} punten, max ${fmt(rep.maxLift, 2)} mm)` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('beetplaat', 'Beetplaat-STL')}`);
   status('Beetplaat gegenereerd.'); updateDone();
-});
+}
+$('beetBuild').onclick = () => busy('Beetplaat berekenen…', buildBeet);
 
 // ---------- tandopstelling ----------
 const toothMaterial = () => new THREE.MeshStandardMaterial({ color: COLORS.tooth, roughness: 0.32, metalness: 0 });
@@ -563,15 +587,41 @@ function pushTeethHistory() { S.teethHistory.push(teethSnapshot()); if (S.teethH
 function invalidateTeethDependents() { if (S.plates.monoblock || S.plates.basis) { delete S.plates.monoblock; delete S.plates.basis; delete S.plates.elementen; showPlate('basis', null); showPlate('basisTeeth', null); $('basisResult').innerHTML = '<span class="err">Opstelling gewijzigd: genereer de prothese opnieuw.</span>'; } }
 function syncConceptUI() { $('customConcept').classList.toggle('hide', $('concept').value !== 'custom'); }
 $('concept').addEventListener('change', syncConceptUI);
+// Boog en occlusievlak volgens de regels (gemeten kamlijn + plooiregel). null zonder scan of bij een standaardboog.
+function ensureAnatomy() { if (!S.scan) return null; if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy(); return S.anatomy; }
+function ruleSetup({ forceCrest = false, extend = 6 } = {}) {
+  if (!S.scan || !(forceCrest || $('archForm').value === 'crest')) return null;
+  const a = ensureAnatomy(); if (!a) return null;
+  const fo = $('frontOffset').value === '' ? null : num('frontOffset');
+  const arch = setupArch(a.an, { concept: $('concept').value, front: fo, scale: num('toothScale') / 100, extend });
+  return arch ? { arch, rule: occlusalPlaneRule(a.an) } : null;
+}
+function currentArchFn() {
+  const f = S.frame; if (!f) return null;
+  if ($('archForm').value === 'crest' && S.anatomy?.soup === S.scan && S.anatomy.arch) return S.anatomy.arch;
+  return formArch({ width: f.width, depth: f.depth, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value });
+}
 function buildTeeth() {
-  const ids = S.selectedTeeth.size ? [...S.selectedTeeth] : (jaw() === 'upper' ? FDI_UPPER : FDI_LOWER);
+  // zonder keuze in de opdrachtbon: 7–7 (14 elementen, geen verstandskiezen), daarna wat niet op de kam past weglaten
+  const explicit = S.selectedTeeth.size > 0;
+  let ids = explicit ? [...S.selectedTeeth] : (jaw() === 'upper' ? FDI_UPPER : FDI_LOWER).filter(id => id % 10 !== 8);
   let frame = computeFrame();
   if (!frame) { if (S.scan) throw Error('Zet eerst de drie referentiepunten op de kam (stap Analyse → Automatisch).'); frame = S.frame = defaultFrame(jaw()); }
-  const placed = placeTeeth(ids, frame, {
-    form: $('archForm').value, scale: num('toothScale') / 100, shape: $('anteriorShape').value, concept: $('concept').value,
-    occlusalHeight: num('occlHeight'), gap: num('basisGap'), wall: num('basisWall'),
+  const rs = ruleSetup(), useRule = $('planeMode').value === 'rule' && rs?.rule;
+  if (rs && S.anatomy) S.anatomy.arch = rs.arch;
+  let placed = placeTeeth(ids, frame, {
+    form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, scale: num('toothScale') / 100, shape: $('anteriorShape').value, concept: $('concept').value,
+    occlusalHeight: useRule ? rs.rule.at : num('occlHeight'), gap: num('basisGap'), wall: num('basisWall'),
     custom: { spee: num('cSpee'), wilson: num('cWilson'), labial: num('cLabial'), cusp: num('cCusp') },
   }, viewer.scanMesh);
+  let dropped = [];
+  if (!explicit && rs && S.anatomy) {
+    const rep = staticsReport(placed.map(t => ({ fdi: t.fdi, x: t.arch2d[0], y: t.arch2d[1] })), S.anatomy.an) || [];
+    dropped = rep.filter(r => r.beyond > 2 && r.fdi % 10 >= 6).map(r => r.fdi);
+    // nooit een eerste molaar weglaten als er daardoor een gat ontstaat: alleen van achteren af
+    dropped = dropped.filter(f => f % 10 === 7 || !placed.some(t => t.fdi === f + 1 && !dropped.includes(t.fdi)));
+    placed = placed.filter(t => !dropped.includes(t.fdi));
+  }
   clearTeeth();
   for (const t of placed) {
     const mesh = new THREE.Mesh(Viewer.geometryFromSoup(t.soup), toothMaterial());
@@ -584,7 +634,9 @@ function buildTeeth() {
   S.teethInitial = teethSnapshot();
   invalidateTeethDependents();
   renderToothList(); refreshOverlay();
-  $('teethInfo').textContent = `${placed.length} elementen opgesteld · ${$('concept').selectedOptions[0].text} · boog ${fmt(frame.width)} × ${fmt(frame.depth)} mm.`;
+  const planeTxt = useRule ? `occlusievlak volgens plooiregel: voor ${fmt(rs.rule.front)} / achter ${fmt(rs.rule.back)} mm boven de kam${rs.rule.notes.length ? ' (' + rs.rule.notes.join('; ') + ')' : ''}` : `occlusievlak ${fmt(num('occlHeight'))} mm boven de kam${$('planeMode').value === 'rule' ? ' (plooiregel vraagt een scan)' : ''}`;
+  $('teethInfo').textContent = `${placed.length} elementen opgesteld${dropped.length ? ` (${dropped.sort((a, b) => a - b).join(', ')} weggelaten: geen ruimte op de kam, kantelgevaar)` : ''} · ${$('concept').selectedOptions[0].text} · ${rs ? 'boog op de gemeten kamlijn' : `boog ${fmt(frame.width)} × ${fmt(frame.depth)} mm`} · ${planeTxt}.`;
+  S.teethPlan = { rule: useRule ? rs.rule : null, crest: rs?.arch?.crest ?? null };
   status('Tanden opgesteld. Tik op een tand om hem aan te passen.'); updateDone();
 }
 $('teethBuild').onclick = () => busy('Tanden opstellen…', async () => buildTeeth());
@@ -622,7 +674,8 @@ for (const b of document.querySelectorAll('[data-nudge]')) b.onclick = () => {
 $('teethUndo').onclick = () => { const h = S.teethHistory.pop(); if (!h) return; S.teethFuture.push(teethSnapshot()); applyTeethSnapshot(h); };
 $('teethRedo').onclick = () => { const h = S.teethFuture.pop(); if (!h) return; S.teethHistory.push(teethSnapshot()); applyTeethSnapshot(h); };
 $('teethReset').onclick = () => { if (!S.teethInitial) return; pushTeethHistory(); applyTeethSnapshot(S.teethInitial); clearContactMap(S.teeth); };
-$('autoOcclude').onclick = () => busy('Occlusie zoeken…', async () => {
+$('autoOcclude').onclick = () => autoOccludeClick();
+const autoOccludeClick = () => busy('Occlusie zoeken…', async () => {
   if (!S.teeth.length) throw Error('Stel eerst de tanden op.');
   if (!viewer.antagonistMesh) throw Error('Laad eerst een antagonist (stap Scan & mesh).');
   pushTeethHistory();
@@ -645,7 +698,7 @@ $('exportSetup').onclick = () => {
 function teethWorldSoups() { return S.teeth.map(t => { t.updateMatrixWorld(); return { fdi: t.userData.fdi, soup: applyMatrixToSoup(t.userData.soup, t.matrixWorld.elements) }; }); }
 
 // ---------- prothesebasis ----------
-$('basisBuild').onclick = () => busy('Prothese berekenen (booleaanse bewerkingen)…', async () => {
+async function buildBasis() {
   const surface = surfaceFor('basis'), gap = num('basisGap'), wall = num('basisWall'), reverse = $('basisReverse').checked, rep = {};
   const base = shell(surface, { gap, wall, reverse }, rep);
   await loadManifold();
@@ -655,7 +708,7 @@ $('basisBuild').onclick = () => busy('Prothese berekenen (booleaanse bewerkingen
     const N = S.frame.N, O = S.frame.O;
     const cervical = S.teeth.map(t => vec.dot(vec.sub(t.localToWorld(new THREE.Vector3(0, 0, 0)).toArray(), O), N));
     const top = cervical.reduce((s, v) => s + v, 0) / cervical.length + num('gingivaOver');
-    parts.push(gingivaBand(S.frame, { width: num('gingivaWidth'), top, embed: 3, form: $('archForm').value, conform: conformTo(gap + wall * 0.5) }));
+    parts.push(gingivaBand(S.frame, { width: num('gingivaWidth'), top, embed: 3, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: $('archForm').value === 'crest' ? ruleSetup({ extend: 0 })?.arch ?? null : null, conform: conformTo(gap + wall * 0.5) }));
     notes.push(`gingivaband tot ${fmt(top)} mm`);
   } else if (!teeth.length) notes.push('zonder tanden (alleen basis)');
   const teethTrimmed = teeth;
@@ -688,7 +741,8 @@ $('basisBuild').onclick = () => busy('Prothese berekenen (booleaanse bewerkingen
   if (teethTrimmed.length) S.plates.elementen = { soup: concatSoups(teethTrimmed.map(t => t.soup)), name: 'Elementen', file: `ELEMENTEN_${safe($('caseName').value)}.stl`, parts: teethTrimmed };
   viewer.groups.teeth.visible = false;
   status('Prothese gegenereerd.'); updateDone();
-});
+}
+$('basisBuild').onclick = () => busy('Prothese berekenen (booleaanse bewerkingen)…', buildBasis);
 
 // ---------- controle ----------
 function runChecks() {
@@ -705,6 +759,15 @@ function runChecks() {
   if (work === 'prothese' || work === 'partieel') {
     add(S.teeth.length ? 'ok' : 'warn', S.teeth.length ? `${S.teeth.length} elementen opgesteld` : 'Geen tandopstelling');
     add(S.plates.monoblock || S.plates.basis ? 'ok' : 'warn', S.plates.monoblock || S.plates.basis ? 'Prothesebasis gegenereerd' : 'Prothesebasis nog niet gegenereerd');
+    if (S.teeth.length && S.scan && S.frame) {
+      const a = S.anatomy?.soup === S.scan ? S.anatomy : null;
+      const rep = a && staticsReport(S.teeth.map(t => { const d = vec.sub(t.position.toArray(), S.frame.O); return { fdi: t.userData.fdi, x: vec.dot(d, S.frame.X), y: vec.dot(d, S.frame.Y) }; }), a.an);
+      if (!rep) add('info', 'Statiek niet gecontroleerd: analyseer eerst de kaak (Analyse → 🧭)');
+      else {
+        const bad = rep.filter(r => r.level === 'warn');
+        add(bad.length ? 'warn' : 'ok', bad.length ? `Statiek: ${bad.map(r => `${r.fdi} ${r.msg}`).join(' · ')}` : `Statiek: zijdelingse elementen boven de kam${S.frame.jaw === 'lower' ? ' (binnen de Pound-lijn)' : ''}, geen elementen voorbij het einde van de kam`);
+      }
+    }
     add(S.antagonist ? 'ok' : 'info', S.antagonist ? 'Antagonist aanwezig: occlusie controleerbaar' : 'Geen antagonist: occlusie niet te controleren');
     add($('splitReviewed').checked ? 'ok' : 'warn', $('splitReviewed').checked ? 'Scheidingslijn beoordeeld' : 'Scheidingslijn niet beoordeeld');
   }
@@ -734,10 +797,36 @@ function renderOutputs() {
   host.innerHTML = '';
   for (const o of outputList()) {
     const l = document.createElement('label'); l.className = 'check' + (o.available ? '' : ' unavailable');
-    l.innerHTML = `<input type="checkbox" value="${o.key}" ${o.available ? '' : 'disabled'} ${o.available && (prev.has(o.key) || !prev.size) && !['scan', 'antagonist'].includes(o.key) ? 'checked' : ''}> ${o.label}${o.available ? '' : ' — nog niet gegenereerd'}`;
+    l.innerHTML = `<input type="checkbox" value="${o.key}" ${o.available ? '' : 'disabled'} ${o.available && (prev.has(o.key) || !prev.size) && !['scan', 'antagonist'].includes(o.key) ? 'checked' : ''}> <span class="grow">${o.label}${o.available ? '' : ' — nog niet gegenereerd'}</span>`
+      + (o.available ? `<button type="button" class="mini" data-preview="${o.key}" title="Bekijk dit bestand los in 3D">👁</button><button type="button" class="mini" data-single="${o.key}" title="Alleen dit bestand downloaden">↓</button>` : '');
     host.appendChild(l);
   }
 }
+// Eén uitvoerbestand los bekijken (de rest verbergen) of los downloaden.
+let previewing = null;
+function stopPreview() {
+  if (!previewing) return;
+  viewer.groups.overlay.remove(previewing.mesh); previewing.mesh.geometry.dispose(); previewing.mesh.material.dispose();
+  for (const [g, v] of previewing.vis) g.visible = v;
+  previewing = null; $('previewInfo').innerHTML = ''; for (const b of document.querySelectorAll('[data-preview]')) b.setAttribute('aria-pressed', 'false'); viewer.render();
+}
+$('outputs').addEventListener('click', e => {
+  const pv = e.target.closest('[data-preview]'), sg = e.target.closest('[data-single]');
+  if (!pv && !sg) return;
+  e.preventDefault();
+  const o = outputList().find(x => x.key === (pv || sg).dataset.preview || x.key === (pv || sg).dataset.single); if (!o) return;
+  const files = o.files();
+  if (sg) { if (files.length === 1) download(writeSTL(files[0][1], files[0][0]), files[0][0].replace(/^.*\//, '')); else download(makeZip(files.map(([n, soup]) => ({ name: n, data: writeSTL(soup, n) }))), `${o.key}.zip`); return; }
+  const same = previewing?.key === o.key; stopPreview(); if (same) return;
+  const soup = concatSoups(files.map(f => f[1])), color = COLORS.plate[o.key] ?? (o.key.startsWith('elem') || o.key === 'losse' ? COLORS.tooth : COLORS.plate.basis);
+  const vis = [viewer.groups.scan, viewer.groups.antagonist, viewer.groups.plates, viewer.groups.teeth].map(g => [g, g.visible]);
+  for (const [g] of vis) g.visible = false;
+  const mesh = makeMesh(soup, color, { roughness: 0.4 }); viewer.groups.overlay.add(mesh);
+  previewing = { key: o.key, mesh, vis }; pv.setAttribute('aria-pressed', 'true');
+  const b = soupBounds(soup), q = plateSummary(soup);
+  $('previewInfo').innerHTML = `<b>${o.label}</b><br>${b.size.map(v => fmt(v)).join(' × ')} mm · ${q.text}<br><span class="sub">Tik nogmaals op 👁 om terug te gaan.</span>`;
+  viewer.fit(new THREE.Box3().setFromObject(mesh)); viewer.render();
+});
 $('exportZip').onclick = () => busy('Productiepakket samenstellen…', async () => {
   const chosen = new Set([...$('outputs').querySelectorAll('input:checked')].map(i => i.value));
   const outs = outputList().filter(o => o.available && chosen.has(o.key));
@@ -810,6 +899,73 @@ document.addEventListener('keydown', e => {
   if (S.step === 'opstelling' && k === 'r') return setGizmo('rotate');
 });
 
+
+
+// ---------- anatomie & weefsel ----------
+const ZONE_COLORS = [[0.27, 0.75, 0.45], [0.62, 0.85, 0.55], [0.93, 0.33, 0.38], [0.33, 0.5, 0.95], [0.97, 0.75, 0.3]];
+const LAB_REF = { upper: { width: 42, depth: 27 }, lower: { width: 50, depth: 34 } }; // mediaan uit 39 labproducten (3Shape-export)
+function scanCaster() {
+  const mesh = viewer.scanMesh; if (!mesh) throw Error('Laad eerst een scan.');
+  const ray = new THREE.Raycaster(); ray.firstHitOnly = true;
+  const o = new THREE.Vector3(), d = new THREE.Vector3();
+  return (origin, dir) => { ray.set(o.set(...origin), d.set(...dir)); const h = ray.intersectObject(mesh, false)[0]; return h ? { point: h.point.toArray() } : null; };
+}
+function ensureFrame() {
+  if (S.frame || computeFrame()) return S.frame;
+  const info = { ...occlusalAxisCached() }; if (S.axis) info.axis = S.axis;
+  const lm = autoLandmarks(S.scan, info);
+  S.landmarks = { R: lm.R, M: lm.M, L: lm.L }; S.axis ??= info.axis; S.frame = null;
+  computeFrame(false); updateLandmarkInfo(); updateAxisInfo(); refreshOverlay(); updateDone();
+  if (!S.frame) throw Error('Referentiepunten konden niet automatisch gezet worden. Zet ze bij Analyse.');
+  return S.frame;
+}
+function runAnatomy() {
+  if (!S.scan) throw Error('Laad eerst een scan.');
+  ensureFrame();
+  // twee rondes: eerst langs de standaardboog, daarna langs de gemeten kamlijn (nauwkeuriger bij scheve kaken)
+  const cast = scanCaster(), an1 = analyseArch(cast, S.frame, { form: $('archForm').value }), crest = crestArch(an1);
+  const an = crest ? analyseArch(cast, S.frame, { arch: crest }) : an1;
+  const zi = tissueZones(S.scan, an);
+  S.anatomy = { soup: S.scan, an, zones: zi.zones, info: zi, cast, arch: crest };
+  const counts = new Map(); for (const z of zi.zones) counts.set(z, (counts.get(z) || 0) + 1);
+  const total = zi.zones.length, pct = z => Math.round((counts.get(z) || 0) / total * 100);
+  const ref = LAB_REF[S.frame.jaw], st = an.stats;
+  const fr = an.frena.map(f => f.side === 'lingual' ? 'linguaal' : Math.abs(f.t) < 0.2 ? 'labiaal' : 'buccaal ' + (f.t < 0 ? 'rechts' : 'links'));
+  $('anaInfo').innerHTML = `<b>${S.frame.jaw === 'upper' ? 'Bovenkaak' : 'Onderkaak'}</b> · boog ${fmt(S.frame.width)} × ${fmt(S.frame.depth)} mm (lab-mediaan ${ref.width} × ${ref.depth})<br>`
+    + (st.sulcusDepthMedian != null ? `Plooidiepte mediaan ${fmt(st.sulcusDepthMedian)} mm${st.edge > st.profiles * 0.5 ? ' · <span class="err">vestibulum grotendeels niet gescand (scan eindigt bij de plaatrand)</span>' : ''}<br>` : '')
+    + `Frenula: ${fr.length ? fr.join(', ') : 'geen duidelijk gevonden'}${zi.torus ? ` · <b>torus palatinus</b> (${fmt(zi.torus.height)} mm)` : ''}<br>`
+    + `Drukdragend ${pct(1) + pct(2)}% · ontlasten ${pct(3)}% · afsluiting ${pct(4)}% · plooi/rand ${pct(5)}%`;
+  $('anaLegend').classList.remove('hide'); $('anaIdealBox').classList.remove('hide');
+  $('anaPostDam').disabled = S.frame.jaw !== 'upper';
+  refreshScanColors();
+  return S.anatomy;
+}
+$('anaRun').onclick = () => busy('Kaak analyseren…', async () => { runAnatomy(); status('Anatomie geanalyseerd. Gebruik bij Lepel/Beetplaat "🧭 Automatisch" voor de omtrek.'); });
+$('anaShow').addEventListener('change', refreshScanColors);
+$('anaIdeal').onclick = () => busy('Scan aanpassen…', async () => {
+  if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
+  const { soup, report } = idealizeScan(S.scan, S.anatomy.info, {
+    frame: S.frame, doSmooth: $('anaSmooth').checked, doRelief: $('anaRelief').checked, doPostDam: $('anaPostDam').checked && S.frame.jaw === 'upper',
+    reliefPapilla: num('anaReliefPap'), relief: num('anaReliefOther'), postDam: num('anaPostDamMm'),
+  });
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); if (S.history.length > 8) S.history.shift(); S.future = [];
+  clearPlates(); clearTeeth();
+  setScan(soup, S.scanName.replace(/(_ideaal)?\.stl$/i, '') + '_ideaal.stl', { reset: false });
+  runAnatomy();
+  status(`Scan aangepast: ${report.smoothed ? 'gladgemaakt, ' : ''}${int(report.relieved)} punten ontlast${report.postDam ? `, post-dam op ${int(report.postDam)} punten` : ''}. Genereer de werkstukken opnieuw.`);
+});
+function autoContour(kind) {
+  if (!CONTOUR_KINDS.includes(kind)) return;
+  if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
+  const ol = proposeOutline(S.anatomy.cast, S.anatomy.an, kind);
+  S.contours.clear(kind);
+  for (const p of ol.points) S.contours.addPoint(kind, p);
+  if (S.mode === 'contour') setMode('orbit');
+  closeContourFromAbove(kind); delete S.plates[kind];
+  updateContourUI(); refreshScanColors(); refreshOverlay();
+  status(`Automatische omtrek: ${ol.rule}${ol.frena ? ` · ${ol.frena} frenulum-uitsparing(en)` : ''}. Pas aan met Terug/Wis of teken zelf.`);
+}
+$('contourAuto').onclick = () => busy('Omtrek bepalen volgens de anatomie…', async () => autoContour(S.step));
 
 // ---------- vrij bewerken (penselen) ----------
 const SCULPT_KINDS = { lepel: 'Lepel', beetplaat: 'Beetplaat', monoblock: 'Monoblock prothese', basis: 'Prothesebasis' };
@@ -1011,7 +1167,7 @@ $('rimOn').addEventListener('change', syncRimFields);
 
 // ---------- start ----------
 buildSteps(); buildToothMap();
-try { const saved = JSON.parse(localStorage.getItem(STORE) || 'null'); if (saved) { if (!saved.v61 && saved.settings) saved.settings.rimOn = false; applySettings(saved.settings); S.selectedTeeth = new Set(saved.teeth || []); } } catch { /* geen opslag */ }
+try { const saved = JSON.parse(localStorage.getItem(STORE) || 'null'); if (saved) { if (!saved.v61 && saved.settings) saved.settings.rimOn = false; if (!saved.v63 && saved.settings) { delete saved.settings.archForm; delete saved.settings.planeMode; } applySettings(saved.settings); S.selectedTeeth = new Set(saved.teeth || []); } } catch { /* geen opslag */ }
 updateTeethMap(); syncConceptUI(); updateAxisInfo(); updateLandmarkInfo(); updateMarkInfo(); renderToothList();
 $('biteDraft').disabled = $('biteFit').value !== 'block';
 syncRimFields();
@@ -1033,3 +1189,38 @@ if (new URLSearchParams(location.search).has('handoff')) takeHandoff().then(item
     showStep('scan');
   }).then(() => { if (item.extract && S.scan) $('intaglioBtn').click(); });
 }).catch(e => status('Overdracht mislukt: ' + e.message, true));
+
+// ---------- ⚡ alles automatisch ----------
+// Eén knop: referentiepunten → anatomie → omtrek → werkstuk (lepel / beetplaat / opstelling + basis) → controle.
+// Elke stap gebruikt dezelfde functies als de losse knoppen; bij een fout stopt de reeks en blijft alles bewerkbaar.
+async function autoAll() {
+  if (!S.scan) { status('Open eerst een STL-scan of kies Demo-kaak, en tik dan op ⚡ Alles automatisch.', true); toast('Open eerst een scan (of Demo-kaak).', true); return false; }
+  const work = $('work').value, done = [], t0 = performance.now();
+  const step = async (label, fn) => {
+    const ok = await busy(`⚡ ${label}…`, async () => { await fn(); return true; });
+    if (!ok) { $('autoLog').innerHTML = done.map(d => `<li class="ok">${d}</li>`).join('') + `<li class="warn">${label}: mislukt — zie de melding onderaan. Los het op en tik opnieuw.</li>`; return false; }
+    done.push(label); return true;
+  };
+  $('autoLog').innerHTML = '';
+  if (!await step('Referentiepunten op de kam', async () => ensureFrame())) return false;
+  if (!await step('Anatomie analyseren', async () => runAnatomy())) return false;
+  if (work === 'lepel' || work === 'beetplaat') {
+    showStep(work);
+    if (!await step(`Omtrek ${work} volgens de anatomie`, async () => autoContour(work))) return false;
+    if (!await step(work === 'lepel' ? 'Lepel genereren' : 'Beetplaat genereren', work === 'lepel' ? buildLepel : buildBeet)) return false;
+    if (!S.plates[work]) return false;
+  } else {
+    showStep('opstelling');
+    if (!await step('Tanden opstellen op de kamlijn', async () => buildTeeth())) return false;
+    if (S.antagonist && viewer.antagonistMesh) await step('In occlusie brengen met de antagonist', async () => { await autoOccludeClick(); });
+    showStep('basis');
+    if (!await step('Omtrek basis volgens de anatomie', async () => autoContour('basis'))) return false;
+    if (!await step('Prothesebasis genereren', buildBasis)) return false;
+  }
+  showStep('controle'); runChecks();
+  const secs = ((performance.now() - t0) / 1000).toFixed(1).replace('.', ',');
+  $('autoLog').innerHTML = done.map(d => `<li class="ok">${d}</li>`).join('') + `<li class="info">Klaar in ${secs} s. Controleer het resultaat hieronder en ga naar Productie.</li>`;
+  status(`⚡ Klaar in ${secs} s: ${done.length} stappen. Controleer en pas zo nodig aan; elke stap is daarna los te wijzigen.`);
+  return true;
+}
+$('autoAll').onclick = () => autoAll();

@@ -74,11 +74,24 @@ export function autoLandmarks(soup, axisInfo = occlusalAxis(soup)) {
   const sign = Math.sign(vCenter - vEnds) || 1;
   const M = center.reduce((b, q) => (q.v * sign > b.v * sign ? q : b), center[0]);
   const near = q => q.v * sign < vEnds * sign + w * 0.15;
-  const left = crest.filter(q => q.u < mid && near(q)), right = crest.filter(q => q.u > mid && near(q));
+  const pick = side => {
+    const pool = crest.filter(q => (side < 0 ? q.u < mid : q.u > mid) && near(q));
+    // in het distale gebied is de kam het hoogst; een omslag van de wang ligt lager → alleen punten tot 2 mm onder de top
+    const top = pool.reduce((m, q) => Math.max(m, q.h), -Infinity);
+    const extreme = pool.reduce((b, q) => (side < 0 ? q.u < b.u : q.u > b.u) ? q : b, pool[0]);
+    return extreme.h < top - 3 ? pool.filter(q => q.h >= top - 2) : pool;
+  };
+  const left = pick(-1), right = pick(1);
   if (!left.length || !right.length) throw Error('Distale kampunten niet gevonden. Zet de punten handmatig.');
   const A = left.reduce((b, q) => (q.u < b.u ? q : b), left[0]), B = right.reduce((b, q) => (q.u > b.u ? q : b), right[0]);
+  // Verfijnen: de kam is altijd hoger dan een omslag van lip/wang of een frenulum in het vestibulum.
+  //  M = hoogste punt op de middellijn (van het midden tussen R/L tot iets voorbij M), R/L = hoogste punt binnen 8 mm.
+  const O = { u: (A.u + B.u) / 2, v: (A.v + B.v) / 2 }, axis = [M.u - O.u, M.v - O.v], len = Math.hypot(...axis) || 1, ax = [axis[0] / len, axis[1] / len];
+  let M2 = M;
+  for (const q of pts) { const du = q.u - O.u, dv = q.v - O.v, along = du * ax[0] + dv * ax[1], across = Math.abs(du * ax[1] - dv * ax[0]); if (across < 3 && along > len * 0.4 && along < len + 6 && q.h > M2.h) M2 = q; }
+  const refine = P => { let b = P; for (const q of pts) if (Math.hypot(q.u - P.u, q.v - P.v) < 8 && q.h > b.h) b = q; return b; };
   // Rechts/links volgens de rechtshandige conventie met de occlusale as (zie setup.js).
-  return { R: A.p, M: M.p, L: B.p, axis: N };
+  return { R: refine(A).p, M: M2.p, L: refine(B).p, axis: N };
 }
 
 // Ondersnijdingen t.o.v. de invoerrichting (richting waarin de plaat op de kaak schuift is -dir).
@@ -107,3 +120,19 @@ export function undercutMarks(mesh, dir) {
 }
 
 export function planeFrom3(a, b, c) { return norm(cross(sub(b, a), sub(c, a))); }
+
+// Herhaald: as uit het vlak door R, M, L halen en de punten opnieuw zoeken. Corrigeert een scheve
+// gemiddelde-normaal-as (bv. bij een volledige scan met diep labiaal vestibulum).
+export function autoLandmarksRefined(soup, axisInfo = occlusalAxis(soup), rounds = 3) {
+  let info = { ...axisInfo }, lm = autoLandmarks(soup, info);
+  for (let k = 0; k < rounds; k++) {
+    const n = norm(cross(sub(lm.M, lm.R), sub(lm.L, lm.R)));
+    const N = dot(n, info.axis) < 0 ? n.map(v => -v) : n;
+    if (dot(N, info.axis) > 0.99995) break;
+    // alleen accepteren als de nieuwe as niet absurd ver afwijkt (max 25°)
+    if (dot(N, axisInfo.axis) < Math.cos(25 * Math.PI / 180)) break;
+    info = { ...info, axis: N };
+    try { lm = autoLandmarks(soup, info); } catch { break; }
+  }
+  return { ...lm, axis: info.axis };
+}

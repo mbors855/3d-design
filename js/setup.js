@@ -42,9 +42,11 @@ export function frameBuccal(frame, x, y, tangent2) {
 }
 
 export function placeTeeth(ids, frame, opts, scanMesh = null) {
-  const { form = 'oval', scale = 1, shape = 'oval', concept = 'gysi', occlusalHeight = 9, gap = 0, wall = 2, custom = null } = opts;
+  const { form = 'oval', scale = 1, shape = 'oval', concept = 'gysi', occlusalHeight = 9, gap = 0, wall = 2, custom = null, arch = null } = opts;
+  // occlusalHeight: vast getal (mm boven het boogvlak) of functie (booglengte vanaf de middellijn, maximale booglengte) → mm.
+  const planeAt = typeof occlusalHeight === 'function' ? occlusalHeight : () => occlusalHeight;
   const c = { ...CONCEPTS[concept], ...(concept === 'custom' && custom ? custom : {}) };
-  const layout = layoutArch(ids, { jaw: frame.jaw, width: frame.width, depth: frame.depth, form, scale });
+  const layout = layoutArch(ids, { jaw: frame.jaw, width: frame.width, depth: frame.depth, form, scale, arch });
   const maxD = Math.max(1, ...layout.map(t => t.distance));
   const canineD = layout.find(t => toothType(t.fdi) === 3)?.distance ?? maxD * 0.35;
   const ray = new THREE.Raycaster(); ray.firstHitOnly = true;
@@ -58,11 +60,11 @@ export function placeTeeth(ids, frame, opts, scanMesh = null) {
     const dims = toothDimensions(item.fdi, scale);
     // Hoogte langs N: occlusaal vlak + curve van Spee.
     const f = item.distance > canineD ? ((item.distance - canineD) / Math.max(1, maxD - canineD)) ** 2 : 0;
-    const shift = upperSign * c.spee * f;
+    const shift = upperSign * c.spee * f, plane = planeAt(item.distance, maxD);
     const lingual = posterior && frame.jaw === 'upper' ? -c.lingualShift : 0;
     // Wortellengte: tot halverwege de basis, gemeten met een straal naar de scan.
     let root = 4;
-    const cervicalN = occlusalHeight - dims.height * (type <= 3 ? 0.95 : 0.85) + shift;
+    const cervicalN = plane - dims.height * (type <= 3 ? 0.95 : 0.85) + shift;
     if (scanMesh) {
       // Meerdere stralen over de wortelbreedte; de kortste afstand bepaalt de lengte (geen doorsteek door het pasvlak).
       const center = new THREE.Vector3(...P).addScaledVector(N, cervicalN).addScaledVector(zAxis, lingual);
@@ -83,9 +85,9 @@ export function placeTeeth(ids, frame, opts, scanMesh = null) {
     if (type <= 3) tilt = c.labial * (type === 3 ? 0.5 : 1) * (frame.jaw === 'upper' ? 1 : 0.6);
     else tilt = (frame.jaw === 'upper' ? 1 : -1) * c.wilson * (type >= 6 ? 1 : 0.5);
     q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), tilt * Math.PI / 180));
-    const position = new THREE.Vector3(...P).addScaledVector(N, occlusalHeight - tooth.occlusalY + shift).addScaledVector(zAxis, lingual);
+    const position = new THREE.Vector3(...P).addScaledVector(N, plane - tooth.occlusalY + shift).addScaledVector(zAxis, lingual);
     const mesial = new THREE.Vector3(...[0, 1, 2].map(i => frame.X[i] * item.mesial[0] + frame.Y[i] * item.mesial[1])).normalize();
-    return { fdi: item.fdi, soup: tooth.soup, position, quaternion: q, dims, root, mesial, buccal: zAxis.clone() };
+    return { fdi: item.fdi, soup: tooth.soup, position, quaternion: q, dims, root, mesial, buccal: zAxis.clone(), planeHeight: plane, arch2d: item.position };
   });
 }
 
