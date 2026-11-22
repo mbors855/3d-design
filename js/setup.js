@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { vec } from './analysis.js';
 import { makeTooth, layoutArch, archPoint, toothType, toothDimensions } from './teeth.js';
+import { anatomicTooth } from './crowns.js';
 
 export const CONCEPTS = {
   gysi: { label: 'Gysi', spee: 2.0, wilson: 10, labial: 10, cusp: 1.0, lingualShift: 0 },
@@ -42,7 +43,7 @@ export function frameBuccal(frame, x, y, tangent2) {
 }
 
 export function placeTeeth(ids, frame, opts, scanMesh = null) {
-  const { form = 'oval', scale = 1, shape = 'oval', concept = 'gysi', occlusalHeight = 9, gap = 0, wall = 2, custom = null, arch = null } = opts;
+  const { form = 'oval', scale = 1, shape = 'oval', concept = 'gysi', occlusalHeight = 9, gap = 0, wall = 2, custom = null, arch = null, library = 'anatomic' } = opts;
   // occlusalHeight: vast getal (mm boven het boogvlak) of functie (booglengte vanaf de middellijn, maximale booglengte) → mm.
   const planeAt = typeof occlusalHeight === 'function' ? occlusalHeight : () => occlusalHeight;
   const c = { ...CONCEPTS[concept], ...(concept === 'custom' && custom ? custom : {}) };
@@ -77,7 +78,9 @@ export function placeTeeth(ids, frame, opts, scanMesh = null) {
       }
       if (Number.isFinite(best)) root = Math.max(0.8, best - gap - wall * 0.5);
     } else root = Math.max(1.2, cervicalN - gap - wall * 0.5);
-    const tooth = makeTooth(item.fdi, { scale, shape: type <= 3 ? shape : 'oval', cuspHeight: c.cusp, rootLength: root });
+    // anatomische kronen (Wheeler's/DentCraft); knobbelhoogte en slijtage volgen het opstelconcept
+    const tooth = library === 'simple' ? makeTooth(item.fdi, { scale, shape: type <= 3 ? shape : 'oval', cuspHeight: c.cusp, rootLength: root })
+      : anatomicTooth(item.fdi, { scale, shape: type <= 3 ? shape : 'oval', rootLength: root, cusp: Math.max(0.3, c.cusp), wear: concept === 'monoplane' ? 1 : Math.max(0, 1 - c.cusp) * 0.6 });
     const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
     const q = new THREE.Quaternion().setFromRotationMatrix(basis);
     // Labiale inclinatie (front) en curve van Wilson (zijdelings): rotatie om de mesiodistale as.

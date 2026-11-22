@@ -18,6 +18,36 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 64
+
+**Werkwijze per werkstuk.** Lepel = plaat (met of zonder handvat), beetplaat = alleen de plaat, prothese = basis met elementen. Stappen en downloads die niet bij het werkstuk horen, zijn verborgen.
+
+**🧹 Scan voorbereiden** (Scan & mesh, en de eerste stap van ⚡ Alles automatisch). Scanpunten worden nooit verschoven:
+- analyse: delen, losse vlekjes, spikes, niet-manifold randen, gaten, open of gesloten (model met sokkel);
+- reparatie: kapotte en dubbele facetten, losse delen, spikes (PCA-vlak van de buren) en niet-manifold facetten weg, kleine gaten dicht;
+- bijsnijden tot het prothesegebied plus marge: sokkel, wang, tong en artefacten eruit, met alleen het deel dat de kam bevat;
+- aanvullen: is de plooi niet gescand (scan stopt bij de plaatrand, zoals bij een 3Shape-weefselzijde), dan wordt de rand vloeiend verlengd en de plooidiepte geschat (mediaan van de rest van de kaak, anders BK 8 / OK 7 mm). Het ontworpen deel is paars en telt niet mee in de pasvlakcontrole.
+
+**Omtrek: automatisch, en met de vinger aan te passen.** De omtrek wordt langs de insteekas exact uitgesneden, onafhankelijk van het camerastandpunt. Facetten binnen de lijn worden ongewijzigd overgenomen; facetten op de lijn worden exact gesneden (bisectie, rand ≤ 0,05 mm van de lijn).
+- Sleep een punt: punten in de meeneemzone (instelbaar) gaan vloeiend mee en blijven op de scan.
+- Tik op de lijn: er komt een punt bij. Houd een punt vast: het punt verdwijnt. ↶ en ↷ werken voor elke wijziging.
+
+**Belijning volgens de literatuur:**
+- lepel 2 mm korter dan de plooi (2–3 mm, ruimte voor randvormen), BK 2,5 mm voorbij de A-lijn door de hamulus-insnoeringen, OK over de hele retromolaire pad;
+- beetplaat en basis tot de functionele plooidiepte, BK tot de A-lijn (1–2 mm vóór de foveae palatinae), OK ⅔ van de pad;
+- frenumuitsparing labiaal smal, buccaal breder.
+
+**🗂 Lagen met faders.** Scan, Was, Design, Tanden en Antagonist zijn elk apart aan en uit te zetten, met een fader voor de doorzichtigheid.
+
+**🕯 Waslaag voor ondersnijdingen.** De ondersnijdingen worden langs de insteekas opgevuld (kegel met uitblokhoek, plus wat onder overhangend weefsel ligt). De was is te bewerken met penselen (toevoegen, wegnemen, gladmaken, Shift keert om) en komt nooit onder de scan. De plaat wordt op scan + was gebouwd; waar geen was ligt, is het pasvlak exact de scan.
+
+**Nauwkeurigheid (doel 0,05 mm):**
+- Bij elk werkstuk staat de afwijking van het pasvlak ten opzichte van de scan, of van de afdrukruimte bij een lepel; ook in Controle.
+- Wortels, de onderkant van de gingivaband, wallen en handvatten die door het pasvlak staken, worden nu weggesneden met een weefselblok (scanoppervlak 0,005 mm in het weefsel).
+- De afdrukruimte wordt gecorrigeerd met de echte afstand tot de scan (Minkowski): in holtes nooit te dicht, en smalle plooien worden overbrugd.
+
+**Anatomische tanden.** De 32 elementen hebben leerboekvormen (Wheeler's Dental Anatomy), met knobbels, randlijsten, fissuren, fossae, cingulum en incisale rand, op de gepubliceerde gemiddelde maten. Het is een port van de open-source kroonbibliotheek van DentCraft (MIT/Apache-2.0, zie `NOTICE`). Knobbelhoogte en slijtage volgen het opstelconcept (monoplane = vlak). De gingiva heeft festoenen en papillen.
+
 ### Nieuw in 63
 
 - **⚡ Alles automatisch** (werkbalk): in één keer referentiepunten → anatomie → omtrek → werkstuk volgens de opdrachtbon (lepel, beetplaat, of opstelling + prothesebasis), daarna direct de controle. Ongeveer 2–5 s; elke stap blijft daarna los aan te passen.
@@ -95,6 +125,10 @@ js/intaglio.js              weefselzijde uit gesloten product
 js/sculpt.js                penselen (vrij bewerken)
 js/anatomy.js               plooi, frenula, omtrek, weefselzones, scan richting ideaal
 js/shell.js, mesh.js, csg.js, construct.js, contour.js, analysis.js, setup.js, teeth.js
+js/prep.js                  scan voorbereiden (analyse, reparatie, aanvullen)
+js/trim.js                  exacte uitsnede langs de omtrek (insteekas)
+js/wax.js                   waslaag (ondersnijdingen), penselen
+js/crowns.js                anatomische kronen (port van DentCraft, MIT/Apache-2.0)
 js/unzip.js, zip.js, handoff.js, stl.js, viewer.js
 vendor/                     three.js, three-mesh-bvh, manifold-3d (WebAssembly)
 tests/run.mjs               headless tests

@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Digital Denture CAD 63</title>
+<title>Digital Denture CAD 64</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🦷%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/app.css">
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 </head>
 <body>
 <header>
-  <div class="brand">🦷 Digital Denture CAD <span>63</span></div>
+  <div class="brand">🦷 Digital Denture CAD <span>64</span></div>
   <div class="header-actions">
     <span class="badge">Prototype · niet voor klinisch gebruik</span>
     <a class="btn" href="orders.html" title="3Shape-export inlezen en controleren">📋 Orders</a>
@@ -239,6 +239,7 @@
         <div class="field"><label for="cCusp">Knobbelhoogte (0–1,2)</label><input id="cCusp" type="number" min="0" max="1.2" step=".05" value=".8" data-persist></div>
       </div>
       <div class="grid2">
+        <div class="field"><label for="toothLib">Tandvormen</label><select id="toothLib" data-persist><option value="anatomic">Anatomisch (Wheeler's, 32 elementen)</option><option value="simple">Eenvoudig (snel)</option></select></div>
         <div class="field"><label for="anteriorShape">Fronttandvorm</label><select id="anteriorShape" data-persist><option value="oval">Ovaal</option><option value="square">Vierkant</option><option value="tapered">Driehoekig</option></select></div>
         <div class="field"><label for="archForm">Boogvorm</label><select id="archForm" data-persist><option value="crest">Kamlijn (gemeten) – aanbevolen</option><option value="oval">Ovaal</option><option value="square">Breed / U</option><option value="tapered">Smal / V</option></select></div>
       </div>

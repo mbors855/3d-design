@@ -1,0 +1,11 @@
+Digital Denture CAD
+
+Derde partijen
+--------------
+js/crowns.js is een JavaScript-port van de parametrische kroonbibliotheek van DentCraft
+(crates/dentcraft-anatomy: shape.rs, library.rs, dimensions.rs), https://github.com/elnajar1/DentCraft
+Copyright (c) 2026 Dr. Mahmoud ElNajar and DentCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+De vormen volgen Nelson & Ash, Wheeler's Dental Anatomy, Physiology and Occlusion, 9th ed., 2010.
+
+vendor/: three.js (MIT), three-mesh-bvh (MIT), manifold-3d (Apache-2.0).

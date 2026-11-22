@@ -20,7 +20,7 @@ import { trimByOutline } from './trim.js';
 import { WaxLayer } from './wax.js';
 import { analyseArch, proposeOutline, tissueZones, idealizeScan, ZONE_LABEL, RULES, crestArch, setupArch, occlusalPlaneRule, staticsReport } from './anatomy.js';
 
-const VERSION = '63.0';
+const VERSION = '64.0';
 const $ = id => document.getElementById(id);
 const num = id => { const v = $(id).valueAsNumber; return Number.isFinite(v) ? v : Number($(id).value); };
 const fmt = (v, d = 1) => Number(v).toLocaleString('nl-NL', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -601,8 +601,10 @@ function fitCheck(kind, surface, soup, gap) {
   const f = fitReport(surface, soup, gap, { skipFrom: skip });
   S.fit[kind] = f ? { ...f, gap, designed: skip != null } : null;
   if (!f) return '';
-  const ok = f.p99 <= 0.05;
-  return ` · <span class="${ok ? 'ok' : 'err'}">pasvlak ${gap ? `(ruimte ${fmt(gap, 2)} mm) ` : ''}${Math.round(f.within * 1000) / 10}% binnen 0,05 mm, 99% ≤ ${fmt(f.p99, 3)} mm, max ${fmt(f.max, 2)} mm</span>${skip != null ? ' · aangevuld deel niet meegeteld' : ''}`;
+  const tail = skip != null ? ' · aangevuld deel niet meegeteld' : '';
+  if (!gap) { const ok = f.p99 <= 0.05; return ` · <span class="${ok ? 'ok' : 'err'}">pasvlak ${Math.round(f.within * 1000) / 10}% binnen 0,05 mm van de scan, 99% ≤ ${fmt(f.p99, 3)} mm</span>${tail}`; }
+  const ok = f.closeP99 <= 0.05;
+  return ` · <span class="${ok ? 'ok' : 'err'}">afdrukruimte ${fmt(gap, 2)} mm: ${Math.round(f.within * 1000) / 10}% binnen 0,05 mm, nergens meer dan ${fmt(f.closeP99, 3)} mm te dicht (99%)</span>${f.bridged > 0.005 ? ` · ${Math.round(f.bridged * 1000) / 10}% overbrugd (smalle plooien)` : ''}${tail}`;
 }
 
 // ---------- werkstukken ----------
@@ -729,7 +731,7 @@ function buildTeeth() {
   const rs = ruleSetup(), useRule = $('planeMode').value === 'rule' && rs?.rule;
   if (rs && S.anatomy) S.anatomy.arch = rs.arch;
   let placed = placeTeeth(ids, frame, {
-    form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, scale: num('toothScale') / 100, shape: $('anteriorShape').value, concept: $('concept').value,
+    form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, scale: num('toothScale') / 100, shape: $('anteriorShape').value, concept: $('concept').value, library: $('toothLib').value,
     occlusalHeight: useRule ? rs.rule.at : num('occlHeight'), gap: num('basisGap'), wall: num('basisWall'),
     custom: { spee: num('cSpee'), wilson: num('cWilson'), labial: num('cLabial'), cusp: num('cCusp') },
   }, viewer.scanMesh);
@@ -827,8 +829,14 @@ async function buildBasis() {
     const N = S.frame.N, O = S.frame.O;
     const cervical = S.teeth.map(t => vec.dot(vec.sub(t.localToWorld(new THREE.Vector3(0, 0, 0)).toArray(), O), N));
     const top = cervical.reduce((s, v) => s + v, 0) / cervical.length + num('gingivaOver');
-    parts.push(gingivaBand(S.frame, { width: num('gingivaWidth'), top, embed: 3, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: $('archForm').value === 'crest' ? ruleSetup({ extend: 0 })?.arch ?? null : null, conform: conformTo(gap + wall * 0.5) }));
-    notes.push(`gingivaband tot ${fmt(top)} mm`);
+    // Festoenen: de gingivarand volgt per element de halslijn en loopt tussen de elementen op tot een papil.
+    const gArch = $('archForm').value === 'crest' ? ruleSetup({ extend: 0 })?.arch ?? null : null;
+    const archFn = gArch ?? formArch({ width: S.frame.width, depth: S.frame.depth, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value });
+    const T2 = S.teeth.map((t, i) => { const d = vec.sub(t.position.toArray(), O); return { x: vec.dot(d, S.frame.X), y: vec.dot(d, S.frame.Y), c: cervical[i], r: t.userData.dims.md / 2 }; });
+    const over = num('gingivaOver');
+    const topAt = t => { const [x, y] = archFn(t); let best = Infinity; for (const q of T2) { const d = Math.hypot(x - q.x, y - q.y); best = Math.min(best, q.c + over + 1.8 * (1 - Math.exp(-((d / (q.r * 1.05)) ** 2)))); } return Number.isFinite(best) ? best : top; };
+    parts.push(gingivaBand(S.frame, { width: num('gingivaWidth'), top: topAt, embed: 3, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: gArch, conform: conformTo(gap + wall * 0.5) }));
+    notes.push(`gingiva met festoenen en papillen (rand ${fmt(over)} mm boven de halslijn)`);
   } else if (!teeth.length) notes.push('zonder tanden (alleen basis)');
   const teethTrimmed = teeth;
   if ($('coupling').value === 'monoblock' || !teeth.length) {
@@ -836,7 +844,8 @@ async function buildBasis() {
     S.plates.monoblock = { soup: mono, name: 'Monoblock prothese', file: `MONOBLOCK_${safe($('caseName').value)}.stl` };
     delete S.plates.basis;
     // Weergave: basis in gingivakleur, tanden in tandkleur (export blijft één monoblock).
-    let display = mono; if (teeth.length) try { display = await subtractSoups(mono, teeth.map(t => t.soup)); } catch { /* alleen weergave */ }
+    // weergave: basis (zonder tanden) in gingivakleur, tanden apart in tandkleur — geen samenvallende vlakken
+    let display = mono; if (teeth.length) try { display = await clipToTissue('basis', (await unionSoups(parts)).soup, reverse); } catch { /* alleen weergave */ }
     showPlate('basis', display, COLORS.plate.basis);
     showPlate('basisTeeth', teeth.length ? concatSoups(teeth.map(t => t.soup)) : null, COLORS.tooth);
     const { text } = plateSummary(mono), fitTxt = fitCheck('basis', surface, mono, gap);
@@ -891,7 +900,7 @@ function runChecks() {
     add($('splitReviewed').checked ? 'ok' : 'warn', $('splitReviewed').checked ? 'Scheidingslijn beoordeeld' : 'Scheidingslijn niet beoordeeld');
   }
   for (const [k, p] of Object.entries(S.plates)) if (p.soup) { const q = quality(weld(p.soup, 1e-6)); add(q.watertight ? 'ok' : 'warn', `${p.name}: ${q.watertight ? 'gesloten mesh' : `${q.open} open randen, ${q.nonManifold} niet-manifold`}`); }
-  for (const [k, f] of Object.entries(S.fit)) if (f && (S.plates[k] || (k === 'basis' && (S.plates.monoblock || S.plates.basis)))) add(f.p99 <= 0.05 ? 'ok' : 'warn', `Pasvlak ${k}: 99% ≤ ${fmt(f.p99, 3)} mm van ${f.gap ? `de ruimte (${fmt(f.gap, 2)} mm)` : 'de scan'} (doel ≤ 0,05 mm), mediaan ${fmt(f.median, 3)}, max ${fmt(f.max, 2)} mm${f.designed ? ' · aangevuld deel apart' : ''}`);
+  for (const [k, f] of Object.entries(S.fit)) if (f && (S.plates[k] || (k === 'basis' && (S.plates.monoblock || S.plates.basis)))) add((f.gap ? f.closeP99 : f.p99) <= 0.05 ? 'ok' : 'warn', f.gap ? `Afdrukruimte ${k}: ${fmt(f.gap, 2)} mm, 99% nergens meer dan ${fmt(f.closeP99, 3)} mm te dicht bij de scan (doel ≤ 0,05 mm)${f.bridged > 0.005 ? `, ${Math.round(f.bridged * 1000) / 10}% overbrugd` : ''}` : `Pasvlak ${k}: 99% ≤ ${fmt(f.p99, 3)} mm van de scan (doel ≤ 0,05 mm), mediaan ${fmt(f.median, 3)} mm${f.designed ? ' · aangevuld deel apart' : ''}`);
   if (S.designedFrom != null) add('warn', `Aangevuld (niet gescand) gebied in de scan (paars): ${int(S.scan.length / 9 - S.designedFrom)} facetten. Controleer de rand daar klinisch.`);
   add('info', 'Geen klinische validatie: controleer alle bestanden in slicer/CAM en klinisch');
   $('checks').innerHTML = items.map(([c, t]) => `<li class="${c}">${t}</li>`).join('');

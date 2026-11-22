@@ -48,17 +48,24 @@ export function shell(soup, { gap = 0, wall = 2, reverse = false, draftAngle = n
   report.gapCorrected = 0;
   if (gap > 0) {
     const surfaceSoup = toSoup(work), onRim = new Uint8Array(vCount); for (const v of rim) onRim[v] = 1;
-    for (let it = 0; it < 4; it++) {
-      const d = pointToSurfaceDistances(inner, surfaceSoup, { maxDist: gap + 2 });
+    const cp = new Float32Array(inner.length);
+    for (let it = 0; it < 5; it++) {
+      const d = pointToSurfaceDistances(inner, surfaceSoup, { maxDist: gap + 2, closest: cp });
       let changed = 0;
       for (let v = 0; v < vCount; v++) {
         if (!Number.isFinite(d[v])) continue;
-        let delta = 0;
-        if (d[v] < gap - 0.01) delta = gap - d[v];
-        else if (d[v] > gap + 0.03 && !onRim[v]) delta = -(d[v] - gap) * 0.5;
-        if (!delta) continue;
-        delta = Math.max(-0.5, Math.min(0.5, delta)); changed++;
-        for (let j = 0; j < 3; j++) { const i = v * 3 + j; inner[i] += normals[i] * delta; outer[i] += normals[i] * delta; }
+        let delta = [0, 0, 0];
+        if (d[v] < gap - 0.01) {
+          // te dicht (holte, of de tegenoverliggende wand van een smalle plooi): weg van het dichtstbijzijnde scanpunt
+          // tot precies de ingestelde ruimte (Minkowski-offset); zo overbrugt de lepel smalle plooien
+          const o = [inner[v * 3] - cp[v * 3], inner[v * 3 + 1] - cp[v * 3 + 1], inner[v * 3 + 2] - cp[v * 3 + 2]], l = Math.hypot(...o);
+          const dir = l > 1e-6 ? o.map(x => x / l) : [normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2]];
+          delta = [0, 1, 2].map(k => cp[v * 3 + k] + dir[k] * gap - inner[v * 3 + k]);
+        } else if (d[v] > gap + 0.03 && !onRim[v]) { const k2 = -(d[v] - gap) * 0.5; delta = [normals[v * 3] * k2, normals[v * 3 + 1] * k2, normals[v * 3 + 2] * k2]; }
+        else continue;
+        const len = Math.hypot(...delta); if (len < 1e-6) continue;
+        const sc = Math.min(1, 1.0 / len); changed++;
+        for (let j = 0; j < 3; j++) { inner[v * 3 + j] += delta[j] * sc; outer[v * 3 + j] += delta[j] * sc; }
       }
       report.gapCorrected = Math.max(report.gapCorrected, changed);
       if (!changed) break;

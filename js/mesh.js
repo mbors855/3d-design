@@ -354,7 +354,7 @@ export function applyMatrixToSoup(soup, m) {
 
 // Afstand van punten tot een oppervlak (soup), exact punt-tot-driehoek, met een rasterversnelling.
 // Geeft Float32Array met afstanden (Infinity als niets binnen maxDist ligt).
-export function pointToSurfaceDistances(points, soup, { cell = 1, maxDist = 6 } = {}) {
+export function pointToSurfaceDistances(points, soup, { cell = 1, maxDist = 6, closest = null } = {}) {
   const grid = new Map(), key = (x, y, z) => (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
   const nf = soup.length / 9;
   for (let i = 0; i < nf; i++) {
@@ -373,7 +373,7 @@ export function pointToSurfaceDistances(points, soup, { cell = 1, maxDist = 6 } 
     for (let ring = 0; ring <= R; ring++) {
       for (let x = cx - ring; x <= cx + ring; x++) for (let y = cy - ring; y <= cy + ring; y++) for (let z = cz - ring; z <= cz + ring; z++) {
         if (Math.max(Math.abs(x - cx), Math.abs(y - cy), Math.abs(z - cz)) !== ring) continue;
-        for (const i of grid.get(key(x, y, z)) || []) { if (seen[i] === pi) continue; seen[i] = pi; best = Math.min(best, pointTriangle(px, py, pz, soup, i * 9)); }
+        for (const i of grid.get(key(x, y, z)) || []) { if (seen[i] === pi) continue; seen[i] = pi; const d = pointTriangle(px, py, pz, soup, i * 9, closest ? _cp : null); if (d < best) { best = d; if (closest) { closest[pi * 3] = _cp[0]; closest[pi * 3 + 1] = _cp[1]; closest[pi * 3 + 2] = _cp[2]; } } }
       }
       if (best <= ring * cell) break;
     }
@@ -381,12 +381,13 @@ export function pointToSurfaceDistances(points, soup, { cell = 1, maxDist = 6 } 
   }
   return out;
 }
-function pointTriangle(px, py, pz, s, o) {
+const _cp = [0, 0, 0];
+function pointTriangle(px, py, pz, s, o, cp = null) {
   // Ericson, Real-Time Collision Detection: dichtstbijzijnd punt op een driehoek
   const ax = s[o], ay = s[o + 1], az = s[o + 2], bx = s[o + 3], by = s[o + 4], bz = s[o + 5], cx = s[o + 6], cy = s[o + 7], cz = s[o + 8];
   const abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az, apx = px - ax, apy = py - ay, apz = pz - az;
   const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
-  const dist = (x, y, z) => Math.hypot(px - x, py - y, pz - z);
+  const dist = (x, y, z) => { if (cp) { cp[0] = x; cp[1] = y; cp[2] = z; } return Math.hypot(px - x, py - y, pz - z); };
   if (d1 <= 0 && d2 <= 0) return dist(ax, ay, az);
   const bpx = px - bx, bpy = py - by, bpz = pz - bz, d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
   if (d3 >= 0 && d4 <= d3) return dist(bx, by, bz);
@@ -407,8 +408,11 @@ export function fitReport(surfaceSoup, plateSoup, gap = 0, { skipFrom = null, sa
   const n = (skipFrom ?? surfaceSoup.length / 9) * 3, stride = Math.max(1, Math.floor(n / sample));
   const pts = []; for (let v = 0; v < n; v += stride) pts.push(surfaceSoup[v * 3], surfaceSoup[v * 3 + 1], surfaceSoup[v * 3 + 2]);
   const d = pointToSurfaceDistances(Float32Array.from(pts), plateSoup, { maxDist: gap + 3 });
-  const dev = Array.from(d, x => Math.abs(x - gap)).filter(Number.isFinite).sort((a, b) => a - b);
+  const fin = Array.from(d).filter(Number.isFinite);
+  const dev = fin.map(x => Math.abs(x - gap)).sort((a, b) => a - b), close = fin.map(x => Math.max(0, gap - x)).sort((a, b) => a - b);
   if (!dev.length) return null;
-  const q = f => dev[Math.min(dev.length - 1, Math.floor(dev.length * f))];
-  return { n: dev.length, median: q(0.5), p95: q(0.95), p99: q(0.99), max: dev.at(-1), within: dev.filter(x => x <= 0.05).length / dev.length };
+  const q = (a, f) => a[Math.min(a.length - 1, Math.floor(a.length * f))];
+  // 'close' = dichter bij de scan dan de ingestelde ruimte (te weinig afdrukruimte); verder weg = overbrugd (smalle plooi)
+  return { n: dev.length, median: q(dev, 0.5), p95: q(dev, 0.95), p99: q(dev, 0.99), max: dev.at(-1), within: dev.filter(x => x <= 0.05).length / dev.length,
+    closeP99: q(close, 0.99), closeMax: close.at(-1), bridged: fin.filter(x => x > gap + 0.05).length / fin.length };
 }
