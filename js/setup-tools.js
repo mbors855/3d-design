@@ -499,7 +499,9 @@ export function initSetupTools(ctx) {
   }
   $('libFile')?.addEventListener('change', e => { const f = [...(e.target.files || [])]; e.target.value = ''; if (f.length) busy('Bibliotheek importeren…', () => importLibrary(f)); });
   $('libFolder')?.addEventListener('change', e => { const f = [...(e.target.files || [])]; e.target.value = ''; if (f.length) busy('Bibliotheek importeren…', () => importLibrary(f)); });
-  $('libList')?.addEventListener('click', e => { const b = e.target.closest('[data-libdel]'); if (!b) return; if (!confirm(`Bibliotheek "${b.dataset.libdel}" van dit apparaat verwijderen?`)) return; busy('Verwijderen…', async () => { await deleteSet(b.dataset.libdel); await refreshLibraryOptions(); }); });
+  $('libList')?.addEventListener('click', e => { const b = e.target.closest('[data-libdel]'); if (!b) return;
+    // twee keer tikken om te bevestigen (geen browserdialoog: werkt ook in ingesloten weergaven)
+    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Zeker?'; setTimeout(() => { delete b.dataset.armed; b.textContent = '🗑'; }, 3000); return; } busy('Verwijderen…', async () => { await deleteSet(b.dataset.libdel); await refreshLibraryOptions(); }); });
   refreshLibraryOptions();
 
   // ---------- knoppen ----------

@@ -72,7 +72,21 @@ async function busy(text, fn) {
   finally { $('busy').classList.add('hide'); }
 }
 const WHERE = /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'Bestanden → Downloads' : /Android/.test(navigator.userAgent) ? 'Mijn bestanden → Downloads' : 'je map Downloads';
+// Als de app als claude.ai-artifact draait, gaan downloads via de downloads-capability (alleen toegestane
+// extensies: STL wordt dan in een ZIP verpakt). Anders de gewone browserdownload.
+let artifactDownloads = null;
+if (window.claude?.use) window.claude.use('downloads').then(d => { artifactDownloads = d; }).catch(() => {});
+const ARTIFACT_EXT = /\.(zip|json|txt|csv|md|png|jpg|jpeg|svg|pdf|html)$/i;
 function download(blobOrBuffer, name, type = 'application/octet-stream') {
+  if (artifactDownloads) {
+    let data = blobOrBuffer instanceof Blob ? blobOrBuffer : new Blob([blobOrBuffer], { type }), file = name;
+    const go = async () => {
+      if (!ARTIFACT_EXT.test(file)) { const bytes = new Uint8Array(await data.arrayBuffer()); data = new Blob([makeZip([{ name, data: bytes }])]); file = name.replace(/\.[^.]+$/, '') + '.zip'; }
+      try { await artifactDownloads.save({ filename: file, data }); toast(`Opgeslagen: ${file}`); }
+      catch (e) { if (e?.code !== 'declined') toast(`Downloaden lukt hier niet (${e?.code ?? e}).`, true); }
+    };
+    go(); return;
+  }
   const blob = blobOrBuffer instanceof Blob ? blobOrBuffer : new Blob([blobOrBuffer], { type });
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
