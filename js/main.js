@@ -10,13 +10,14 @@ import { archFrame, defaultFrame, placeTeeth, autoOcclude, contactMap, clearCont
 import { FDI_UPPER, FDI_LOWER } from './teeth.js';
 import { biteRim, gingivaBand, trayHandle, perforations, tissueStops } from './construct.js';
 import { unionSoups, subtractSoups, loadManifold } from './csg.js';
-import { demoJaw, demoAntagonist } from './demo.js';
+import { demoJaw, demoAntagonist, anatomicJaw } from './demo.js';
 import { makeZip } from './zip.js';
 import { extractIntaglio } from './intaglio.js';
 import { takeHandoff } from './handoff.js';
 import { Sculpt, TOOLS } from './sculpt.js';
+import { analyseArch, proposeOutline, tissueZones, idealizeScan, ZONE_LABEL, RULES } from './anatomy.js';
 
-const VERSION = '61.0';
+const VERSION = '62.0';
 const $ = id => document.getElementById(id);
 const num = id => { const v = $(id).valueAsNumber; return Number.isFinite(v) ? v : Number($(id).value); };
 const fmt = (v, d = 1) => Number(v).toLocaleString('nl-NL', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -26,7 +27,7 @@ const STEPS = [['opdracht', 'Opdrachtbon'], ['scan', 'Scan & mesh'], ['analyse',
 const CONTOUR_KINDS = ['lepel', 'beetplaat', 'basis'];
 const LM_COLORS = { R: 0xff6b6b, M: 0xffd166, L: 0x4dabf7 };
 const MARK_COLORS = { boundary: 0x55d8f5, bar: 0xff6877, reference: 0xffce72 };
-const MODE_TEXT = { sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Omtrek tekenen: tik punten op de scan, tik op het eerste punt om te sluiten', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
+const MODE_TEXT = { contourHint: ' · slepen = draaien, knijpen/scrollen = zoomen', sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Omtrek tekenen: tik punten op de scan, tik op het eerste punt om te sluiten', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
 
 const S = {
   scan: null, scanName: 'scan.stl', history: [], future: [],
@@ -55,11 +56,13 @@ async function busy(text, fn) {
   catch (e) { console.error(e); status(e.message, true); toast(e.message, true); return undefined; }
   finally { $('busy').classList.add('hide'); }
 }
+const WHERE = /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'Bestanden → Downloads' : /Android/.test(navigator.userAgent) ? 'Mijn bestanden → Downloads' : 'je map Downloads';
 function download(blobOrBuffer, name, type = 'application/octet-stream') {
   const blob = blobOrBuffer instanceof Blob ? blobOrBuffer : new Blob([blobOrBuffer], { type });
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast(`Opgeslagen: ${name} (${fmt(blob.size / 1048576, 1)} MB) → ${WHERE}`);
 }
 const safe = s => String(s || 'project').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 48);
 const jaw = () => $('jaw').value === 'onder' ? 'lower' : 'upper';
@@ -81,6 +84,7 @@ function buildSteps() {
 function wrapLi(b) { const li = document.createElement('li'); li.appendChild(b); return li; }
 function showStep(id) {
   if (S.sculpt && id !== 'bewerken') finishSculpt(true);
+  if (id !== 'productie') stopPreview();
   S.step = id;
   if (id === 'bewerken') fillSculptTargets();
   for (const p of document.querySelectorAll('.panel')) p.classList.toggle('active', p.dataset.panel === id);
@@ -193,9 +197,9 @@ $('intaglioBtn').onclick = () => busy('Weefselzijde zoeken…', async () => {
 });
 $('fileScan').addEventListener('change', e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) loadScanFile(f); });
 $('demoBtn').onclick = () => busy('Demo-kaak maken…', async () => {
-  $('jaw').value = 'boven'; updateTeethMap();
-  setScan(demoJaw(), 'demo_bovenkaak.stl');
-  status('Synthetische tandeloze bovenkaak geladen. Ga naar Analyse voor de referentiepunten.');
+  const j = jaw(), { soup } = anatomicJaw({ jaw: j, torus: j === 'upper' });
+  setScan(soup, j === 'upper' ? 'demo_bovenkaak.stl' : 'demo_onderkaak.stl');
+  status(`Anatomische demo-${j === 'upper' ? 'bovenkaak (met torus)' : 'onderkaak'} geladen, met vestibulum en frenula. Kies Analyse → 🧭 Analyseer kaak, of bij Lepel/Beetplaat → 🧭 Automatisch.`);
 });
 // Slepen-en-neerzetten van STL-bestanden.
 $('viewport').addEventListener('dragover', e => e.preventDefault());
@@ -278,10 +282,11 @@ $('helpBtn').onclick = () => $('helpDialog').showModal();
 // ---------- modi en aanwijzen ----------
 function setMode(mode, arg = null) {
   S.mode = mode; S.modeArg = arg;
-  viewer.controls.enableRotate = mode === 'orbit' || mode === 'sculpt';
+  // Draaien blijft mogelijk tijdens tekenen/punten zetten: slepen = draaien, tikken = punt. Alleen markeren met slepen blokkeert draaien.
+  viewer.controls.enableRotate = !(mode === 'mark' && arg !== 'reference');
   $('viewport').classList.toggle('drawing', mode !== 'orbit');
   $('modeChip').classList.toggle('hide', mode === 'orbit');
-  $('modeText').textContent = mode === 'landmark' ? MODE_TEXT.landmark + ({ R: 'rechts distaal', M: 'midden (incisief)', L: 'links distaal' })[arg] : mode === 'mark' ? (arg === 'reference' ? MODE_TEXT.reference : MODE_TEXT.mark) : MODE_TEXT[mode] || '';
+  $('modeText').textContent = (mode === 'landmark' ? MODE_TEXT.landmark + ({ R: 'rechts distaal', M: 'midden (incisief)', L: 'links distaal' })[arg] : mode === 'mark' ? (arg === 'reference' ? MODE_TEXT.reference : MODE_TEXT.mark) : MODE_TEXT[mode] || '') + (['contour', 'landmark'].includes(mode) || (mode === 'mark' && arg === 'reference') ? MODE_TEXT.contourHint : '');
   $('contourToggle').setAttribute('aria-pressed', String(mode === 'contour'));
   $('contourToggle').textContent = mode === 'contour' ? '↻ Draaien' : '✏️ Teken omtrek';
   for (const b of document.querySelectorAll('[data-landmark]')) b.setAttribute('aria-pressed', String(mode === 'landmark' && b.dataset.landmark === arg));
@@ -387,8 +392,9 @@ function refreshScanColors() {
     if (!s?.facets.length || kind !== S.step) continue;
     marks ??= new Uint8Array(n); for (const f of s.facets) marks[f] = i + 1;
   }
+  if (S.anatomy?.zones && S.step === 'analyse' && $('anaShow').checked && S.anatomy.soup === S.scan) { marks ??= new Uint8Array(n); for (let f = 0; f < n; f++) if (S.anatomy.zones[f]) marks[f] = 4 + S.anatomy.zones[f]; }
   if (S.undercut && S.step === 'analyse') { marks ??= new Uint8Array(n); for (let f = 0; f < n; f++) if (S.undercut[f]) marks[f] = 4; }
-  viewer.colorFaces(marks, [COLORS.lepel, COLORS.beetplaat, COLORS.basis, COLORS.undercut]);
+  viewer.colorFaces(marks, [COLORS.lepel, COLORS.beetplaat, COLORS.basis, COLORS.undercut, ...ZONE_COLORS]);
 }
 
 // ---------- analyse ----------
@@ -452,7 +458,7 @@ function addContourPoint(e, type) {
     if (s?.points.length >= 3) {
       const project = viewer.projector(), [px, py] = project(...s.points[0]), r = canvas.getBoundingClientRect();
       if (Math.hypot(px - (e.clientX - r.left), py - (e.clientY - r.top)) <= (type === 'touch' ? 22 : 13)) {
-        S.contours.close(kind, viewer); delete S.plates[kind];
+        closeContourFromAbove(kind); delete S.plates[kind];
         setMode('orbit'); updateContourUI(); refreshScanColors(); refreshOverlay(); return;
       }
     }
@@ -461,6 +467,15 @@ function addContourPoint(e, type) {
     S.contours.addPoint(kind, hit.point.toArray());
     updateContourUI(); refreshOverlay();
   } catch (err) { contourError(err.message); }
+}
+// Sluiten vanuit het occlusale aanzicht, zodat de hele omtrek zichtbaar is ook als er tussendoor gedraaid is.
+function closeContourFromAbove(kind) {
+  const cam = viewer.camera.position.clone(), target = viewer.controls.target.clone(), up = viewer.camera.up.clone();
+  try { S.contours.close(kind, viewer); }
+  catch (first) {
+    viewDir('occlusal'); viewer.fit(); viewer.render();
+    try { S.contours.close(kind, viewer); } catch { viewer.camera.position.copy(cam); viewer.controls.target.copy(target); viewer.camera.up.copy(up); viewer.controls.update(); viewer.render(); throw first; }
+  }
 }
 $('contourToggle').onclick = () => { if (!S.scan) return contourError('Laad eerst een scan.'); setMode(S.mode === 'contour' ? 'orbit' : 'contour'); };
 $('contourUndo').onclick = () => { S.contours.undo(S.step); updateContourUI(); refreshScanColors(); refreshOverlay(); };
@@ -509,7 +524,8 @@ function plateSummary(soup) {
   const state = q.watertight ? 'gesloten ✓'
     : q.open === 0 && q.flipped === 0 ? `gesloten, ${int(q.nonManifold)} niet-manifold rand${q.nonManifold === 1 ? '' : 'en'} (delen raken elkaar; controleer in de slicer)`
     : `⚠ niet volledig gesloten (${int(q.open)} open randen)`;
-  return { q, text: `${int(q.faces)} facetten · ${state} · volume ${fmt(Math.abs(q.volume))} mm³` };
+  const loose = q.components > 1 ? ` · ⚠ ${q.components} losse delen (raakt handvat of wal de plaat niet? verklein de afstand of schakel het onderdeel uit)` : '';
+  return { q, text: `${int(q.faces)} facetten · ${state}${loose} · volume ${fmt(Math.abs(q.volume))} mm³` };
 }
 function plateLink(kind, label) { return `<a class="download" href="#" data-download="${kind}">↓ ${label}</a>`; }
 document.addEventListener('click', e => { const a = e.target.closest('[data-download]'); if (!a) return; e.preventDefault(); const p = S.plates[a.dataset.download]; if (p) download(writeSTL(p.soup, p.name), p.file); });
@@ -734,10 +750,36 @@ function renderOutputs() {
   host.innerHTML = '';
   for (const o of outputList()) {
     const l = document.createElement('label'); l.className = 'check' + (o.available ? '' : ' unavailable');
-    l.innerHTML = `<input type="checkbox" value="${o.key}" ${o.available ? '' : 'disabled'} ${o.available && (prev.has(o.key) || !prev.size) && !['scan', 'antagonist'].includes(o.key) ? 'checked' : ''}> ${o.label}${o.available ? '' : ' — nog niet gegenereerd'}`;
+    l.innerHTML = `<input type="checkbox" value="${o.key}" ${o.available ? '' : 'disabled'} ${o.available && (prev.has(o.key) || !prev.size) && !['scan', 'antagonist'].includes(o.key) ? 'checked' : ''}> <span class="grow">${o.label}${o.available ? '' : ' — nog niet gegenereerd'}</span>`
+      + (o.available ? `<button type="button" class="mini" data-preview="${o.key}" title="Bekijk dit bestand los in 3D">👁</button><button type="button" class="mini" data-single="${o.key}" title="Alleen dit bestand downloaden">↓</button>` : '');
     host.appendChild(l);
   }
 }
+// Eén uitvoerbestand los bekijken (de rest verbergen) of los downloaden.
+let previewing = null;
+function stopPreview() {
+  if (!previewing) return;
+  viewer.groups.overlay.remove(previewing.mesh); previewing.mesh.geometry.dispose(); previewing.mesh.material.dispose();
+  for (const [g, v] of previewing.vis) g.visible = v;
+  previewing = null; $('previewInfo').innerHTML = ''; for (const b of document.querySelectorAll('[data-preview]')) b.setAttribute('aria-pressed', 'false'); viewer.render();
+}
+$('outputs').addEventListener('click', e => {
+  const pv = e.target.closest('[data-preview]'), sg = e.target.closest('[data-single]');
+  if (!pv && !sg) return;
+  e.preventDefault();
+  const o = outputList().find(x => x.key === (pv || sg).dataset.preview || x.key === (pv || sg).dataset.single); if (!o) return;
+  const files = o.files();
+  if (sg) { if (files.length === 1) download(writeSTL(files[0][1], files[0][0]), files[0][0].replace(/^.*\//, '')); else download(makeZip(files.map(([n, soup]) => ({ name: n, data: writeSTL(soup, n) }))), `${o.key}.zip`); return; }
+  const same = previewing?.key === o.key; stopPreview(); if (same) return;
+  const soup = concatSoups(files.map(f => f[1])), color = COLORS.plate[o.key] ?? (o.key.startsWith('elem') || o.key === 'losse' ? COLORS.tooth : COLORS.plate.basis);
+  const vis = [viewer.groups.scan, viewer.groups.antagonist, viewer.groups.plates, viewer.groups.teeth].map(g => [g, g.visible]);
+  for (const [g] of vis) g.visible = false;
+  const mesh = makeMesh(soup, color, { roughness: 0.4 }); viewer.groups.overlay.add(mesh);
+  previewing = { key: o.key, mesh, vis }; pv.setAttribute('aria-pressed', 'true');
+  const b = soupBounds(soup), q = plateSummary(soup);
+  $('previewInfo').innerHTML = `<b>${o.label}</b><br>${b.size.map(v => fmt(v)).join(' × ')} mm · ${q.text}<br><span class="sub">Tik nogmaals op 👁 om terug te gaan.</span>`;
+  viewer.fit(new THREE.Box3().setFromObject(mesh)); viewer.render();
+});
 $('exportZip').onclick = () => busy('Productiepakket samenstellen…', async () => {
   const chosen = new Set([...$('outputs').querySelectorAll('input:checked')].map(i => i.value));
   const outs = outputList().filter(o => o.available && chosen.has(o.key));
@@ -810,6 +852,70 @@ document.addEventListener('keydown', e => {
   if (S.step === 'opstelling' && k === 'r') return setGizmo('rotate');
 });
 
+
+
+// ---------- anatomie & weefsel ----------
+const ZONE_COLORS = [[0.27, 0.75, 0.45], [0.62, 0.85, 0.55], [0.93, 0.33, 0.38], [0.33, 0.5, 0.95], [0.97, 0.75, 0.3]];
+const LAB_REF = { upper: { width: 42, depth: 27 }, lower: { width: 50, depth: 34 } }; // mediaan uit 39 labproducten (3Shape-export)
+function scanCaster() {
+  const mesh = viewer.scanMesh; if (!mesh) throw Error('Laad eerst een scan.');
+  const ray = new THREE.Raycaster(); ray.firstHitOnly = true;
+  const o = new THREE.Vector3(), d = new THREE.Vector3();
+  return (origin, dir) => { ray.set(o.set(...origin), d.set(...dir)); const h = ray.intersectObject(mesh, false)[0]; return h ? { point: h.point.toArray() } : null; };
+}
+function ensureFrame() {
+  if (S.frame || computeFrame()) return S.frame;
+  const info = { ...occlusalAxisCached() }; if (S.axis) info.axis = S.axis;
+  const lm = autoLandmarks(S.scan, info);
+  S.landmarks = { R: lm.R, M: lm.M, L: lm.L }; S.axis ??= info.axis; S.frame = null;
+  computeFrame(false); updateLandmarkInfo(); updateAxisInfo(); refreshOverlay(); updateDone();
+  if (!S.frame) throw Error('Referentiepunten konden niet automatisch gezet worden. Zet ze bij Analyse.');
+  return S.frame;
+}
+function runAnatomy() {
+  if (!S.scan) throw Error('Laad eerst een scan.');
+  ensureFrame();
+  const cast = scanCaster(), an = analyseArch(cast, S.frame, { form: $('archForm').value });
+  const zi = tissueZones(S.scan, an);
+  S.anatomy = { soup: S.scan, an, zones: zi.zones, info: zi, cast };
+  const counts = new Map(); for (const z of zi.zones) counts.set(z, (counts.get(z) || 0) + 1);
+  const total = zi.zones.length, pct = z => Math.round((counts.get(z) || 0) / total * 100);
+  const ref = LAB_REF[S.frame.jaw], st = an.stats;
+  const fr = an.frena.map(f => f.side === 'lingual' ? 'linguaal' : Math.abs(f.t) < 0.2 ? 'labiaal' : 'buccaal ' + (f.t < 0 ? 'rechts' : 'links'));
+  $('anaInfo').innerHTML = `<b>${S.frame.jaw === 'upper' ? 'Bovenkaak' : 'Onderkaak'}</b> · boog ${fmt(S.frame.width)} × ${fmt(S.frame.depth)} mm (lab-mediaan ${ref.width} × ${ref.depth})<br>`
+    + (st.sulcusDepthMedian != null ? `Plooidiepte mediaan ${fmt(st.sulcusDepthMedian)} mm${st.edge > st.profiles * 0.5 ? ' · <span class="err">vestibulum grotendeels niet gescand (scan eindigt bij de plaatrand)</span>' : ''}<br>` : '')
+    + `Frenula: ${fr.length ? fr.join(', ') : 'geen duidelijk gevonden'}${zi.torus ? ` · <b>torus palatinus</b> (${fmt(zi.torus.height)} mm)` : ''}<br>`
+    + `Drukdragend ${pct(1) + pct(2)}% · ontlasten ${pct(3)}% · afsluiting ${pct(4)}% · plooi/rand ${pct(5)}%`;
+  $('anaLegend').classList.remove('hide'); $('anaIdealBox').classList.remove('hide');
+  $('anaPostDam').disabled = S.frame.jaw !== 'upper';
+  refreshScanColors();
+  return S.anatomy;
+}
+$('anaRun').onclick = () => busy('Kaak analyseren…', async () => { runAnatomy(); status('Anatomie geanalyseerd. Gebruik bij Lepel/Beetplaat "🧭 Automatisch" voor de omtrek.'); });
+$('anaShow').addEventListener('change', refreshScanColors);
+$('anaIdeal').onclick = () => busy('Scan aanpassen…', async () => {
+  if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
+  const { soup, report } = idealizeScan(S.scan, S.anatomy.info, {
+    frame: S.frame, doSmooth: $('anaSmooth').checked, doRelief: $('anaRelief').checked, doPostDam: $('anaPostDam').checked && S.frame.jaw === 'upper',
+    reliefPapilla: num('anaReliefPap'), relief: num('anaReliefOther'), postDam: num('anaPostDamMm'),
+  });
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); if (S.history.length > 8) S.history.shift(); S.future = [];
+  clearPlates(); clearTeeth();
+  setScan(soup, S.scanName.replace(/(_ideaal)?\.stl$/i, '') + '_ideaal.stl', { reset: false });
+  runAnatomy();
+  status(`Scan aangepast: ${report.smoothed ? 'gladgemaakt, ' : ''}${int(report.relieved)} punten ontlast${report.postDam ? `, post-dam op ${int(report.postDam)} punten` : ''}. Genereer de werkstukken opnieuw.`);
+});
+$('contourAuto').onclick = () => busy('Omtrek bepalen volgens de anatomie…', async () => {
+  const kind = S.step; if (!CONTOUR_KINDS.includes(kind)) return;
+  if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
+  const ol = proposeOutline(S.anatomy.cast, S.anatomy.an, kind);
+  S.contours.clear(kind);
+  for (const p of ol.points) S.contours.addPoint(kind, p);
+  if (S.mode === 'contour') setMode('orbit');
+  closeContourFromAbove(kind); delete S.plates[kind];
+  updateContourUI(); refreshScanColors(); refreshOverlay();
+  status(`Automatische omtrek: ${ol.rule}${ol.frena ? ` · ${ol.frena} frenulum-uitsparing(en)` : ''}. Pas aan met Terug/Wis of teken zelf.`);
+});
 
 // ---------- vrij bewerken (penselen) ----------
 const SCULPT_KINDS = { lepel: 'Lepel', beetplaat: 'Beetplaat', monoblock: 'Monoblock prothese', basis: 'Prothesebasis' };

@@ -18,6 +18,22 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 62
+
+- **Anatomie & weefsel** (stap *Analyse*): zoekt de plooi (vestibulum) en de plooidiepte, frenula (labiaal, buccaal, tongriem), A-lijn/hamulus (BK) of retromolaire pad (OK) en een torus palatinus. Kleurt de **weefselkaart**: drukdragend (primair/secundair), ontlasten, afsluiting (post-dam/pad) en plooi/rand.
+- **Automatische omtrek** (knop 🧭 bij Lepel/Beetplaat/Basis): lepel 2 mm korter dan de plooi en 2,5 mm voorbij de A-lijn; beetplaat/basis tot in de plooi, achter tot de A-lijn of over ⅔ van de retromolaire pad; V-uitsparing bij elk frenulum.
+- **Scan aanpassen richting ideaal**: gladmaken (scanruis), ontlasten van papil (1,0 mm), raphe/torus/scherpe richels (0,5 mm), optioneel post-dam (BK, 0,8 mm). Terug te draaien.
+- **Draaien en zoomen tijdens het tekenen** van de omtrek en het zetten van punten (slepen = draaien, tikken = punt). Bij het sluiten wordt automatisch het occlusale aanzicht gekozen.
+- **STL bekijken**: 3D-voorbeeld per bestand in het orderoverzicht; in *Productie* elk uitvoerbestand los bekijken (👁) of los downloaden. Na elke download staat in beeld waar het bestand terechtkomt.
+- **Anatomische demo-kaak** (boven of onder, met vestibulum, frenula, verhemelte/torus of retromolaire pads).
+- Kamlijn-referentiepunten nauwkeuriger op de kamtop; handvat schuift automatisch op de plaat bij smalle platen; melding bij losse delen.
+
+**Waar worden bestanden opgeslagen?** Alles blijft op het apparaat; er gaat niets naar een server. Downloads gaan naar de map *Downloads* (iPhone: app Bestanden → Downloads; Android: Mijn bestanden → Downloads; computer: map Downloads). Het complete project (met scan) bewaar je met 💾 Opslaan.
+
+**Lab-referentie** (mediaan van 39 producten uit een 3Shape-export, kamtop-tot-kamtop): bovenkaak boog 42 × 27 mm, verhemeltediepte ~14 mm; onderkaak 50 × 34 mm.
+
+**Literatuur (samenvatting van de gebruikte regels):** lepelrand 2–3 mm korter dan de plooi en achter door de hamulus-insnoeringen voorbij de A-lijn; OK-basis over ½–⅔ van de retromolaire pad; drukdragend BK: hard verhemelte naast de raphe en postero-laterale kamhellingen; OK: buccal shelf; ontlasten: papilla incisiva, raphe mediana, torus palatinus, scherpe benige richels; frenula met V-uitsparing. Bronnen o.a. Zarb/Boucher (*Prosthodontic Treatment for Edentulous Patients*), opleidingsdictaten prothetiek en *British Dental Journal* (tips custom trays).
+
 ### Nieuw in 61
 
 - **Vrij bewerken** (stap *Bewerken*): penselen zoals de freeform-/wasmes-tools in 3Shape en de penselen in Photoshop: *Toevoegen*, *Wegnemen*, *Gladmaken*, *Vlakmaken* en *Verschuiven*. Penseelgrootte en sterkte met schuifjes (of `[` `]`), Shift keert toevoegen/wegnemen om, sneltoetsen A/R/S/V/D, ongedaan maken/opnieuw (Ctrl+Z/Y), optioneel symmetrisch links/rechts. Het pasvlak (kant van de scan) is beschermd. **Diktekaart** toont waar de plaat dunner is dan de ingestelde minimale dikte. Het werkstuk blijft een gesloten mesh.
@@ -56,7 +72,8 @@ Validatie van versie 61 op een echte lab-export (51 STL-bestanden, 3Shape Dental
 - beetwal op echte scans: 33/39 volledig schoon, 6 gesloten met enkele niet-manifold randen (melding in het programma);
 - handvat op 12 echte lepels: 12/12 schoon;
 - penselen: toevoegen, wegnemen, gladmaken, verschuiven, pasvlak beschermd, gesloten na bewerken, ongedaan maken;
-- browser-doorloop (Chrome, desktop + mobiel, incl. penseelstreek met de muis en diktekaart): 25/25.
+- anatomie op de demo-kaken: plooi binnen 1 mm, alle frenula en de tongriem gevonden, torus herkend, omtrek geldig;
+- browser-doorloop (Chrome, desktop + mobiel, incl. penselen, anatomie, automatische omtrek, scan aanpassen, STL-voorbeelden): 40/40.
 
 ## Structuur
 
@@ -67,6 +84,7 @@ js/main.js                  CAD-interface
 js/orders.js, orders-ui.js  orderoverzicht (rekenwerk / interface)
 js/intaglio.js              weefselzijde uit gesloten product
 js/sculpt.js                penselen (vrij bewerken)
+js/anatomy.js               plooi, frenula, omtrek, weefselzones, scan richting ideaal
 js/shell.js, mesh.js, csg.js, construct.js, contour.js, analysis.js, setup.js, teeth.js
 js/unzip.js, zip.js, handoff.js, stl.js, viewer.js
 vendor/                     three.js, three-mesh-bvh, manifold-3d (WebAssembly)

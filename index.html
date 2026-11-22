@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Digital Denture CAD 61</title>
+<title>Digital Denture CAD 62</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🦷%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/app.css">
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 </head>
 <body>
 <header>
-  <div class="brand">🦷 Digital Denture CAD <span>61</span></div>
+  <div class="brand">🦷 Digital Denture CAD <span>62</span></div>
   <div class="header-actions">
     <span class="badge">Prototype · niet voor klinisch gebruik</span>
     <a class="btn" href="orders.html" title="3Shape-export inlezen en controleren">📋 Orders</a>
@@ -31,7 +31,7 @@
   <section class="workspace">
     <div class="toolbar" role="toolbar" aria-label="Weergave">
       <label class="btn primary">📂 Open STL<input id="fileScan" type="file" accept=".stl" hidden></label>
-      <button id="demoBtn" title="Laad een synthetische tandeloze bovenkaak">Demo-kaak</button>
+      <button id="demoBtn" title="Laad een anatomische demo-kaak (boven- of onderkaak volgens de opdrachtbon)">Demo-kaak</button>
       <span class="sep"></span>
       <button data-view="occlusal" title="Occlusaal aanzicht (1)">Occlusaal</button>
       <button data-view="front" title="Frontaal aanzicht (2)">Frontaal</button>
@@ -51,6 +51,7 @@
     </div>
 
     <div id="contourBar" class="toolbar sub hide" role="toolbar" aria-label="Plaatomtrek">
+      <button id="contourAuto" title="Omtrek automatisch volgens de anatomie (plooi, frenula, A-lijn / retromolaire pad)">🧭 Automatisch</button>
       <button id="contourToggle" aria-pressed="false">✏️ Teken omtrek</button>
       <button id="contourUndo" disabled>↶ Terug</button>
       <button id="contourRedo" disabled>↷ Vooruit</button>
@@ -136,6 +137,18 @@
       <p class="sub">Rechts distaal, midden (incisief) en links distaal op de kam. Bepalen de tandboog, beetwal en het handvat.</p>
       <div class="actions"><button id="lmAuto" class="primary">Automatisch</button><button data-landmark="R" class="lm r">● Rechts</button><button data-landmark="M" class="lm m">● Midden</button><button data-landmark="L" class="lm l">● Links</button><button id="lmClear">Wis</button></div>
       <div id="lmInfo" class="sub"></div>
+      <h4>🧭 Anatomie &amp; weefsel</h4>
+      <p class="sub">Zoekt de plooi (vestibulum), frenula, A-lijn/hamulus of retromolaire pad en deelt het weefsel in volgens de prothetiekliteratuur.</p>
+      <div class="actions"><button id="anaRun" class="primary">🧭 Analyseer kaak</button><label class="check inline"><input type="checkbox" id="anaShow" checked> Toon weefselkaart</label></div>
+      <div id="anaLegend" class="legend hide"><span class="z1">drukdragend</span><span class="z2">secundair</span><span class="z3">ontlasten</span><span class="z4">afsluiting</span><span class="z5">plooi/rand</span></div>
+      <div id="anaInfo" class="note-inline"></div>
+      <details id="anaIdealBox" class="hide"><summary>Scan aanpassen richting ideaal</summary>
+        <label class="check"><input type="checkbox" id="anaSmooth" checked data-persist> Gladmaken (scanruis en kleine putjes)</label>
+        <label class="check"><input type="checkbox" id="anaRelief" checked data-persist> Ontlasten: papil <input id="anaReliefPap" type="number" class="tiny" min="0" max="2" step="0.1" value="1.0" data-persist> mm, raphe/torus/scherpe richels <input id="anaReliefOther" type="number" class="tiny" min="0" max="2" step="0.1" value="0.5" data-persist> mm</label>
+        <label class="check"><input type="checkbox" id="anaPostDam" data-persist> Post-dam (alleen bovenkaak, beetplaat/basis) <input id="anaPostDamMm" type="number" class="tiny" min="0" max="1.5" step="0.1" value="0.8" data-persist> mm</label>
+        <button id="anaIdeal">✨ Pas scan aan</button>
+        <p class="sub">Ontlasten verschuift het scanoppervlak naar de plaat toe (ruimte in de plaat); post-dam drukt een smalle band iets in (afsluitrand). ↶ Terug bij Scan &amp; mesh zet de originele scan terug.</p>
+      </details>
       <h4>Ondersnijdingen</h4>
       <div class="actions"><button id="undercutRun">Toon ondersnijdingen</button><button id="undercutClear">Verberg</button></div>
       <div id="undercutInfo" class="sub">Rood = niet bereikbaar langs de occlusale richting (invoerrichting).</div>
@@ -287,7 +300,9 @@
       <div id="outputs" class="outputs"></div>
       <label class="check"><input type="checkbox" id="includeProject" checked data-persist> Projectbestand en rapport toevoegen</label>
       <button id="exportZip" class="primary wide">↓ Download productiepakket (ZIP)</button>
+      <div id="previewInfo" class="note-inline"></div>
       <div id="exportResult" class="result"></div>
+      <p class="sub"><b>Waar komen de bestanden?</b> Alles blijft op dit apparaat; er wordt niets naar een server gestuurd. Downloads gaan naar de map <b>Downloads</b> (iPhone: app Bestanden → Downloads, Android: Mijn bestanden → Downloads, computer: map Downloads). Bewaar het hele project (met scan) via 💾 Opslaan.</p>
       <p class="note">Alle STL's zijn echte, gesloten meshes in millimeters. Controleer ze altijd in je slicer of CAM-software. Geen klinische validatie.</p>
     </section>
   </aside>

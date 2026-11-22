@@ -11,6 +11,28 @@ const { extractIntaglio } = await import(J + 'intaglio.js');
 const { demoJaw } = await import(J + 'demo.js');
 const { autoLandmarks, occlusalAxis } = await import(J + 'analysis.js');
 const { Sculpt } = await import(J + 'sculpt.js');
+const { anatomicJaw } = await import(J + 'demo.js');
+const { archFrame } = await import(J + 'setup.js');
+const A = await import(J + 'anatomy.js');
+const { validContour } = await import(J + 'contour.js');
+// eenvoudige 'straal van boven' voor hoogtevelden (z = occlusaal), zonder three.js
+function verticalCaster(soup, cell = 1) {
+  const grid = new Map(), key = (x, y) => Math.floor(x / cell) + ',' + Math.floor(y / cell);
+  for (let f = 0; f < soup.length / 9; f++) { const o = f * 9, xs = [soup[o], soup[o + 3], soup[o + 6]], ys = [soup[o + 1], soup[o + 4], soup[o + 7]];
+    for (let x = Math.floor(Math.min(...xs) / cell); x <= Math.floor(Math.max(...xs) / cell); x++) for (let y = Math.floor(Math.min(...ys) / cell); y <= Math.floor(Math.max(...ys) / cell); y++) { const k = x + ',' + y; if (!grid.has(k)) grid.set(k, []); grid.get(k).push(f); } }
+  return (o, d) => {
+    let best = null;
+    for (const f of grid.get(key(o[0], o[1])) ?? []) {
+      const b = f * 9, ax = soup[b], ay = soup[b + 1], bx = soup[b + 3], by = soup[b + 4], cx = soup[b + 6], cy = soup[b + 7];
+      const det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy); if (Math.abs(det) < 1e-12) continue;
+      const w1 = ((by - cy) * (o[0] - cx) + (cx - bx) * (o[1] - cy)) / det, w2 = ((cy - ay) * (o[0] - cx) + (ax - cx) * (o[1] - cy)) / det, w3 = 1 - w1 - w2;
+      if (w1 < -1e-9 || w2 < -1e-9 || w3 < -1e-9) continue;
+      const z = w1 * soup[b + 2] + w2 * soup[b + 5] + w3 * soup[b + 8];
+      if (z < o[2] && (!best || z > best[2])) best = [o[0], o[1], z];
+    }
+    return best ? { point: best } : null;
+  };
+}
 
 let pass = 0, fail = 0;
 async function test(name, fn) { try { await fn(); pass++; console.log('✓', name); } catch (e) { fail++; console.log('✗', name, '\n   ', e.message); } }
@@ -107,4 +129,32 @@ await test('penselen: toevoegen/wegnemen/gladmaken, pasvlak beschermd, blijft ge
   sc.grab(c, 4, { O: [0, c[1], 0], X: [1, 0, 0] }); sc.dragTo([0, 0, 1]); sc.release();
   assert.ok(sc.positions[top * 3 + 2] > c[2] + 0.5, 'verschuiven');
 });
+
+for (const jawName of ['upper', 'lower']) {
+  await test(`anatomie ${jawName}: plooi, frenula, omtrek, zones, ideaal`, () => {
+    const { soup, truth } = anatomicJaw({ jaw: jawName, torus: jawName === 'upper' });
+    const lm = autoLandmarks(soup, { ...occlusalAxis(soup), axis: [0, 0, 1] });
+    assert.ok(Math.abs(lm.M[1] - truth.M[1]) < 3, `M op de kam (y ${lm.M[1].toFixed(1)} vs ${truth.M[1]})`);
+    const frame = archFrame(lm, jawName, [0, 0, 1]), cast = verticalCaster(soup);
+    const an = A.analyseArch(cast, frame);
+    const sd = an.profiles.filter(p => p.buccal?.sulcus).map(p => p.buccal.sulcus.d).sort((a, b) => a - b), med = sd[Math.floor(sd.length / 2)];
+    assert.ok(Math.abs(med - truth.sulcusD) < 1, `plooi-afstand ${med.toFixed(1)} vs ${truth.sulcusD}`);
+    assert.ok(Math.abs(an.stats.sulcusDepthMedian - truth.sulcusDepth) < 1, 'plooidiepte');
+    const labial = an.frena.filter(f => f.side === 'buccal' && Math.abs(f.at[0]) < 4);
+    assert.ok(labial.length >= 1, 'labiaal frenulum gevonden');
+    assert.ok(an.frena.filter(f => f.side === 'buccal').length >= 3, 'drie buccale/labiale frenula');
+    if (jawName === 'lower') assert.ok(an.frena.some(f => f.side === 'lingual'), 'tongriem gevonden');
+    for (const kind of ['lepel', 'beetplaat']) { const o = A.proposeOutline(cast, an, kind); assert.ok(validContour(o.points.map(p => [p[0] * 10, p[1] * 10])), 'omtrek ' + kind + ' kruist zichzelf'); }
+    // lepel ligt binnen de beetplaat (2 mm korter dan de plooi): gemiddeld hoger (dichter bij de kam)
+    const h = pts => pts.reduce((t, p) => t + p[2], 0) / pts.length;
+    assert.ok(h(A.proposeOutline(cast, an, 'lepel').points) > h(A.proposeOutline(cast, an, 'beetplaat').points) + 0.8, 'lepelrand korter dan beetplaatrand');
+    const zi = A.tissueZones(soup, an);
+    assert.equal(!!zi.torus, jawName === 'upper', 'torus-herkenning');
+    const cnt = z => zi.zones.filter(v => v === z).length;
+    assert.ok(cnt(A.ZONE.primary) > 0 && cnt(A.ZONE.relief) > 0 && cnt(A.ZONE.seal) > 0, 'alle zonetypes aanwezig');
+    const id = A.idealizeScan(soup, zi, { frame });
+    assert.ok(id.report.relieved > 0, 'ontlast'); if (jawName === 'upper') assert.ok(id.report.postDam > 0, 'post-dam');
+    assert.equal(id.soup.length, soup.length, 'zelfde topologie');
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

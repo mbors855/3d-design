@@ -115,6 +115,11 @@ export function cylinder(start, end, radius, segments = 12) {
 
 // Handvat: verticale lip bij het midden, licht labiaal van de kam.
 export function trayHandle(frame, { base = 2, height = 14, width = 14, thickness = 3, labial = 2, conform = null } = {}) {
+  // Met conform: naar achteren schuiven tot alle vier onderhoeken boven de scan liggen (anders zweeft het handvat voor een smalle plaat).
+  if (conform) for (let l = labial; l >= -10; l -= 1) {
+    const corners = [-1, 1].flatMap(i => [-1, 1].map(j => framePoint(frame, i * width / 2, frame.depth + l + j * thickness / 2, 0)));
+    if (corners.every(q => conform(q, frame.N))) { labial = l; break; }
+  }
   const P = framePoint(frame, 0, frame.depth + labial, base + height / 2);
   return box(P, [frame.X, frame.Y, frame.N], [width, thickness, height + base], conform);
 }
