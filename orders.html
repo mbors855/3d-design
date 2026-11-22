@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Orderoverzicht · Digital Denture CAD</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E📋%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/orders.css">
+</head>
+<body class="orders-page">
+<header>
+  <div class="brand">📋 Orderoverzicht <span>CAD</span></div>
+  <div class="header-actions">
+    <a class="btn" href="index.html" title="Terug naar het ontwerpprogramma">🦷 Naar CAD</a>
+  </div>
+</header>
+<div class="op-wrap">
+  <section id="drop" class="op-drop">
+    <h1>3Shape-export inlezen</h1>
+    <p>Kies de <b>ZIP</b> (bijv. van TransferNow) of losse bestanden (.3ox, .inf, .stl, .pts). Alles blijft op dit apparaat: er wordt niets geüpload.</p>
+    <div class="actions">
+      <label class="btn primary">🗜 ZIP kiezen<input id="pickZip" type="file" accept=".zip,application/zip" hidden></label>
+      <label class="btn">📄 Bestanden kiezen<input id="pickFiles" type="file" multiple accept=".stl,.3ox,.inf,.pts" hidden></label>
+      <label class="btn" id="pickDirLabel">📁 Map kiezen<input id="pickDir" type="file" webkitdirectory multiple hidden></label>
+    </div>
+    <p class="sub">Of sleep een ZIP of bestanden hierheen.</p>
+    <div id="progress" class="op-progress hide"><div class="bar"><i></i></div><span></span></div>
+  </section>
+
+  <section id="report" class="hide">
+    <div class="op-tiles" id="tiles"></div>
+    <div class="op-toolbar">
+      <div class="seg" role="tablist">
+        <button data-filter="all" class="active">Alles</button><button data-filter="fout">Fouten</button><button data-filter="let op">Let op</button><button data-filter="late">Levering verstreken</button>
+      </div>
+      <input id="search" type="search" placeholder="Zoek patiënt of ordernummer…">
+      <span class="grow"></span>
+      <button id="exportCsv">↓ CSV</button>
+      <button id="exportJson">↓ JSON</button>
+      <button id="resetBtn">↺ Ander pakket</button>
+    </div>
+    <div id="patients" class="op-patients"></div>
+
+    <h2>Printsimulatie</h2>
+    <div class="op-sim-controls">
+      <div class="field"><label for="simPrinter">Printer</label><select id="simPrinter"></select></div>
+      <div class="field"><label for="simOrient">Oriëntatie lepels/beetplaten</label><select id="simOrient"><option value="auto" selected>Automatisch (kleinste footprint)</option><option value="rechtop">Rechtop op de hielen</option><option value="staand">Staand op de rand</option><option value="schuin">Schuin (~45°)</option><option value="plat">Plat</option></select></div>
+      <div class="field"><label for="simLayer">Laagdikte (mm)</label><select id="simLayer"><option>0.05</option><option selected>0.1</option><option>0.2</option></select></div>
+      <div class="field"><label for="simLayerSec">Seconden per laag</label><input id="simLayerSec" type="number" min="1" max="60" step="0.5" placeholder="standaard printer"></div>
+      <div class="field"><label for="simResin">Hars €/liter</label><input id="simResin" type="number" min="0" step="5" value="150"></div>
+      <div class="field"><label for="simUntil">Alleen levering t/m</label><input id="simUntil" type="date"></div>
+    </div>
+    <div id="simSummary" class="note"></div>
+    <div id="simPlates" class="op-plates"></div>
+    <p class="sub">Schatting: footprint op basis van de omhullende doos, supports als +35% hars, tijd = lagen × gemiddelde laagtijd van de printer. Gebruik je slicer voor de definitieve indeling.</p>
+
+    <h2>Naamgeving</h2>
+    <p class="sub" id="namingNote"></p>
+    <div class="op-table-wrap"><table class="op-table" id="namingTable"><thead><tr><th>Huidige naam</th><th>Voorstel</th></tr></thead><tbody></tbody></table></div>
+    <button id="copyNames">⧉ Kopieer als lijst</button>
+  </section>
+</div>
+<div id="toast" class="hide"></div>
+<script type="module" src="js/orders-ui.js"></script>
+</body>
+</html>
