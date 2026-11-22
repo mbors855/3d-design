@@ -214,4 +214,76 @@ await test('statiek: boven de kam ok, 3 mm buccaal en voorbij de kam worden geme
   const moved = A.staticsReport([{ fdi: 46, x: t46.arch2d[0] + v[0] / l * 3, y: t46.arch2d[1] + v[1] / l * 3 }], an)[0];
   assert.equal(moved.level, 'warn', moved.msg); assert.ok(moved.offset > 2, 'buccaal');
 });
+
+// ---------- v64: scan voorbereiden, exacte uitsnede, aanvullen ----------
+const PR = await import(J + 'prep.js');
+const TR = await import(J + 'trim.js');
+function dirtyJaw(jawName = 'upper') {
+  const { soup, truth } = anatomicJaw({ jaw: jawName });
+  const extra = [];
+  const tri = (a, b, c) => extra.push(...a, ...b, ...c);
+  // los eilandje (scanvlek) boven de kaak, sokkelplaat (groot!) 12 mm onder de kaak, dubbele facetten
+  for (let i = 0; i < 6; i++) tri([60 + i, 0, 5], [61 + i, 0, 5], [60 + i, 1, 5]);
+  for (let x = -40; x < 40; x += 4) for (let y = -25; y < 50; y += 4) { tri([x, y, -14], [x, y + 4, -14], [x + 4, y, -14]); tri([x + 4, y, -14], [x, y + 4, -14], [x + 4, y + 4, -14]); }
+  for (let k = 0; k < 90; k++) extra.push(soup[k]);
+  const all = new Float32Array(soup.length + extra.length); all.set(soup); all.set(extra, soup.length);
+  // spikes: drie punten 3 mm omhoog trekken
+  const spiked = all.slice(); const targets = [[0, 20], [10, 25], [-12, 22]];
+  for (const [tx, ty] of targets) { let best = -1, bd = 1e9; for (let i = 0; i < soup.length; i += 3) { const d = Math.hypot(soup[i] - tx, soup[i + 1] - ty); if (d < bd) { bd = d; best = i; } }
+    const ox = soup[best], oy = soup[best + 1], oz = soup[best + 2]; for (let i = 0; i < soup.length; i += 3) if (soup[i] === ox && soup[i + 1] === oy && soup[i + 2] === oz) spiked[i + 2] = oz + 3; }
+  return { soup: spiked, clean: soup, truth };
+}
+await test('scan voorbereiden: eilandjes, spikes, dubbele facetten weg; punten niet verschoven', () => {
+  const { soup, clean: orig } = dirtyJaw();
+  const a = PR.analyzeScan(soup);
+  assert.ok(a.components >= 3 && a.spikes >= 3, `analyse: ${a.components} delen, ${a.spikes} spikes`);
+  const { soup: rep, report } = PR.repairScan(soup);
+  assert.ok(report.spikes >= 3 && report.duplicate >= 10 && report.islands >= 1, JSON.stringify(report));
+  const set = new Set(); for (let i = 0; i < orig.length; i += 3) set.add(orig[i] + ',' + orig[i + 1] + ',' + orig[i + 2]);
+  for (let i = 0; i < report.designedFrom * 9; i += 3) assert.ok(set.has(rep[i] + ',' + rep[i + 1] + ',' + rep[i + 2]) || rep[i + 2] === -14, 'punt verschoven');
+});
+for (const jawName of ['upper', 'lower']) await test(`uitsnede ${jawName}: langs de omtrek, sokkel weg, pasvlak exact, één rand`, () => {
+  const { soup } = dirtyJaw(jawName);
+  const { soup: rep } = PR.repairScan(soup);
+  const lm = autoLandmarks(rep, { ...occlusalAxis(rep), axis: [0, 0, 1] });
+  const frame = archFrame(lm, jawName, [0, 0, 1]), cast = verticalCaster(rep);
+  const an = A.analyseArch(cast, frame), ol = A.proposeOutline(cast, an, 'basis');
+  const t = TR.trimByOutline(rep, ol.points, frame.N, { margin: 0 });
+  const m = weld(t.soup, 1e-6), q = quality(m);
+  assert.equal(q.holes, 1, `${q.holes} randen`); assert.equal(q.nonManifold, 0);
+  let minZ = Infinity; for (let i = 2; i < t.soup.length; i += 3) minZ = Math.min(minZ, t.soup[i]);
+  assert.ok(minZ > -13, 'sokkel verwijderd');
+  assert.ok(t.report.kept > 1000 && t.report.clipped > 50, JSON.stringify(t.report));
+  // rand ligt op de omtrek: geprojecteerde randpunten op ≤ 0,05 mm van de gladde lijn
+  const basis = TR.axisBasis(frame.N), field = new TR.PolygonField(t.polygon), loops = boundaryLoops(m).loops;
+  const origV = new Set(); for (let i = 0; i < rep.length; i += 3) origV.add(rep[i] + ',' + rep[i + 1] + ',' + rep[i + 2]);
+  let worst = 0, onLine = 0, scanEdge = 0;
+  for (const v of loops[0]) { const P = [m.positions[v * 3], m.positions[v * 3 + 1], m.positions[v * 3 + 2]], [u, w] = basis.project(P), d = field.distance(u, w);
+    if (origV.has(P.join(',')) && d > 0.05) { scanEdge++; continue; } // omtrek ligt hier buiten de scan: rand = scanrand
+    worst = Math.max(worst, d); onLine++; }
+  assert.ok(worst < 0.05, `rand ${worst.toFixed(3)} mm naast de lijn`);
+  assert.ok(onLine > scanEdge, `${onLine} op de lijn, ${scanEdge} op de scanrand`);
+  // met marge 4 mm: groter
+  const t4 = TR.trimByOutline(rep, ol.points, frame.N, { margin: 4 });
+  assert.ok(t4.soup.length > t.soup.length * 1.1, 'marge vergroot de uitsnede');
+});
+await test('aanvullen: scan die vóór de plooi ophoudt wordt verlengd (ontworpen deel apart, geen naden)', () => {
+  const { soup } = anatomicJaw({ jaw: 'upper' });
+  const lm = autoLandmarks(soup, { ...occlusalAxis(soup), axis: [0, 0, 1] });
+  const frame = archFrame(lm, 'upper', [0, 0, 1]), cast = verticalCaster(soup);
+  const an = A.analyseArch(cast, frame);
+  // scan houdt 3 mm buccaal van de kam op (zoals de weefselzijde van een 3Shape-beetplaat): omtrek op 3 mm
+  const pts = an.profiles.filter(p => p.buccal?.pts?.length > 8).map(p => p.buccal.pts.find(q => q.d >= 3).p);
+  const pal = [[0, 5, 0]]; // palatinaal binnen de boog: omtrek sluiten via de achterkant
+  const short = TR.trimByOutline(soup, [...pts, [pts.at(-1)[0], pts.at(-1)[1] - 6, 0], [pts[0][0], pts[0][1] - 6, 0]], frame.N).soup;
+  const an2 = A.analyseArch(verticalCaster(short), frame);
+  assert.ok(an2.stats.edge > an2.stats.profiles * 0.6, 'plooi niet gescand');
+  const ext = PR.extendBorder(short, { length: 6 });
+  const m = weld(ext.soup, 1e-6), q = quality(m);
+  assert.equal(q.nonManifold, 0); assert.equal(q.holes, 1);
+  assert.ok(ext.soup.length / 9 > ext.report.designedFrom + 100, 'ontworpen facetten toegevoegd');
+  const an3 = A.analyseArch(verticalCaster(ext.soup), frame);
+  const reach = s => Math.max(...s.profiles.filter(p => p.buccal?.pts?.length).map(p => p.buccal.pts.at(-1).d));
+  assert.ok(reach(an3) > reach(an2) + 3, `verder gescand: ${reach(an2).toFixed(1)} → ${reach(an3).toFixed(1)} mm`);
+});
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

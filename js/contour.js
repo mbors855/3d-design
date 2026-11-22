@@ -1,5 +1,6 @@
 // Plaatomtrek: punten op de scan, sluiten, zichtbaar oppervlak selecteren en exact uitsnijden.
 import { weld } from './mesh.js';
+import { trimByOutline, axisBasis, outlinePolygon } from './trim.js';
 
 export function validContour(polygon) {
   const orientation = (a, b, c) => { const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); return Math.abs(cross) < 1e-7 ? 0 : Math.sign(cross); };
@@ -115,38 +116,64 @@ export function cropSurface(soup, shape) {
   return Float32Array.from(out);
 }
 
+// Omtrekken per werkstuk. Een omtrek is een gesloten lijn van punten op de scan; de uitsnede wordt langs de
+// insteekas berekend (trim.js), dus onafhankelijk van het camerastandpunt. Punten kunnen versleept, ingevoegd en
+// verwijderd worden; elke wijziging is ongedaan te maken.
 export class ContourSet {
-  constructor() { this.shapes = new Map(); this.redo = new Map(); }
+  constructor() { this.shapes = new Map(); this.redo = new Map(); this.undoStack = new Map(); }
   get(kind) { return this.shapes.get(kind); }
-  ensure(kind) { if (!this.shapes.has(kind)) this.shapes.set(kind, { points: [], facets: [], polygon: null, project: null, surface: null }); return this.shapes.get(kind); }
-  addPoint(kind, point) { const s = this.ensure(kind); if (s.facets.length) throw Error('Omtrek is al gesloten. Gebruik Terug of Wis.'); if (s.points.length >= 512) throw Error('Maximaal 512 punten.'); s.points.push(point); this.redo.set(kind, []); }
-  close(kind, viewer) {
+  ensure(kind) { if (!this.shapes.has(kind)) this.shapes.set(kind, { points: [], closed: false, axis: null, facets: [], surface: null }); return this.shapes.get(kind); }
+  snap(kind) { const s = this.ensure(kind), st = this.undoStack.get(kind) ?? []; st.push({ points: s.points.map(p => p.slice()), closed: s.closed, axis: s.axis }); if (st.length > 80) st.shift(); this.undoStack.set(kind, st); this.redo.set(kind, []); }
+  invalidate(kind) { const s = this.get(kind); if (s) { s.facets = []; s.surface = null; } }
+  addPoint(kind, point, { record = true } = {}) { const s = this.ensure(kind); if (s.closed) throw Error('Omtrek is al gesloten. Versleep punten, of gebruik Terug of Wis.'); if (s.points.length >= 512) throw Error('Maximaal 512 punten.'); if (record) this.snap(kind); s.points.push(point); }
+  setPoints(kind, points, axis, { record = true } = {}) { if (record) this.snap(kind); const s = this.ensure(kind); s.points = points.map(p => p.slice()); s.closed = false; this.invalidate(kind); return this.close(kind, axis, { record: false }); }
+  close(kind, axis, { record = true } = {}) {
     const s = this.get(kind);
     if (!s || s.points.length < 3) throw Error('Zet minimaal drie punten om de omtrek te sluiten.');
-    const project = viewer.projector();
-    const polygon = s.points.map(p => project(p[0], p[1], p[2]));
-    if (polygon.some(q => q[2] <= 0)) throw Error('Niet alle punten liggen voor de camera. Draai de scan zodat de hele omtrek zichtbaar is.');
-    if (!validContour(polygon)) throw Error('De omtrek kruist zichzelf of is te klein. Gebruik Terug om punten te corrigeren.');
-    const facets = viewer.visibleFaces(polygon);
-    if (!facets.length) throw Error('Er ligt geen zichtbaar scanoppervlak binnen deze omtrek.');
-    Object.assign(s, { facets, polygon: polygon.map(q => [q[0], q[1]]), project, surface: null });
-    this.redo.set(kind, []);
+    const basis = axisBasis(axis), poly = outlinePolygon(s.points, basis, { step: 1 });
+    if (!validContour(poly.map(q => [q[0] * 10, q[1] * 10]))) throw Error('De omtrek kruist zichzelf of is te klein. Versleep of verwijder het punt waar de lijn kruist.');
+    if (record) this.snap(kind);
+    s.closed = true; s.axis = axis.slice(); this.invalidate(kind);
     return s;
   }
-  undo(kind) {
+  /** Punt i verplaatsen (met zachte meeneem-zone langs de lijn); project(p) zet een punt terug op de scan. */
+  movePoint(kind, i, to, { radius = 3, project = null } = {}) {
     const s = this.get(kind); if (!s) return;
-    const stack = this.redo.get(kind) ?? []; this.redo.set(kind, stack);
-    if (s.facets.length) { stack.push({ closed: { facets: s.facets, polygon: s.polygon, project: s.project, surface: s.surface } }); Object.assign(s, { facets: [], polygon: null, project: null, surface: null }); }
-    else if (s.points.length) { stack.push({ point: s.points.pop() }); if (!s.points.length) this.shapes.delete(kind); }
+    const from = s.points[i], d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]], n = s.points.length;
+    s.points[i] = to.slice();
+    if (radius > 0) for (const dir of [1, -1]) {
+      let along = 0, prev = from;
+      for (let k = 1; k < n / 2; k++) {
+        const j = (i + dir * k + n) % n, q = s.points[j];
+        along += Math.hypot(q[0] - prev[0], q[1] - prev[1], q[2] - prev[2]); prev = q;
+        if (along >= radius) break;
+        const w = (1 - along / radius) ** 2, moved = [q[0] + d[0] * w, q[1] + d[1] * w, q[2] + d[2] * w];
+        s.points[j] = project ? project(moved) ?? moved : moved;
+      }
+    }
+    this.invalidate(kind);
+  }
+  insertPoint(kind, after, point) { const s = this.get(kind); this.snap(kind); s.points.splice(after + 1, 0, point.slice()); this.invalidate(kind); }
+  removePoint(kind, i) { const s = this.get(kind); if (s.points.length <= 3) throw Error('Een omtrek heeft minimaal drie punten.'); this.snap(kind); s.points.splice(i, 1); this.invalidate(kind); }
+  undo(kind) {
+    const st = this.undoStack.get(kind); if (!st?.length) return;
+    const s = this.ensure(kind), r = this.redo.get(kind) ?? []; r.push({ points: s.points.map(p => p.slice()), closed: s.closed, axis: s.axis }); this.redo.set(kind, r);
+    Object.assign(s, st.pop()); this.invalidate(kind);
   }
   redoStep(kind) {
-    const stack = this.redo.get(kind); if (!stack?.length) return;
-    const item = stack.pop(), s = this.ensure(kind);
-    if (item.closed) Object.assign(s, item.closed); else s.points.push(item.point);
+    const r = this.redo.get(kind); if (!r?.length) return;
+    const s = this.ensure(kind), st = this.undoStack.get(kind) ?? []; st.push({ points: s.points.map(p => p.slice()), closed: s.closed, axis: s.axis }); this.undoStack.set(kind, st);
+    Object.assign(s, r.pop()); this.invalidate(kind);
   }
+  canUndo(kind) { return !!this.undoStack.get(kind)?.length; }
   canRedo(kind) { return !!this.redo.get(kind)?.length; }
-  clear(kind) { this.shapes.delete(kind); this.redo.delete(kind); }
-  reset() { this.shapes.clear(); this.redo.clear(); }
-  surface(kind, soup) { const s = this.get(kind); if (!s?.facets.length) throw Error('Sluit eerst de omtrek.'); s.surface ??= cropSurface(soup, s); return s.surface; }
-  toJSON() { return [...this.shapes].map(([kind, s]) => ({ kind, points: s.points })); }
+  clear(kind) { if (this.get(kind)) this.snap(kind); this.shapes.delete(kind); }
+  reset() { this.shapes.clear(); this.redo.clear(); this.undoStack.clear(); }
+  /** Uitgesneden oppervlak (exact langs de lijn) en de betrokken facetindices voor de kleuring. */
+  surface(kind, soup, splitAt = null) {
+    const s = this.get(kind); if (!s?.closed) throw Error('Sluit eerst de omtrek.');
+    if (!s.surface || s.splitAt !== splitAt) { const r = trimByOutline(soup, s.points, s.axis, { splitAt }); s.surface = r.soup; s.facets = r.faces; s.trimReport = r.report; s.splitAt = splitAt; s.splitIndex = r.splitIndex; }
+    return s.surface;
+  }
+  toJSON() { return [...this.shapes].map(([kind, s]) => ({ kind, points: s.points, closed: s.closed, axis: s.axis })); }
 }

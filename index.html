@@ -58,6 +58,7 @@
       <button id="contourRedo" disabled>↷ Vooruit</button>
       <button id="contourClear" disabled>Wis omtrek</button>
       <button id="contourCrop" disabled>↓ Uitgesneden scan</button>
+      <label class="inline-field" title="Bij slepen gaan punten binnen deze afstand vloeiend mee">Meeneemzone <input id="contourSoft" type="number" class="tiny" min="0" max="10" step="0.5" value="3" data-persist> mm</label>
       <span id="contourStatus" class="hint" role="status"></span>
     </div>
 
@@ -102,7 +103,17 @@
     <section class="panel" data-panel="scan">
       <h3>📐 Scan &amp; mesh</h3>
       <div id="scanInfo" class="note">Nog geen scan geladen.</div>
-      <h4>Kwaliteit en reparatie</h4>
+      <h4>🧹 Scan voorbereiden</h4>
+      <p class="sub">Analyseert en repareert de scan (losse delen, spikes, dubbele/kapotte facetten, kleine gaten), snijdt hem bij tot het prothesegebied plus marge (sokkel, wang, tong en artefacten eruit) en vult een niet-gescande plooi aan. Scanpunten worden nooit verschoven.</p>
+      <div class="grid2">
+        <div class="field"><label for="prepMargin">Marge buiten de plooi (mm)</label><input id="prepMargin" type="number" min="1" max="15" step="0.5" value="4" data-persist></div>
+        <div class="field"><label for="prepExtend">Aanvullen tot (mm)</label><input id="prepExtend" type="number" min="0" max="15" step="0.5" value="8" data-persist></div>
+      </div>
+      <label class="check"><input type="checkbox" id="prepTrim" checked data-persist> Automatisch bijsnijden</label>
+      <label class="check"><input type="checkbox" id="prepComplete" checked data-persist> Ontbrekende plooi aanvullen (ontworpen deel paars)</label>
+      <button id="prepRun" class="primary wide">🧹 Scan voorbereiden</button>
+      <div id="prepReport" class="note"></div>
+      <h4>Kwaliteit en reparatie (handmatig)</h4>
       <div class="actions"><button id="meshQA">🔎 Analyseer</button><button id="meshRepair" class="primary">🛠 Repareer</button></div>
       <label class="check"><input type="checkbox" id="repairFill" checked data-persist> Gaten dichten (buitenrand open laten)</label>
       <div id="meshReport" class="note mono"></div>

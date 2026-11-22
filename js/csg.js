@@ -1,5 +1,5 @@
 // Booleaanse bewerkingen (vereniging/aftrekking) met de Manifold-bibliotheek (WebAssembly).
-import { weld, clean, quality } from './mesh.js';
+import { weld, clean, quality, repair, toSoup, edgeMap, compact, fillHoles } from './mesh.js';
 
 let wasmPromise = null;
 export function loadManifold() {
@@ -73,7 +73,7 @@ function meshToSoup(man, snap = 1e-5) {
 export async function unionSoups(soups, report = {}) {
   const w = await loadManifold();
   const parts = [], loose = [];
-  for (const s of soups) { if (!s?.length) continue; try { parts.push(await toManifold(s)); } catch { loose.push(s); } }
+  for (const s of soups) { if (!s?.length) continue; try { parts.push(await toManifold(s)); } catch { try { parts.push(await toManifold(heal(s))); report.healed = (report.healed || 0) + 1; } catch { loose.push(s); } } }
   report.loose = loose.length;
   if (!parts.length) return { soup: concat(loose), merged: false };
   const u = parts.length === 1 ? parts[0] : w.Manifold.union(parts);
@@ -83,10 +83,11 @@ export async function unionSoups(soups, report = {}) {
   return { soup: loose.length ? concat([soup, ...loose]) : soup, merged: true };
 }
 
-export async function subtractSoups(base, cutters) {
+export async function subtractSoups(base, cutters, report = {}) {
   const w = await loadManifold();
   const b = await toManifold(base), cs = [];
-  for (const s of cutters) { try { cs.push(await toManifold(s)); } catch { /* overslaan */ } }
+  report.skipped = 0;
+  for (const s of cutters) { try { cs.push(await toManifold(s)); } catch { report.skipped++; } }
   if (!cs.length) { const r = fromManifold(b); b.delete(); return r; }
   const c = cs.length === 1 ? cs[0] : w.Manifold.union(cs);
   const r = b.subtract(c), out = fromManifold(r);
@@ -95,3 +96,16 @@ export async function subtractSoups(base, cutters) {
 }
 
 function concat(list) { const n = list.reduce((s, a) => s + a.length, 0), o = new Float32Array(n); let k = 0; for (const a of list) { o.set(a, k); k += a.length; } return o; }
+
+// Herstel voor een gesloten onderdeel dat net niet manifold is (bijv. samenvallende punten na aansluiten op de scan):
+// facetten op niet-manifold randen weg, platte facetten weg, gaten dichten, oriënteren.
+export function heal(soup) {
+  let m = clean(weld(soup, 1e-4)).mesh;
+  for (let pass = 0; pass < 3; pass++) {
+    const bad = new Set(); for (const e of edgeMap(m).values()) if (e.count > 2) e.faces.forEach(f => bad.add(f));
+    if (!bad.size) break;
+    const f = m.indices, keep = []; for (let i = 0; i < f.length / 3; i++) if (!bad.has(i)) keep.push(f[i * 3], f[i * 3 + 1], f[i * 3 + 2]);
+    m = fillHoles(compact({ positions: m.positions, indices: Uint32Array.from(keep) })).mesh;
+  }
+  return toSoup(repair(toSoup(m), { fill: true, tolerance: 1e-5 }).mesh);
+}

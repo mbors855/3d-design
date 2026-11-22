@@ -1,5 +1,5 @@
 // Scanvolgende plaat: offset van een open kaakoppervlak tot een gesloten schaal.
-import { weld, clean, orient, flipAll, boundaryLoops, fillHoles, vertexNormals, loopLength, tidySheet } from './mesh.js';
+import { weld, clean, orient, flipAll, boundaryLoops, fillHoles, vertexNormals, loopLength, tidySheet, toSoup, pointToSurfaceDistances } from './mesh.js';
 
 export function shell(soup, { gap = 0, wall = 2, reverse = false, draftAngle = null, smoothing = 2, allowNegativeGap = false, maxScale = 1.3 } = {}, report = {}) {
   if (!Number.isFinite(gap) || (gap < 0 && !allowNegativeGap) || !Number.isFinite(wall) || wall <= 0) throw Error('Vul een geldige ruimte en positieve dikte in.');
@@ -42,6 +42,28 @@ export function shell(soup, { gap = 0, wall = 2, reverse = false, draftAngle = n
     for (let j = 0; j < 3; j++) { const i = v * 3 + j; inner[i] = positions[i] + normals[i] * gap * k; outer[i] = positions[i] + normals[i] * (gap + wall) * k; }
   }
   const rim = loops[0];
+  // Ruimte exact maken (nauwkeurigheid 0,05 mm): de verschuiving langs de puntnormaal komt in holtes te dicht bij
+  // en op bolle delen te ver van de scan. Per punt de echte afstand tot het (onverschoven) oppervlak meten en
+  // binnen- en buitenkant samen bijstellen, zodat de wanddikte gelijk blijft.
+  report.gapCorrected = 0;
+  if (gap > 0) {
+    const surfaceSoup = toSoup(work), onRim = new Uint8Array(vCount); for (const v of rim) onRim[v] = 1;
+    for (let it = 0; it < 4; it++) {
+      const d = pointToSurfaceDistances(inner, surfaceSoup, { maxDist: gap + 2 });
+      let changed = 0;
+      for (let v = 0; v < vCount; v++) {
+        if (!Number.isFinite(d[v])) continue;
+        let delta = 0;
+        if (d[v] < gap - 0.01) delta = gap - d[v];
+        else if (d[v] > gap + 0.03 && !onRim[v]) delta = -(d[v] - gap) * 0.5;
+        if (!delta) continue;
+        delta = Math.max(-0.5, Math.min(0.5, delta)); changed++;
+        for (let j = 0; j < 3; j++) { const i = v * 3 + j; inner[i] += normals[i] * delta; outer[i] += normals[i] * delta; }
+      }
+      report.gapCorrected = Math.max(report.gapCorrected, changed);
+      if (!changed) break;
+    }
+  }
   const out = new Float32Array((f.length / 3 * 2 + rim.length * 2) * 9);
   let o = 0;
   const put = (arr, v) => { out[o++] = arr[v * 3]; out[o++] = arr[v * 3 + 1]; out[o++] = arr[v * 3 + 2]; };

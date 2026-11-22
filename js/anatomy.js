@@ -22,7 +22,7 @@ import { weld, toSoup, vertexNormals } from './mesh.js';
 export const ZONE = { none: 0, primary: 1, secondary: 2, relief: 3, seal: 4, border: 5 };
 export const ZONE_LABEL = { 1: 'Drukdragend (primair)', 2: 'Drukdragend (secundair)', 3: 'Ontlasten', 4: 'Afsluiting (post-dam / pad)', 5: 'Randgebied (plooi)' };
 export const RULES = {
-  lepel: { short: 2.0, posterior: 2.5, label: 'Individuele lepel: 2 mm korter dan de plooi, achter 2,5 mm voorbij de A-lijn' },
+  lepel: { short: 2.0, posterior: 2.5, padCover: 1, label: 'Individuele lepel: 2 mm korter dan de plooi (ruimte voor randvormen), BK 2,5 mm voorbij de A-lijn, OK over de hele retromolaire pad' },
   beetplaat: { short: 0.5, posterior: 0, label: 'Beetplaat: tot in de plooi (0,5 mm marge), achter tot de A-lijn / ⅔ retromolaire pad' },
   basis: { short: 0, posterior: 0, label: 'Prothesebasis: tot de functionele plooidiepte, achter tot de A-lijn / ⅔ retromolaire pad' },
 };
@@ -209,13 +209,28 @@ const fmt1 = v => v.toFixed(1).replace('.', ',');
 
 const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
 
-/** Punt op het profiel waar de hoogte de plooidiepte + 'short' bereikt (vanaf de plooi terug naar de kam). */
-function borderPoint(side, short) {
+/** Punt op het profiel waar de hoogte de plooidiepte + 'short' bereikt (vanaf de plooi terug naar de kam).
+ * Is de plooi niet gescand (profiel loopt door tot de scanrand of het aangevulde deel), dan geldt de verwachte
+ * plooidiepte 'expected' (mm onder de kam, uit de rest van de kaak of uit de literatuur). */
+function borderPoint(side, short, crestH = null, expected = null) {
   if (!side?.pts?.length) return null;
-  const s = side.sulcus ?? side.pts.at(-1), iS = side.pts.indexOf(s);
+  let s = side.sulcus ?? side.pts.at(-1);
+  if (side.edge && expected != null && crestH != null) {
+    const target = crestH - expected, hit = side.pts.find(q => q.h <= target);
+    s = hit ?? side.pts.at(-1);
+  }
+  const iS = side.pts.indexOf(s);
   if (short <= 0) return s.p;
   for (let k = iS; k >= 0; k--) if (side.pts[k].h >= s.h + short) return side.pts[k].p;
   return side.pts[0].p;
+}
+
+/** Verwachte plooidiepte (mm onder de kam): mediaan van de profielen waar de plooi wél gescand is, anders literatuur/labwaarde. */
+export const DEFAULT_SULCUS = { upper: 8, lower: 7 };
+export function expectedSulcus(analysis, side = 'buccal') {
+  const d = analysis.profiles.filter(p => !p.missing && p[side]?.sulcus && !p[side].edge).map(p => p.h - p[side].sulcus.h);
+  if (d.length >= Math.max(5, analysis.profiles.length * 0.2)) return { depth: median(d), source: 'gemeten' };
+  return { depth: DEFAULT_SULCUS[analysis.frame.jaw] - (side === 'lingual' ? 1 : 0), source: 'standaard' };
 }
 
 /**
@@ -225,8 +240,13 @@ function borderPoint(side, short) {
 export function proposeOutline(cast, analysis, kind = 'beetplaat', { frenumRelief = 1.0, padCover = 2 / 3, padLength = 10, smooth = 2, maxPoints = 140 } = {}) {
   const { frame, profiles, frena, ends } = analysis, upper = frame.jaw === 'upper', rule = RULES[kind] ?? RULES.beetplaat;
   const H = p => dot(sub(p, frame.O), frame.N);
-  const extra = (side, i) => { const f = frena.find(q => q.side === side && Math.abs(q.i - i) <= 1); return f ? f.deficit * (Math.abs(f.i - i) === 0 ? 1 : 0.55) + frenumRelief : 0; };
-  const sideLine = side => profiles.map((p, i) => p.missing ? null : borderPoint(p[side], rule.short + extra(side, i))).filter(Boolean);
+  // frenum-uitsparing: labiaal smal, buccaal breder (het buccale frenum beweegt mee naar voren en achteren)
+  const extra = (side, i) => {
+    const f = frena.find(q => q.side === side && Math.abs(q.i - i) <= (side === 'buccal' && Math.abs(q.t) > 0.2 ? 2 : 1)); if (!f) return 0;
+    const k = Math.abs(f.i - i); return f.deficit * (k === 0 ? 1 : k === 1 ? 0.6 : 0.3) + frenumRelief;
+  };
+  const exp = { buccal: expectedSulcus(analysis, 'buccal'), lingual: upper ? null : expectedSulcus(analysis, 'lingual') };
+  const sideLine = side => profiles.map((p, i) => p.missing ? null : borderPoint(p[side], rule.short + extra(side, i), p.h, exp[side]?.depth)).filter(Boolean);
   let buccal = sideLine('buccal');
   if (buccal.length < 5) throw Error('Te weinig vestibulum gevonden. Controleer de referentiepunten (stap Analyse) of teken de omtrek met de hand.');
   buccal = smoothLine(buccal, smooth);
@@ -258,7 +278,7 @@ export function proposeOutline(cast, analysis, kind = 'beetplaat', { frenumRelie
   loop = loop.filter(Boolean);
   // uitdunnen tot maxPoints, gelijkmatig langs de lijn
   if (loop.length > maxPoints) { const step = loop.length / maxPoints; loop = Array.from({ length: maxPoints }, (_, i) => loop[Math.floor(i * step)]); }
-  return { points: loop, rule: rule.label, frena: frena.length, minHeight: Math.min(...loop.map(H)) };
+  return { points: loop, rule: rule.label, frena: frena.length, minHeight: Math.min(...loop.map(H)), sulcus: exp };
 }
 function smoothLine(pts, it) {
   let a = pts.map(p => p.slice());
