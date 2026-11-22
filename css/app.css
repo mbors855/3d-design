@@ -160,3 +160,18 @@ button.mini { padding: 3px 7px; font-size: 12px; }
 input.tiny { width: 58px; padding: 3px 5px; display: inline-block; margin: 0 2px; }
 .check.inline { display: inline-flex; margin: 0 0 0 8px; }
 details summary { cursor: pointer; margin: 10px 0 4px; color: #8fc3cf; font-weight: 600; }
+
+/* lagenpaneel */
+.layers-panel { position: relative; font-size: 12px; color: var(--muted); }
+.layers-panel summary { cursor: pointer; padding: 4px 8px; border: 1px solid #2b4a60; border-radius: 12px; list-style: none; user-select: none; }
+.layers-panel[open] summary { color: var(--text, #e8f1f6); }
+.layers-panel[open] > .layer-row:first-of-type { margin-top: 6px; }
+.layers-panel .layer-row { display: flex; align-items: center; gap: 8px; padding: 2px 4px; }
+.layers-panel .layer-row label { display: inline-flex; align-items: center; gap: 4px; min-width: 92px; cursor: pointer; }
+.layers-panel input[type=range] { width: 110px; accent-color: var(--accent); }
+.layers-panel { position: absolute; right: 8px; top: 8px; z-index: 6; background: rgba(13, 24, 34, .9); border-radius: 10px; }
+.layers-panel[open] { border: 1px solid #2b4a60; padding: 4px 8px 6px; }
+.layers-panel[open] summary { border: 0; padding: 2px 4px; }
+.wtool[aria-pressed=true], #waxEdit[aria-pressed=true] { outline: 2px solid var(--accent); }
+.inline-field { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.inline-field input { width: 52px; }

@@ -17,6 +17,7 @@ import { takeHandoff } from './handoff.js';
 import { Sculpt, TOOLS } from './sculpt.js';
 import { analyzeScan, repairScan, extendBorder, keepComponentNear } from './prep.js';
 import { trimByOutline } from './trim.js';
+import { WaxLayer } from './wax.js';
 import { analyseArch, proposeOutline, tissueZones, idealizeScan, ZONE_LABEL, RULES, crestArch, setupArch, occlusalPlaneRule, staticsReport } from './anatomy.js';
 
 const VERSION = '63.0';
@@ -38,7 +39,7 @@ const workSteps = () => WORK_STEPS[$('work').value === 'partieel' ? 'prothese' :
 const isDenture = () => ['prothese', 'partieel'].includes($('work').value);
 const LM_COLORS = { R: 0xff6b6b, M: 0xffd166, L: 0x4dabf7 };
 const MARK_COLORS = { boundary: 0x55d8f5, bar: 0xff6877, reference: 0xffce72 };
-const MODE_TEXT = { contourHint: ' · slepen = draaien, knijpen/scrollen = zoomen', sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Omtrek tekenen: tik punten op de scan, tik op het eerste punt om te sluiten', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
+const MODE_TEXT = { wax: 'Was bewerken: sleep over scan of was · buiten de scan draaien · Shift keert toevoegen/wegnemen om', contourHint: ' · slepen = draaien, knijpen/scrollen = zoomen', sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Omtrek tekenen: tik punten op de scan, tik op het eerste punt om te sluiten', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
 
 const S = {
   scan: null, scanName: 'scan.stl', history: [], future: [],
@@ -101,9 +102,9 @@ function showStep(id) {
   for (const p of document.querySelectorAll('.panel')) p.classList.toggle('active', p.dataset.panel === id);
   for (const b of document.querySelectorAll('[data-step]')) b.classList.toggle('active', b.dataset.step === id);
   $('contourBar').classList.toggle('hide', !CONTOUR_KINDS.includes(id));
-  if (S.mode !== 'orbit' && !(S.mode === 'contour' && CONTOUR_KINDS.includes(id)) && !(S.mode === 'sculpt' && id === 'bewerken')) setMode('orbit');
+  if (S.mode !== 'orbit' && !(S.mode === 'contour' && CONTOUR_KINDS.includes(id)) && !(S.mode === 'sculpt' && id === 'bewerken') && !(S.mode === 'wax' && id === 'analyse')) setMode('orbit');
   if (id !== 'opstelling') selectTooth(null);
-  viewer.groups.teeth.visible = isDenture() && $('layerTeeth').checked && !(['basis', 'controle', 'productie'].includes(id) && (S.plates.monoblock || S.plates.basis));
+  applyLayers();
   if (id === 'productie') renderOutputs();
   if (id === 'controle') runChecks();
   updateContourUI(); refreshScanColors(); refreshOverlay(); syncPlateVisibility(); updateDone();
@@ -154,6 +155,7 @@ for (const e of document.querySelectorAll('[data-persist]')) e.addEventListener(
 
 // ---------- scan ----------
 function setScan(soup, name, { reset = true, designedFrom = null } = {}) {
+  if (S.wax && S.wax.soup !== soup) { S.wax = null; S.waxSoup = null; viewer.clearGroup('wax'); }
   S.scan = soup; S.scanName = name || S.scanName; S.designedFrom = designedFrom;
   viewer.setScan(soup, { keepView: !reset });
   $('emptyHint').classList.toggle('hide', !!soup);
@@ -162,7 +164,7 @@ function setScan(soup, name, { reset = true, designedFrom = null } = {}) {
     S.contours.reset(); clearPlates(); clearTeeth();
   } else reopenContours();
   S.undercut = null;
-  viewer.setScanOpacity($('layerScanLight').checked);
+  applyLayers();
   updateScanInfo(); refreshScanColors(); refreshOverlay(); updateDone();
 }
 function reopenContours() { for (const k of S.contours.shapes.keys()) S.contours.invalidate(k); updateContourUI(); }
@@ -282,11 +284,21 @@ for (const b of document.querySelectorAll('[data-view]')) b.onclick = () => view
 $('fitBtn').onclick = () => viewer.fit();
 $('zoomIn').onclick = () => viewer.zoom(0.8);
 $('zoomOut').onclick = () => viewer.zoom(1.25);
-$('layerScan').onchange = e => { viewer.groups.scan.visible = e.target.checked; viewer.render(); };
-$('layerScanLight').onchange = e => viewer.setScanOpacity(e.target.checked);
-$('layerAntagonist').onchange = e => { viewer.groups.antagonist.visible = e.target.checked; viewer.render(); };
-$('layerPlates').onchange = e => { viewer.groups.plates.visible = e.target.checked; viewer.render(); };
-$('layerTeeth').onchange = e => { viewer.groups.teeth.visible = e.target.checked; viewer.render(); };
+// Lagen: elke laag apart aan/uit en met een fader voor de doorzichtigheid.
+const LAYERS = { Scan: 'scan', Wax: 'wax', Plates: 'plates', Teeth: 'teeth', Antagonist: 'antagonist' };
+function setGroupOpacity(group, op) {
+  group.traverse(o => { if (!o.isMesh || !o.material) return; const m = o.material; m.userData.baseOpacity ??= m.opacity ?? 1; const v = Math.min(1, m.userData.baseOpacity * op); m.opacity = v; m.transparent = v < 0.999; m.depthWrite = v >= 0.6; m.needsUpdate = true; });
+}
+function applyLayers() {
+  for (const [id, g] of Object.entries(LAYERS)) {
+    const group = viewer.groups[g]; if (!group) continue;
+    let on = $('layer' + id).checked;
+    if (g === 'teeth') on = on && isDenture() && !(['basis', 'controle', 'productie'].includes(S.step) && (S.plates.monoblock || S.plates.basis));
+    group.visible = on; setGroupOpacity(group, num('op' + id) / 100);
+  }
+  viewer.render();
+}
+for (const id of Object.keys(LAYERS)) { $('layer' + id).addEventListener('change', applyLayers); $('op' + id).addEventListener('input', applyLayers); }
 $('focusBtn').onclick = () => { document.body.classList.toggle('focus'); setTimeout(() => viewer.resize(), 50); };
 $('helpBtn').onclick = () => $('helpDialog').showModal();
 
@@ -299,6 +311,7 @@ function setMode(mode, arg = null) {
   $('modeChip').classList.toggle('hide', mode === 'orbit');
   $('modeText').textContent = (mode === 'landmark' ? MODE_TEXT.landmark + ({ R: 'rechts distaal', M: 'midden (incisief)', L: 'links distaal' })[arg] : mode === 'mark' ? (arg === 'reference' ? MODE_TEXT.reference : MODE_TEXT.mark) : MODE_TEXT[mode] || '') + (['contour', 'landmark'].includes(mode) || (mode === 'mark' && arg === 'reference') ? MODE_TEXT.contourHint : '');
   $('contourToggle').setAttribute('aria-pressed', String(mode === 'contour'));
+  $('waxEdit').setAttribute('aria-pressed', String(mode === 'wax'));
   $('contourToggle').textContent = mode === 'contour' ? '↻ Draaien' : '✏️ Teken omtrek';
   for (const b of document.querySelectorAll('[data-landmark]')) b.setAttribute('aria-pressed', String(mode === 'landmark' && b.dataset.landmark === arg));
   for (const b of document.querySelectorAll('[data-mark]')) b.setAttribute('aria-pressed', String(mode === 'mark' && b.dataset.mark === arg));
@@ -367,6 +380,7 @@ canvas.addEventListener('pointercancel', e => { endContourDrag(e); }, { capture:
 canvas.addEventListener('pointerdown', e => {
   pointers.set(e.pointerId, [e.clientX, e.clientY]);
   if (S.mode === 'sculpt') { if (pointers.size === 1 && e.button === 0) sculptDown(e); else sculptUp(); return; }
+  if (S.mode === 'wax') { if (pointers.size === 1 && e.button === 0) waxDown(e); else waxUp(); return; }
   if (viewer.gizmo.dragging || viewer.gizmo.axis) { press = null; return; }
   press = pointers.size === 1 ? { x: e.clientX, y: e.clientY, id: e.pointerId, type: e.pointerType } : null;
   if (S.mode === 'mark' && S.modeArg !== 'reference' && pointers.size === 1 && e.button === 0) {
@@ -377,6 +391,7 @@ canvas.addEventListener('pointerdown', e => {
 canvas.addEventListener('pointermove', e => {
   if (pointers.has(e.pointerId)) pointers.set(e.pointerId, [e.clientX, e.clientY]);
   if (S.mode === 'sculpt') { sculptMove(e); return; }
+  if (S.mode === 'wax') { waxMove(e); return; }
   if (!stroke || pointers.size !== 1) return;
   const hit = viewer.pick(e.clientX, e.clientY);
   if (!hit) return;
@@ -386,6 +401,7 @@ canvas.addEventListener('pointermove', e => {
 function endPointer(e) {
   pointers.delete(e.pointerId);
   if (S.mode === 'sculpt') { sculptUp(); press = null; return; }
+  if (S.mode === 'wax') { waxUp(); press = null; return; }
   if (stroke) { if (stroke.points.length < 2) S.marks.pop(); stroke = null; updateMarkInfo(); refreshOverlay(); press = null; return; }
   if (press && press.id === e.pointerId && Math.hypot(e.clientX - press.x, e.clientY - press.y) < 8 && e.type === 'pointerup') handleTap(e, press.type);
   press = null;
@@ -555,8 +571,10 @@ function surfaceFor(kind) {
   const s = S.contours.get(kind);
   if (s?.points.length && !s.closed) throw Error('Sluit eerst de omtrek door op het eerste punt te tikken.');
   if (!s?.closed) throw Error('Er is nog geen omtrek. Tik op 🧭 Automatisch of teken de omtrek: zonder omtrek wordt geen plaat gemaakt.');
-  return S.contours.surface(kind, S.scan, S.designedFrom ?? null);
+  return S.contours.surface(kind, scanForPlates(), S.designedFrom ?? null);
 }
+// Scan + was (als er was ligt); zelfde facetvolgorde als de scan.
+function scanForPlates() { return S.wax && S.wax.soup === S.scan && S.waxSoup ? S.waxSoup : S.scan; }
 // Alles wat door het pasvlak heen steekt (wortels van tanden, onderkant van wal/gingivaband/handvat) wegsnijden met
 // een 'weefselblok' waarvan één zijde exact het scanoppervlak is (iets ruimer dan de omtrek). Zo blijft het pasvlak gelijk aan de scan.
 async function clipToTissue(kind, soup, reverse) {
@@ -565,7 +583,7 @@ async function clipToTissue(kind, soup, reverse) {
   let lastErr = null;
   for (const [margin, wall] of [[1.5, 8], [1, 4], [0.6, 2.5]]) {
     try {
-      const wide = trimByOutline(S.scan, s.points, s.axis, { margin }).soup;
+      const wide = trimByOutline(scanForPlates(), s.points, s.axis, { margin }).soup;
       const block = shell(wide, { gap: 0.005, wall, reverse: !reverse }); // 0,005 mm in het weefsel: geen samenvallende vlakken
       const rep = {}, out = await subtractSoups(soup, [block], rep);
       if (out?.length && !rep.skipped) return out;
@@ -575,6 +593,7 @@ async function clipToTissue(kind, soup, reverse) {
   toast('Let op: delen die door het pasvlak steken konden niet automatisch worden weggesneden. Controleer het pasvlak.', true);
   return soup;
 }
+function waxNote() { const st = S.wax && S.wax.soup === S.scan ? S.wax.stats() : null; return st?.points ? ` · was op ${int(st.points)} punten (max ${fmt(st.max, 2)} mm): daar ligt de plaat bewust vrij van de scan` : ''; }
 // Pasvlak-controle: afstand scan → plaat t.o.v. de ingestelde ruimte; het aangevulde (ontworpen) deel telt niet mee.
 S.fit = {};
 function fitCheck(kind, surface, soup, gap) {
@@ -602,7 +621,7 @@ function showPlate(kind, soup, color) {
   const old = viewer.groups.plates.getObjectByName(kind);
   if (old) { viewer.groups.plates.remove(old); old.geometry.dispose(); old.material.dispose(); }
   if (soup) { const m = makeMesh(soup, color, { opacity: kind === 'basisTeeth' ? 1 : 0.9, roughness: kind === 'basisTeeth' ? 0.32 : 0.45 }); m.name = kind; viewer.groups.plates.add(m); }
-  syncPlateVisibility();
+  syncPlateVisibility(); applyLayers();
 }
 // Toon per stap alleen het bijbehorende werkstuk; in de latere stappen de prothese.
 function syncPlateVisibility() {
@@ -642,7 +661,7 @@ async function buildLepel() {
     soup = (await unionSoups([soup, ...extras])).soup;
     if (cutters.length) soup = await subtractSoups(soup, cutters);
   }
-  const { text } = plateSummary(soup), fitTxt = fitCheck('lepel', surface, shellSoup, gap);
+  const { text } = plateSummary(soup), fitTxt = fitCheck('lepel', surface, shellSoup, gap) + waxNote();
   S.plates.lepel = { soup, name: 'Individuele lepel', file: `LEPEL_${safe($('caseName').value)}.stl` };
   showPlate('lepel', soup, COLORS.plate.lepel);
   result('lepelResult', `Lepel klaar: ${text}${fitTxt}${rep.holesFilled ? ` · ${rep.holesFilled} gaten in de scan gedicht` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('lepel', 'Lepel-STL')}`);
@@ -652,8 +671,10 @@ $('lepelBuild').onclick = () => busy('Lepel berekenen…', buildLepel);
 $('biteFit').addEventListener('change', () => { $('biteDraft').disabled = $('biteFit').value !== 'block'; });
 async function buildBeet() {
   const surface = surfaceFor('beetplaat'), gap = num('beetGap'), wall = num('beetWall'), reverse = $('beetReverse').checked;
-  const draft = $('biteFit').value === 'block' ? num('biteDraft') : null, rep = {};
-  let soup = shell(surface, { gap, wall, reverse, draftAngle: draft }, rep);
+  if ($('biteFit').value === 'block' && !(S.wax?.stats().points)) { waxBlockout(); }
+  const draft = null, rep = {};
+  const surf2 = surfaceFor('beetplaat'); // na eventueel uitblokken: scan + was
+  let soup = shell(surf2, { gap, wall, reverse }, rep);
   const extras = [], notes = [];
   if ($('rimOn').checked && needFrame('Beetwal')) {
     const rs = $('rimRule').checked ? ruleSetup({ forceCrest: true, extend: 0 }) : null;
@@ -668,7 +689,7 @@ async function buildBeet() {
     soup = (await unionSoups([soup, ...extras])).soup;
     if (!draft) soup = await clipToTissue('beetplaat', soup, reverse);
   }
-  const { text } = plateSummary(soup), fitTxt = draft ? '' : fitCheck('beetplaat', surface, soup, gap);
+  const { text } = plateSummary(soup), fitTxt = fitCheck('beetplaat', surf2, soup, gap) + waxNote();
   S.plates.beetplaat = { soup, name: 'Beetplaat', file: `BEETPLAAT_${safe($('caseName').value)}.stl` };
   showPlate('beetplaat', soup, COLORS.plate.beetplaat);
   result('beetResult', `Beetplaat klaar: ${text}${fitTxt}${draft ? ` · uitblokken ${draft}° (${rep.changed} punten, max ${fmt(rep.maxLift, 2)} mm)` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('beetplaat', 'Beetplaat-STL')}`);
@@ -1374,3 +1395,42 @@ function prepareScan() {
   return after;
 }
 $('prepRun').onclick = () => busy('Scan voorbereiden…', async () => { prepareScan(); status('Scan voorbereid. Controleer het paarse (aangevulde) deel en ga verder met de omtrek.'); });
+
+// ---------- 🕯 was (ondersnijdingen opvullen, bewerkbaar) ----------
+let waxTool = 'add', waxStroke = null, waxQueued = null;
+function ensureWax() { if (!S.scan) throw Error('Laad eerst een scan.'); if (!S.wax || S.wax.soup !== S.scan) S.wax = new WaxLayer(S.scan, contourAxis()); return S.wax; }
+function waxChanged(final = false) {
+  S.waxSoup = S.wax.stats().points ? S.wax.waxedSoup() : null;
+  viewer.clearGroup('wax');
+  const d = S.wax.displaySoup();
+  if (d.length) { const m = makeMesh(d, 0xf0b25a, { roughness: 0.65, opacity: 1 }); m.material.polygonOffset = true; m.material.polygonOffsetFactor = -2; m.material.polygonOffsetUnits = -2; m.name = 'was'; viewer.groups.wax.add(m); }
+  applyLayers();
+  if (final) {
+    const st = S.wax.stats();
+    $('waxInfo').textContent = st.points ? `Was op ${int(st.points)} punten · max ${fmt(st.max, 2)} mm · gem. ${fmt(st.mean, 2)} mm. De plaat wordt op scan + was gebouwd.` : 'Geen was. De plaat ligt exact op de scan.';
+    for (const k of CONTOUR_KINDS) { S.contours.invalidate(k); if (S.plates[k]) { delete S.plates[k]; showPlate(k, null); } }
+    refreshScanColors(); updateDone();
+  }
+}
+function waxBlockout() { const w = ensureWax(); const r = w.blockout(num('waxAngle')); waxChanged(true); return r; }
+$('waxRun').onclick = () => busy('Ondersnijdingen opvullen…', async () => { const r = waxBlockout(); status(r.changed ? `Was aangebracht op ${int(r.changed)} punten (max ${fmt(r.max, 2)} mm, uitblokhoek ${fmt(num('waxAngle'))}°). Bewerk met ✋ Was bewerken.` : 'Geen ondersnijdingen gevonden langs de insteekas.'); });
+$('waxClear').onclick = () => { if (!S.wax) return; S.wax.clear(); waxChanged(true); };
+$('waxUndo').onclick = () => { if (S.wax?.undo()) waxChanged(true); };
+$('waxRedo').onclick = () => { if (S.wax?.redo()) waxChanged(true); };
+$('waxEdit').onclick = () => { try { ensureWax(); } catch (e) { return status(e.message, true); } setMode(S.mode === 'wax' ? 'orbit' : 'wax'); };
+for (const b of document.querySelectorAll('[data-wax]')) b.onclick = () => { waxTool = b.dataset.wax; for (const x of document.querySelectorAll('[data-wax]')) x.setAttribute('aria-pressed', String(x === b)); if (S.mode !== 'wax') $('waxEdit').click(); };
+function waxHit(e) { const objs = [viewer.scanMesh, ...viewer.groups.wax.children].filter(Boolean); return viewer.pick(e.clientX, e.clientY, objs); }
+function waxDab(p) { S.wax.brush(waxStroke.tool, p, { radius: num('waxRadius'), strength: num('waxStrength') }); waxStroke.last = p; waxChanged(false); }
+function waxDown(e) {
+  const hit = waxHit(e); if (!hit || !S.wax) return;
+  viewer.controls.enabled = false; S.wax.snap();
+  const tool = e.shiftKey && waxTool !== 'smooth' ? (waxTool === 'add' ? 'remove' : 'add') : waxTool;
+  waxStroke = { tool, last: null }; waxDab(hit.point.toArray());
+}
+function waxMove(e) {
+  if (!waxStroke) return;
+  waxQueued = { clientX: e.clientX, clientY: e.clientY };
+  requestAnimationFrame(() => { const q = waxQueued; waxQueued = null; if (!q || !waxStroke) return; const hit = waxHit(q); if (!hit) return; const p = hit.point.toArray(), l = waxStroke.last;
+    if (!l || Math.hypot(p[0] - l[0], p[1] - l[1], p[2] - l[2]) >= num('waxRadius') * 0.3) waxDab(p); });
+}
+function waxUp() { viewer.controls.enabled = true; if (waxStroke) { waxStroke = null; waxChanged(true); } }

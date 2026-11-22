@@ -286,4 +286,19 @@ await test('aanvullen: scan die vóór de plooi ophoudt wordt verlengd (ontworpe
   const reach = s => Math.max(...s.profiles.filter(p => p.buccal?.pts?.length).map(p => p.buccal.pts.at(-1).d));
   assert.ok(reach(an3) > reach(an2) + 3, `verder gescand: ${reach(an2).toFixed(1)} → ${reach(an3).toFixed(1)} mm`);
 });
+
+await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken, scan onveranderd', async () => {
+  const { WaxLayer } = await import(J + 'wax.js');
+  const { soup } = anatomicJaw({ jaw: 'upper' });
+  const a = 30 * Math.PI / 180, axis = [0, Math.sin(a), Math.cos(a)];
+  const overhang = s2 => { let n = 0, tot = 0; for (let i = 0; i < s2.length; i += 9) { const u = [s2[i + 3] - s2[i], s2[i + 4] - s2[i + 1], s2[i + 5] - s2[i + 2]], v = [s2[i + 6] - s2[i], s2[i + 7] - s2[i + 1], s2[i + 8] - s2[i + 2]];
+    const nn = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], l = Math.hypot(...nn); if (l < 1e-9) continue; tot += l; if ((nn[0] * axis[0] + nn[1] * axis[1] + nn[2] * axis[2]) / l < -0.02) n += l; } return n / tot; };
+  const w = new WaxLayer(soup, axis), before = overhang(soup), r = w.blockout(2);
+  assert.ok(before > 0.005 && r.changed > 50, `ondersnijding ${(before * 100).toFixed(1)}%, ${r.changed} punten was`);
+  const after = overhang(w.waxedSoup());
+  assert.ok(after < before * 0.4, `na uitblokken ${(after * 100).toFixed(2)}% (was ${(before * 100).toFixed(1)}%)`);
+  const st = w.stats(); w.snap(); w.brush('remove', [0, 30, 0], { radius: 50, strength: 100 }); assert.equal(w.stats().points, 0, 'wegnemen tot 0');
+  w.undo(); assert.equal(w.stats().points, st.points, 'ongedaan maken');
+  assert.deepEqual(Array.from(w.soup.slice(0, 30)), Array.from(soup.slice(0, 30)), 'scan onveranderd');
+});
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

@@ -172,7 +172,7 @@ export class ContourSet {
   /** Uitgesneden oppervlak (exact langs de lijn) en de betrokken facetindices voor de kleuring. */
   surface(kind, soup, splitAt = null) {
     const s = this.get(kind); if (!s?.closed) throw Error('Sluit eerst de omtrek.');
-    if (!s.surface || s.splitAt !== splitAt) { const r = trimByOutline(soup, s.points, s.axis, { splitAt }); s.surface = r.soup; s.facets = r.faces; s.trimReport = r.report; s.splitAt = splitAt; s.splitIndex = r.splitIndex; }
+    if (!s.surface || s.splitAt !== splitAt || s.src !== soup) { s.src = soup; const r = trimByOutline(soup, s.points, s.axis, { splitAt }); s.surface = r.soup; s.facets = r.faces; s.trimReport = r.report; s.splitAt = splitAt; s.splitIndex = r.splitIndex; }
     return s.surface;
   }
   toJSON() { return [...this.shapes].map(([kind, s]) => ({ kind, points: s.points, closed: s.closed, axis: s.axis })); }

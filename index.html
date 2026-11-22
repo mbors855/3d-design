@@ -42,13 +42,6 @@
       <button id="zoomIn" aria-label="Inzoomen">＋</button>
       <button id="zoomOut" aria-label="Uitzoomen">－</button>
       <span class="sep"></span>
-      <div class="layers" role="group" aria-label="Lagen">
-        <label class="chip"><input type="checkbox" id="layerScan" checked> Scan</label>
-        <label class="chip"><input type="checkbox" id="layerScanLight"> Transparant</label>
-        <label class="chip"><input type="checkbox" id="layerAntagonist" checked> Antagonist</label>
-        <label class="chip"><input type="checkbox" id="layerPlates" checked> Werkstukken</label>
-        <label class="chip"><input type="checkbox" id="layerTeeth" checked> Tanden</label>
-      </div>
     </div>
 
     <div id="contourBar" class="toolbar sub hide" role="toolbar" aria-label="Plaatomtrek">
@@ -63,6 +56,15 @@
     </div>
 
     <div id="viewport">
+      <details class="layers-panel" id="layersPanel">
+        <summary>🗂 Lagen</summary>
+        <div class="layer-row"><label><input type="checkbox" id="layerScan" checked> Scan</label><input type="range" id="opScan" min="0" max="100" value="100" aria-label="Doorzichtigheid scan"></div>
+        <div class="layer-row"><label><input type="checkbox" id="layerWax" checked> Was</label><input type="range" id="opWax" min="0" max="100" value="85" aria-label="Doorzichtigheid was"></div>
+        <div class="layer-row"><label><input type="checkbox" id="layerPlates" checked> Design</label><input type="range" id="opPlates" min="0" max="100" value="100" aria-label="Doorzichtigheid design"></div>
+        <div class="layer-row"><label><input type="checkbox" id="layerTeeth" checked> Tanden</label><input type="range" id="opTeeth" min="0" max="100" value="100" aria-label="Doorzichtigheid tanden"></div>
+        <div class="layer-row"><label><input type="checkbox" id="layerAntagonist" checked> Antagonist</label><input type="range" id="opAntagonist" min="0" max="100" value="60" aria-label="Doorzichtigheid antagonist"></div>
+      </details>
+
       <div id="modeChip" class="hide"><span id="modeText"></span><button id="modeExit" title="Terug naar draaien (Esc)">✕</button></div>
       <div id="emptyHint">Open een STL-scan of kies <b>Demo-kaak</b>, kies het werkstuk in de opdrachtbon en tik op <b>⚡ Alles automatisch</b>.</div>
       <div id="busy" class="hide"><div class="spinner"></div><span id="busyText">Bezig…</span></div>
@@ -161,9 +163,18 @@
         <button id="anaIdeal">✨ Pas scan aan</button>
         <p class="sub">Ontlasten verschuift het scanoppervlak naar de plaat toe (ruimte in de plaat); post-dam drukt een smalle band iets in (afsluitrand). ↶ Terug bij Scan &amp; mesh zet de originele scan terug.</p>
       </details>
-      <h4>Ondersnijdingen</h4>
+      <h4>Ondersnijdingen en was</h4>
       <div class="actions"><button id="undercutRun">Toon ondersnijdingen</button><button id="undercutClear">Verberg</button></div>
-      <div id="undercutInfo" class="sub">Rood = niet bereikbaar langs de occlusale richting (invoerrichting).</div>
+      <div id="undercutInfo" class="sub">Rood = niet bereikbaar langs de insteekas (occlusale richting).</div>
+      <div class="field"><label for="waxAngle">Uitblokhoek (°)</label><input id="waxAngle" type="number" min="0.5" max="15" step="0.5" value="2" data-persist></div>
+      <div class="actions"><button id="waxRun" class="primary">🕯 Ondersnijdingen opvullen met was</button><button id="waxClear">Wis was</button></div>
+      <div class="actions"><button id="waxEdit" aria-pressed="false">✋ Was bewerken</button><button data-wax="add" class="wtool" aria-pressed="true">Toevoegen</button><button data-wax="remove" class="wtool">Wegnemen</button><button data-wax="smooth" class="wtool">Gladmaken</button></div>
+      <div class="grid2">
+        <div class="field"><label for="waxRadius">Penseel (mm)</label><input id="waxRadius" type="range" min="0.5" max="8" step="0.5" value="2.5" data-persist></div>
+        <div class="field"><label for="waxStrength">Sterkte</label><input id="waxStrength" type="range" min="0.02" max="1" step="0.02" value="0.15" data-persist></div>
+      </div>
+      <div class="actions"><button id="waxUndo">↶ Terug</button><button id="waxRedo">↷ Vooruit</button></div>
+      <div id="waxInfo" class="sub">De was ligt boven de scan (oranje); de plaat wordt op scan + was gebouwd. Waar geen was ligt, is het pasvlak exact de scan.</div>
       <h4>Markeringen in 3D</h4>
       <div class="actions"><button data-mark="boundary" class="mk b">Randlijn</button><button data-mark="bar" class="mk s">Steg</button><button data-mark="reference" class="mk p">Referentiepunt</button></div>
       <div class="actions"><button id="markUndo">↶ Terug</button><button id="markRedo">↷ Vooruit</button><button id="markClear">Wis alles</button></div>
@@ -199,8 +210,8 @@
         <div class="field"><label for="beetWall">Basisdikte (mm)</label><input id="beetWall" type="number" min="1.5" max="6" step=".1" value="2" data-persist></div>
         <div class="field"><label for="beetGap">Afstand tot scan (mm)</label><input id="beetGap" type="number" min="0" max="3" step=".05" value="0" data-persist></div>
       </div>
-      <div class="field"><label for="biteFit">Aansluiting</label><select id="biteFit" data-persist><option value="exact">Exact op scan, zonder uitblokken</option><option value="block">Uitblokken langs de STL-Z-as</option></select></div>
-      <div class="field"><label for="biteDraft">Uitblokhoek (0–10°)</label><input id="biteDraft" type="number" min="0" max="10" step="0.5" value="2" data-persist></div>
+      <div class="field"><label for="biteFit">Aansluiting</label><select id="biteFit" data-persist><option value="exact">Exact op scan (was wordt meegenomen als die er is)</option><option value="block">Ondersnijdingen automatisch met was opvullen</option></select></div>
+      <div class="field hide"><label for="biteDraft">Uitblokhoek</label><input id="biteDraft" type="number" value="2"></div>
       <label class="check"><input type="checkbox" id="rimOn" data-persist> Met beetwal (vereist referentiepunten)</label>
       <div id="rimFields">
       <div class="grid2">
