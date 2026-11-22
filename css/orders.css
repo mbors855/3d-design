@@ -1,0 +1,64 @@
+body.orders-page { overflow: auto; height: auto; min-height: 100%; }
+.orders-page header { position: sticky; top: 0; z-index: 5; }
+.orders-page a.btn { color: inherit; text-decoration: none; }
+.op-wrap { max-width: 1180px; margin: 0 auto; padding: 18px 16px 60px; }
+.op-wrap h2 { font-size: 15px; margin: 28px 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); color: #dff5fa; }
+.op-drop { border: 2px dashed #2d5068; border-radius: 12px; padding: 28px 20px; text-align: center; background: var(--surface); }
+.op-drop.over { border-color: var(--accent); background: #13293a; }
+.op-drop h1 { font-size: 20px; margin: 0 0 8px; }
+.op-drop p { color: var(--muted); margin: 6px 0 14px; }
+.op-drop .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.sub { color: var(--muted); font-size: 12px; }
+.note { background: var(--surface2); border-radius: var(--radius); padding: 10px 12px; margin: 10px 0; }
+.op-progress { margin: 16px auto 0; max-width: 520px; text-align: left; }
+.op-progress .bar { height: 8px; background: #19303f; border-radius: 4px; overflow: hidden; }
+.op-progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+.op-progress span { display: block; font-size: 12px; color: var(--muted); margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.op-tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.op-tile b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+.op-tile span { color: var(--muted); font-size: 12px; }
+.op-tile.bad b { color: var(--bad); } .op-tile.warn b { color: var(--warn); } .op-tile.good b { color: var(--good); }
+.op-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 12px; position: sticky; top: 54px; background: var(--bg); padding: 8px 0; z-index: 4; }
+.op-toolbar .grow { flex: 1; }
+.op-toolbar input[type=search] { background: var(--surface2); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; min-width: 200px; flex: 1 1 200px; max-width: 320px; }
+.seg { display: inline-flex; border: 1px solid #34556b; border-radius: var(--radius); overflow: hidden; }
+.seg button { border: 0; border-radius: 0; border-right: 1px solid #34556b; }
+.seg button:last-child { border-right: 0; }
+.op-patients { display: grid; gap: 10px; }
+.op-patient { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.op-patient > .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; padding: 10px 14px; background: var(--surface2); }
+.op-patient > .head .nr { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
+.op-patient > .head .name { font-weight: 700; font-size: 14px; }
+.op-patient > .head .meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+.op-order { padding: 10px 14px; border-top: 1px solid #1d3346; }
+.op-order .line { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.op-order .file { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: #cfe3ee; word-break: break-all; }
+.chip { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #1f3a4d; border: 1px solid #2f5268; white-space: nowrap; }
+.chip.jaw { background: #22324a; } .chip.late { background: #4a2a2e; border-color: #7a3a42; color: #ffc3c8; }
+.chip.ok { color: var(--good); } .chip.p-lepel { background: #1d3b3f; } .chip.p-beetplaat { background: #2b2f4a; } .chip.p-beetwal { background: #3b2f45; } .chip.p-copydenture { background: #403a24; } .chip.p-provisorium { background: #3f2a2a; }
+.op-order .stls { margin: 6px 0 0; display: grid; gap: 4px; }
+.op-order .stl { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--muted); }
+.op-order .stl button { padding: 4px 8px; font-size: 11px; }
+.issues { list-style: none; margin: 6px 0 0; padding: 0; }
+.issues li { font-size: 12px; padding: 4px 8px; border-radius: 6px; margin: 3px 0; background: #18303f; }
+.issues li.fout { background: #3a1f26; color: #ffd0d5; } .issues li.fout::before { content: "✖ "; color: var(--bad); }
+.issues li.letop { background: #3a3220; color: #ffe7c0; } .issues li.letop::before { content: "⚠ "; color: var(--warn); }
+.issues li.info::before { content: "ℹ "; color: #8fd0ff; }
+.op-sim-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.op-sim-controls .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.op-sim-controls select, .op-sim-controls input { width: 100%; background: var(--surface2); border: 1px solid var(--line); border-radius: var(--radius); padding: 7px 8px; }
+.op-plates { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin: 10px 0; }
+.op-plate { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.op-plate h3 { font-size: 13px; margin: 0 0 6px; display: flex; justify-content: space-between; }
+.op-plate h3 span { color: var(--muted); font-weight: 400; font-size: 12px; }
+.op-plate svg { width: 100%; height: auto; display: block; background: #0c1925; border-radius: 6px; }
+.op-plate ul { margin: 6px 0 0; padding-left: 16px; font-size: 11.5px; color: var(--muted); }
+.op-table-wrap { overflow-x: auto; }
+.op-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.op-table th, .op-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1d3346; }
+.op-table td { font-family: ui-monospace, Menlo, monospace; }
+.op-table tr.same td:last-child { color: var(--muted); }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #1c3a4e; border: 1px solid var(--accent); padding: 10px 14px; border-radius: 8px; z-index: 20; }
+#toast.error { border-color: var(--bad); }
+@media (max-width: 600px) { .op-toolbar { position: static; } .op-toolbar .grow { display: none; } .op-toolbar input[type=search] { max-width: none; flex-basis: 100%; } .op-patient > .head .meta { margin-left: 0; width: 100%; } }
