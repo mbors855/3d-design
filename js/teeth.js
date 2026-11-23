@@ -3,9 +3,10 @@
 // z = buccaal/labiaal. Elke tand is een gesloten, manifold mesh, inclusief wortelstift voor verankering in de basis.
 
 // [mesiodistaal, buccolinguaal, kroonhoogte] in mm — gemiddelde waarden uit de literatuur.
+// Wheeler's Dental Anatomy (9e druk), gemiddelde kroonmaten — dezelfde als de anatomische kronen (crowns.js).
 const DIMENSIONS = {
-  upper: { 1: [8.6, 7.0, 10.5], 2: [6.6, 6.0, 9.0], 3: [7.6, 8.0, 10.0], 4: [7.0, 9.0, 8.5], 5: [6.7, 9.0, 7.8], 6: [10.2, 11.0, 7.5], 7: [9.0, 11.0, 7.0], 8: [8.5, 10.5, 6.5] },
-  lower: { 1: [5.3, 5.8, 9.0], 2: [5.9, 6.2, 9.5], 3: [6.9, 7.5, 11.0], 4: [7.0, 7.7, 8.5], 5: [7.2, 8.2, 8.0], 6: [11.2, 10.3, 7.5], 7: [10.5, 10.0, 7.0], 8: [10.0, 9.8, 6.5] },
+  upper: { 1: [8.5, 7.0, 10.5], 2: [6.5, 6.0, 9.0], 3: [7.5, 8.0, 10.0], 4: [7.0, 9.0, 8.5], 5: [7.0, 9.0, 8.5], 6: [10.0, 11.0, 7.5], 7: [9.0, 11.0, 7.0], 8: [8.5, 10.0, 6.5] },
+  lower: { 1: [5.0, 6.0, 9.0], 2: [5.5, 6.5, 9.5], 3: [7.0, 7.5, 11.0], 4: [7.0, 7.5, 8.5], 5: [7.0, 8.0, 8.0], 6: [11.0, 10.5, 7.5], 7: [10.5, 10.0, 7.0], 8: [10.0, 9.5, 7.0] },
 };
 
 export const FDI_UPPER = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
@@ -155,7 +156,7 @@ export function formArch({ width, depth, form = 'oval' }) { return t => archPoin
 
 // Plaatst tanden langs de boog op basis van cumulatieve mesiodistale breedte vanaf de middellijn.
 // Geeft per tand de positie in het boogvlak en de mesiale richting. opts.arch: eigen boogfunctie (t → [x, y]).
-export function layoutArch(ids, { jaw = 'upper', width = 50, depth = 40, form = 'oval', scale = 1, gap = 0.1, arch = null } = {}) {
+export function layoutArch(ids, { jaw = 'upper', width = 50, depth = 40, form = 'oval', scale = 1, gap = 0.15, arch = null, widthOf = null } = {}) {
   const N = 400, pts = [], curve = arch ?? formArch({ width, depth, form });
   for (let i = 0; i <= N; i++) pts.push(curve(-1 + 2 * i / N));
   const cum = [0];
@@ -175,7 +176,7 @@ export function layoutArch(ids, { jaw = 'upper', width = 50, depth = 40, form = 
     let s = 0;
     for (let type = 1; type <= 8; type++) {
       const id = (right ? quadrant.right : quadrant.left) * 10 + type;
-      const w = toothDimensions(id, scale).md, centerS = s + w / 2;
+      const w = widthOf?.(id) ?? toothDimensions(id, scale).md, centerS = s + w / 2;
       if (ids.includes(id)) {
         const { p, tangent } = at(right ? mid - centerS : mid + centerS);
         result.push({ fdi: id, position: p, mesial: right ? tangent : [-tangent[0], -tangent[1]], distance: centerS });

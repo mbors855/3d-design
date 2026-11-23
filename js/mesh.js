@@ -351,3 +351,68 @@ export function applyMatrixToSoup(soup, m) {
   const det = e[0] * (e[5] * e[10] - e[9] * e[6]) - e[4] * (e[1] * e[10] - e[9] * e[2]) + e[8] * (e[1] * e[6] - e[5] * e[2]);
   return det < 0 ? flipSoup(out) : out;
 }
+
+// Afstand van punten tot een oppervlak (soup), exact punt-tot-driehoek, met een rasterversnelling.
+// Geeft Float32Array met afstanden (Infinity als niets binnen maxDist ligt).
+export function pointToSurfaceDistances(points, soup, { cell = 1, maxDist = 6, closest = null } = {}) {
+  const grid = new Map(), key = (x, y, z) => (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
+  const nf = soup.length / 9;
+  for (let i = 0; i < nf; i++) {
+    const o = i * 9;
+    const x0 = Math.floor(Math.min(soup[o], soup[o + 3], soup[o + 6]) / cell), x1 = Math.floor(Math.max(soup[o], soup[o + 3], soup[o + 6]) / cell);
+    const y0 = Math.floor(Math.min(soup[o + 1], soup[o + 4], soup[o + 7]) / cell), y1 = Math.floor(Math.max(soup[o + 1], soup[o + 4], soup[o + 7]) / cell);
+    const z0 = Math.floor(Math.min(soup[o + 2], soup[o + 5], soup[o + 8]) / cell), z1 = Math.floor(Math.max(soup[o + 2], soup[o + 5], soup[o + 8]) / cell);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) { const k = key(x, y, z); let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(i); }
+  }
+  const out = new Float32Array(points.length / 3).fill(Infinity), seen = new Int32Array(nf).fill(-1);
+  const R = Math.ceil(maxDist / cell);
+  for (let pi = 0; pi < points.length / 3; pi++) {
+    const px = points[pi * 3], py = points[pi * 3 + 1], pz = points[pi * 3 + 2];
+    const cx = Math.floor(px / cell), cy = Math.floor(py / cell), cz = Math.floor(pz / cell);
+    let best = Infinity;
+    for (let ring = 0; ring <= R; ring++) {
+      for (let x = cx - ring; x <= cx + ring; x++) for (let y = cy - ring; y <= cy + ring; y++) for (let z = cz - ring; z <= cz + ring; z++) {
+        if (Math.max(Math.abs(x - cx), Math.abs(y - cy), Math.abs(z - cz)) !== ring) continue;
+        for (const i of grid.get(key(x, y, z)) || []) { if (seen[i] === pi) continue; seen[i] = pi; const d = pointTriangle(px, py, pz, soup, i * 9, closest ? _cp : null); if (d < best) { best = d; if (closest) { closest[pi * 3] = _cp[0]; closest[pi * 3 + 1] = _cp[1]; closest[pi * 3 + 2] = _cp[2]; } } }
+      }
+      if (best <= ring * cell) break;
+    }
+    out[pi] = best;
+  }
+  return out;
+}
+const _cp = [0, 0, 0];
+function pointTriangle(px, py, pz, s, o, cp = null) {
+  // Ericson, Real-Time Collision Detection: dichtstbijzijnd punt op een driehoek
+  const ax = s[o], ay = s[o + 1], az = s[o + 2], bx = s[o + 3], by = s[o + 4], bz = s[o + 5], cx = s[o + 6], cy = s[o + 7], cz = s[o + 8];
+  const abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az, apx = px - ax, apy = py - ay, apz = pz - az;
+  const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
+  const dist = (x, y, z) => { if (cp) { cp[0] = x; cp[1] = y; cp[2] = z; } return Math.hypot(px - x, py - y, pz - z); };
+  if (d1 <= 0 && d2 <= 0) return dist(ax, ay, az);
+  const bpx = px - bx, bpy = py - by, bpz = pz - bz, d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
+  if (d3 >= 0 && d4 <= d3) return dist(bx, by, bz);
+  const vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) { const v = d1 / (d1 - d3); return dist(ax + v * abx, ay + v * aby, az + v * abz); }
+  const cpx = px - cx, cpy = py - cy, cpz = pz - cz, d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
+  if (d6 >= 0 && d5 <= d6) return dist(cx, cy, cz);
+  const vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) { const w = d2 / (d2 - d6); return dist(ax + w * acx, ay + w * acy, az + w * acz); }
+  const va = d3 * d6 - d5 * d4;
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { const w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); return dist(bx + w * (cx - bx), by + w * (cy - by), bz + w * (cz - bz)); }
+  const den = 1 / (va + vb + vc), v = vb * den, w = vc * den;
+  return dist(ax + abx * v + acx * w, ay + aby * v + acy * w, az + abz * v + acz * w);
+}
+
+// Pasvlak-nauwkeurigheid: afstand van de scanpunten (binnen de omtrek) tot de plaat, vergeleken met de ingestelde ruimte.
+export function fitReport(surfaceSoup, plateSoup, gap = 0, { skipFrom = null, sample = 4000 } = {}) {
+  const n = (skipFrom ?? surfaceSoup.length / 9) * 3, stride = Math.max(1, Math.floor(n / sample));
+  const pts = []; for (let v = 0; v < n; v += stride) pts.push(surfaceSoup[v * 3], surfaceSoup[v * 3 + 1], surfaceSoup[v * 3 + 2]);
+  const d = pointToSurfaceDistances(Float32Array.from(pts), plateSoup, { maxDist: gap + 3 });
+  const fin = Array.from(d).filter(Number.isFinite);
+  const dev = fin.map(x => Math.abs(x - gap)).sort((a, b) => a - b), close = fin.map(x => Math.max(0, gap - x)).sort((a, b) => a - b);
+  if (!dev.length) return null;
+  const q = (a, f) => a[Math.min(a.length - 1, Math.floor(a.length * f))];
+  // 'close' = dichter bij de scan dan de ingestelde ruimte (te weinig afdrukruimte); verder weg = overbrugd (smalle plooi)
+  return { n: dev.length, median: q(dev, 0.5), p95: q(dev, 0.95), p99: q(dev, 0.99), max: dev.at(-1), within: dev.filter(x => x <= 0.05).length / dev.length,
+    closeP99: q(close, 0.99), closeMax: close.at(-1), bridged: fin.filter(x => x > gap + 0.05).length / fin.length };
+}

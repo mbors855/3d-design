@@ -18,6 +18,62 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 65 — opstelling zoals in 3Shape/exocad, met verbeteringen
+
+**📚 Eigen tandenbibliotheek (exocad-indeling).** Kies de ZIP (ook een ZIP in een ZIP of met wachtwoord: WinZip-AES) of de uitgepakte map. Herkend worden `teeth/<set>/{upperjaw,lowerjaw}/1…8.eoff` en `metadata/<set>/{upperjaw,lowerjaw}.xml`. Thimble-/cutback-varianten worden genegeerd. Kronen worden gesloten met een korte, taps toelopende wortelstomp (manifold, klaar voor de basis), gespiegeld voor de andere kaakhelft. De bibliotheek blijft **alleen op het apparaat** (IndexedDB): niets gaat naar een server of in deze repository.
+
+**Automatisch ideaal of handmatig.** *Automatisch ideaal* neemt per element de angulatie, torque en hoogte (curve van Spee/Wilson) over uit de ToothBow van de bibliotheek en zet ze op de gemeten kamlijn. De breedtes langs de boog komen uit de echte kronen; daarna worden de approximale contacten exact nagemeten (≤ 0,05 mm). *Handmatig*: kies een element en tik op de kam, waarna het volgende element wordt voorgesteld.
+
+**BK en OK tegelijk.** De tegenkaak wordt mee opgesteld op een eigen boog (front ~3 mm, zijdelings ~1 mm binnen of buiten de werkboog) en in occlusie gebracht. Download: *Elementen tegenkaak.stl*.
+
+**Selecteren en slepen.** Selecteer per element, groep (front 3–3 of zijdelingse delen), kaak (blok) of BK + OK.
+- Tikken selecteert.
+- **Vasthouden + slepen** verplaatst; met de muis kun je direct slepen. De rij schuift mee en klikt bij loslaten weer aan, met de middellijn vast. Een groep slepen verschuift ook de middellijn.
+- *↔ Naast elkaar zetten*: tik element A en dan B, en A komt aan die kant naast B te staan (volgorde wisselen).
+- *Rij aansluiten* uit: vrij plaatsen.
+
+**Morphen en draaien.** Grootte, breedte, hoogte en dikte in stappen van 2 %, met de rij die meeschuift. Angulatie, torque en draaien om de as: in stappen van 1° of met de vinger (horizontaal slepen). De gizmo blijft beschikbaar.
+
+**🎨 Live contactkleuren** tijdens slepen, draaien, articuleren en slijpen. Magenta/rood = penetratie, oranje = contact, geel < 0,05, groen < 0,15, blauw < 0,35 mm.
+
+**Articulator** (half-instelbaar, Bonwill 105 mm, condylusafstand 110 mm, Balkwill 22°): protrusie, laterotrusie rechts/links (Bennett-hoek, directe zijverschuiving) en openen. Er is een schuif per stand, *▶ Afspelen* en *Bewegingscontacten*: de kleinste afstand over de hele baan, zodat interferenties zichtbaar worden.
+
+**Inslijpen.**
+- *Automatisch*: in centrische stand of ook in de bewegingen. Penetrerende punten gaan naar het oppervlak van de antagonist, zoals bij een inslijpfolie.
+- Instelbaar: in OK, BK of verdeeld; rest-speling; maximaal weg te nemen materiaal (de app meldt waar dat maximum is bereikt, zodat je daar de opstelling of geleiding aanpast); front wel of niet slijpen in de bewegingen.
+- *Handmatig*: slijpkop wegnemen / opbouwen / gladmaken met straal en sterkte.
+- De mesh blijft gesloten. Ingeslepen vormen gaan mee in het projectbestand.
+
+### Nieuw in 64
+
+**Werkwijze per werkstuk.** Lepel = plaat (met of zonder handvat), beetplaat = alleen de plaat, prothese = basis met elementen. Stappen en downloads die niet bij het werkstuk horen, zijn verborgen.
+
+**🧹 Scan voorbereiden** (Scan & mesh, en de eerste stap van ⚡ Alles automatisch). Scanpunten worden nooit verschoven:
+- analyse: delen, losse vlekjes, spikes, niet-manifold randen, gaten, open of gesloten (model met sokkel);
+- reparatie: kapotte en dubbele facetten, losse delen, spikes (PCA-vlak van de buren) en niet-manifold facetten weg, kleine gaten dicht;
+- bijsnijden tot het prothesegebied plus marge: sokkel, wang, tong en artefacten eruit, met alleen het deel dat de kam bevat;
+- aanvullen: is de plooi niet gescand (scan stopt bij de plaatrand, zoals bij een 3Shape-weefselzijde), dan wordt de rand vloeiend verlengd en de plooidiepte geschat (mediaan van de rest van de kaak, anders BK 8 / OK 7 mm). Het ontworpen deel is paars en telt niet mee in de pasvlakcontrole.
+
+**Omtrek: automatisch, en met de vinger aan te passen.** De omtrek wordt langs de insteekas exact uitgesneden, onafhankelijk van het camerastandpunt. Facetten binnen de lijn worden ongewijzigd overgenomen; facetten op de lijn worden exact gesneden (bisectie, rand ≤ 0,05 mm van de lijn).
+- Sleep een punt: punten in de meeneemzone (instelbaar) gaan vloeiend mee en blijven op de scan.
+- Tik op de lijn: er komt een punt bij. Houd een punt vast: het punt verdwijnt. ↶ en ↷ werken voor elke wijziging.
+
+**Belijning volgens de literatuur:**
+- lepel 2 mm korter dan de plooi (2–3 mm, ruimte voor randvormen), BK 2,5 mm voorbij de A-lijn door de hamulus-insnoeringen, OK over de hele retromolaire pad;
+- beetplaat en basis tot de functionele plooidiepte, BK tot de A-lijn (1–2 mm vóór de foveae palatinae), OK ⅔ van de pad;
+- frenumuitsparing labiaal smal, buccaal breder.
+
+**🗂 Lagen met faders.** Scan, Was, Design, Tanden en Antagonist zijn elk apart aan en uit te zetten, met een fader voor de doorzichtigheid.
+
+**🕯 Waslaag voor ondersnijdingen.** De ondersnijdingen worden langs de insteekas opgevuld (kegel met uitblokhoek, plus wat onder overhangend weefsel ligt). De was is te bewerken met penselen (toevoegen, wegnemen, gladmaken, Shift keert om) en komt nooit onder de scan. De plaat wordt op scan + was gebouwd; waar geen was ligt, is het pasvlak exact de scan.
+
+**Nauwkeurigheid (doel 0,05 mm):**
+- Bij elk werkstuk staat de afwijking van het pasvlak ten opzichte van de scan, of van de afdrukruimte bij een lepel; ook in Controle.
+- Wortels, de onderkant van de gingivaband, wallen en handvatten die door het pasvlak staken, worden nu weggesneden met een weefselblok (scanoppervlak 0,005 mm in het weefsel).
+- De afdrukruimte wordt gecorrigeerd met de echte afstand tot de scan (Minkowski): in holtes nooit te dicht, en smalle plooien worden overbrugd.
+
+**Anatomische tanden.** De 32 elementen hebben leerboekvormen (Wheeler's Dental Anatomy), met knobbels, randlijsten, fissuren, fossae, cingulum en incisale rand, op de gepubliceerde gemiddelde maten. Het is een port van de open-source kroonbibliotheek van DentCraft (MIT/Apache-2.0, zie `NOTICE`). Knobbelhoogte en slijtage volgen het opstelconcept (monoplane = vlak). De gingiva heeft festoenen en papillen.
+
 ### Nieuw in 63
 
 - **⚡ Alles automatisch** (werkbalk): in één keer referentiepunten → anatomie → omtrek → werkstuk volgens de opdrachtbon (lepel, beetplaat, of opstelling + prothesebasis), daarna direct de controle. Ongeveer 2–5 s; elke stap blijft daarna los aan te passen.
@@ -69,10 +125,11 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 ## Tests
 
 ```bash
+mkdir -p node_modules/three && ln -sf ../../vendor/three.module.js node_modules/three/three.module.js && ln -sf ../../vendor/three.core.js node_modules/three/three.core.js && printf '{"name":"three","type":"module","exports":"./three.module.js"}' > node_modules/three/package.json
 node tests/run.mjs
 ```
 
-Rekenmodules zonder browser (Node 20+): naamherkenning, 3ox/inf, controles, printsimulatie, ZIP, randopschoning, schaal, weefselzijde, kamlijn.
+Rekenmodules zonder browser (Node 20+; `three` wordt uit `vendor/` geladen via `node_modules/three`, zie hieronder): naamherkenning, OFF/eoff, WinZip-AES, bibliotheek sluiten en spiegelen, ideale standen, rij aansluiten ≤ 0,05 mm, articulatorbewegingen, inslijpen, 3ox/inf, controles, printsimulatie, ZIP, randopschoning, schaal, weefselzijde, kamlijn.
 
 Validatie van versie 61 op een echte lab-export (51 STL-bestanden, 3Shape DentalDesigner + losse beetwallen):
 
@@ -95,6 +152,16 @@ js/intaglio.js              weefselzijde uit gesloten product
 js/sculpt.js                penselen (vrij bewerken)
 js/anatomy.js               plooi, frenula, omtrek, weefselzones, scan richting ideaal
 js/shell.js, mesh.js, csg.js, construct.js, contour.js, analysis.js, setup.js, teeth.js
+js/prep.js                  scan voorbereiden (analyse, reparatie, aanvullen)
+js/trim.js                  exacte uitsnede langs de omtrek (insteekas)
+js/wax.js                   waslaag (ondersnijdingen), penselen
+js/crowns.js                anatomische kronen (port van DentCraft, MIT/Apache-2.0)
+js/library.js, off.js, aes.js  tandenbibliotheek importeren (exocad .eoff + ToothBow, ZIP/AES), op het apparaat bewaren
+js/arrange.js               rij: boog, langs de boog schuiven, aansluiten, morphen, draaien
+js/setup-tools.js           opstelgereedschap: selectie, slepen, BK+OK, contact, articulator, inslijpen (UI)
+js/contacts.js              getekende afstanden en contactkleuren
+js/articulator.js           virtuele articulator (protrusie, laterotrusie, openen)
+js/grind.js                 inslijpen (automatisch en slijpkop)
 js/unzip.js, zip.js, handoff.js, stl.js, viewer.js
 vendor/                     three.js, three-mesh-bvh, manifold-3d (WebAssembly)
 tests/run.mjs               headless tests

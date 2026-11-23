@@ -45,7 +45,7 @@ export class Viewer extends EventTarget {
     this.gizmoHelper = this.gizmo.getHelper();
     this.scene.add(this.gizmoHelper);
     this.groups = {};
-    for (const name of ['scan', 'antagonist', 'plates', 'teeth', 'overlay']) { this.groups[name] = new THREE.Group(); this.groups[name].name = name; this.scene.add(this.groups[name]); }
+    for (const name of ['scan', 'wax', 'antagonist', 'plates', 'teeth', 'overlay']) { this.groups[name] = new THREE.Group(); this.groups[name].name = name; this.scene.add(this.groups[name]); }
     this.scanMesh = null;
     this.antagonistMesh = null;
     this.bounds = null;

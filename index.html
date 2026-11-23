@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Digital Denture CAD 63</title>
+<title>Digital Denture CAD 65</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🦷%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/app.css">
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 </head>
 <body>
 <header>
-  <div class="brand">🦷 Digital Denture CAD <span>63</span></div>
+  <div class="brand">🦷 Digital Denture CAD <span>65</span></div>
   <div class="header-actions">
     <span class="badge">Prototype · niet voor klinisch gebruik</span>
     <a class="btn" href="orders.html" title="3Shape-export inlezen en controleren">📋 Orders</a>
@@ -42,13 +42,6 @@
       <button id="zoomIn" aria-label="Inzoomen">＋</button>
       <button id="zoomOut" aria-label="Uitzoomen">－</button>
       <span class="sep"></span>
-      <div class="layers" role="group" aria-label="Lagen">
-        <label class="chip"><input type="checkbox" id="layerScan" checked> Scan</label>
-        <label class="chip"><input type="checkbox" id="layerScanLight"> Transparant</label>
-        <label class="chip"><input type="checkbox" id="layerAntagonist" checked> Antagonist</label>
-        <label class="chip"><input type="checkbox" id="layerPlates" checked> Werkstukken</label>
-        <label class="chip"><input type="checkbox" id="layerTeeth" checked> Tanden</label>
-      </div>
     </div>
 
     <div id="contourBar" class="toolbar sub hide" role="toolbar" aria-label="Plaatomtrek">
@@ -58,10 +51,20 @@
       <button id="contourRedo" disabled>↷ Vooruit</button>
       <button id="contourClear" disabled>Wis omtrek</button>
       <button id="contourCrop" disabled>↓ Uitgesneden scan</button>
+      <label class="inline-field" title="Bij slepen gaan punten binnen deze afstand vloeiend mee">Meeneemzone <input id="contourSoft" type="number" class="tiny" min="0" max="10" step="0.5" value="3" data-persist> mm</label>
       <span id="contourStatus" class="hint" role="status"></span>
     </div>
 
     <div id="viewport">
+      <details class="layers-panel" id="layersPanel">
+        <summary>🗂 Lagen</summary>
+        <div class="layer-row"><label><input type="checkbox" id="layerScan" checked> Scan</label><input type="range" id="opScan" min="0" max="100" value="100" aria-label="Doorzichtigheid scan"></div>
+        <div class="layer-row"><label><input type="checkbox" id="layerWax" checked> Was</label><input type="range" id="opWax" min="0" max="100" value="85" aria-label="Doorzichtigheid was"></div>
+        <div class="layer-row"><label><input type="checkbox" id="layerPlates" checked> Design</label><input type="range" id="opPlates" min="0" max="100" value="100" aria-label="Doorzichtigheid design"></div>
+        <div class="layer-row"><label><input type="checkbox" id="layerTeeth" checked> Tanden</label><input type="range" id="opTeeth" min="0" max="100" value="100" aria-label="Doorzichtigheid tanden"></div>
+        <div class="layer-row"><label><input type="checkbox" id="layerAntagonist" checked> Antagonist</label><input type="range" id="opAntagonist" min="0" max="100" value="60" aria-label="Doorzichtigheid antagonist"></div>
+      </details>
+
       <div id="modeChip" class="hide"><span id="modeText"></span><button id="modeExit" title="Terug naar draaien (Esc)">✕</button></div>
       <div id="emptyHint">Open een STL-scan of kies <b>Demo-kaak</b>, kies het werkstuk in de opdrachtbon en tik op <b>⚡ Alles automatisch</b>.</div>
       <div id="busy" class="hide"><div class="spinner"></div><span id="busyText">Bezig…</span></div>
@@ -102,7 +105,17 @@
     <section class="panel" data-panel="scan">
       <h3>📐 Scan &amp; mesh</h3>
       <div id="scanInfo" class="note">Nog geen scan geladen.</div>
-      <h4>Kwaliteit en reparatie</h4>
+      <h4>🧹 Scan voorbereiden</h4>
+      <p class="sub">Analyseert en repareert de scan (losse delen, spikes, dubbele/kapotte facetten, kleine gaten), snijdt hem bij tot het prothesegebied plus marge (sokkel, wang, tong en artefacten eruit) en vult een niet-gescande plooi aan. Scanpunten worden nooit verschoven.</p>
+      <div class="grid2">
+        <div class="field"><label for="prepMargin">Marge buiten de plooi (mm)</label><input id="prepMargin" type="number" min="1" max="15" step="0.5" value="4" data-persist></div>
+        <div class="field"><label for="prepExtend">Aanvullen tot (mm)</label><input id="prepExtend" type="number" min="0" max="15" step="0.5" value="8" data-persist></div>
+      </div>
+      <label class="check"><input type="checkbox" id="prepTrim" checked data-persist> Automatisch bijsnijden</label>
+      <label class="check"><input type="checkbox" id="prepComplete" checked data-persist> Ontbrekende plooi aanvullen (ontworpen deel paars)</label>
+      <button id="prepRun" class="primary wide">🧹 Scan voorbereiden</button>
+      <div id="prepReport" class="note"></div>
+      <h4>Kwaliteit en reparatie (handmatig)</h4>
       <div class="actions"><button id="meshQA">🔎 Analyseer</button><button id="meshRepair" class="primary">🛠 Repareer</button></div>
       <label class="check"><input type="checkbox" id="repairFill" checked data-persist> Gaten dichten (buitenrand open laten)</label>
       <div id="meshReport" class="note mono"></div>
@@ -150,9 +163,18 @@
         <button id="anaIdeal">✨ Pas scan aan</button>
         <p class="sub">Ontlasten verschuift het scanoppervlak naar de plaat toe (ruimte in de plaat); post-dam drukt een smalle band iets in (afsluitrand). ↶ Terug bij Scan &amp; mesh zet de originele scan terug.</p>
       </details>
-      <h4>Ondersnijdingen</h4>
+      <h4>Ondersnijdingen en was</h4>
       <div class="actions"><button id="undercutRun">Toon ondersnijdingen</button><button id="undercutClear">Verberg</button></div>
-      <div id="undercutInfo" class="sub">Rood = niet bereikbaar langs de occlusale richting (invoerrichting).</div>
+      <div id="undercutInfo" class="sub">Rood = niet bereikbaar langs de insteekas (occlusale richting).</div>
+      <div class="field"><label for="waxAngle">Uitblokhoek (°)</label><input id="waxAngle" type="number" min="0.5" max="15" step="0.5" value="2" data-persist></div>
+      <div class="actions"><button id="waxRun" class="primary">🕯 Ondersnijdingen opvullen met was</button><button id="waxClear">Wis was</button></div>
+      <div class="actions"><button id="waxEdit" aria-pressed="false">✋ Was bewerken</button><button data-wax="add" class="wtool" aria-pressed="true">Toevoegen</button><button data-wax="remove" class="wtool">Wegnemen</button><button data-wax="smooth" class="wtool">Gladmaken</button></div>
+      <div class="grid2">
+        <div class="field"><label for="waxRadius">Penseel (mm)</label><input id="waxRadius" type="range" min="0.5" max="8" step="0.5" value="2.5" data-persist></div>
+        <div class="field"><label for="waxStrength">Sterkte</label><input id="waxStrength" type="range" min="0.02" max="1" step="0.02" value="0.15" data-persist></div>
+      </div>
+      <div class="actions"><button id="waxUndo">↶ Terug</button><button id="waxRedo">↷ Vooruit</button></div>
+      <div id="waxInfo" class="sub">De was ligt boven de scan (oranje); de plaat wordt op scan + was gebouwd. Waar geen was ligt, is het pasvlak exact de scan.</div>
       <h4>Markeringen in 3D</h4>
       <div class="actions"><button data-mark="boundary" class="mk b">Randlijn</button><button data-mark="bar" class="mk s">Steg</button><button data-mark="reference" class="mk p">Referentiepunt</button></div>
       <div class="actions"><button id="markUndo">↶ Terug</button><button id="markRedo">↷ Vooruit</button><button id="markClear">Wis alles</button></div>
@@ -188,8 +210,8 @@
         <div class="field"><label for="beetWall">Basisdikte (mm)</label><input id="beetWall" type="number" min="1.5" max="6" step=".1" value="2" data-persist></div>
         <div class="field"><label for="beetGap">Afstand tot scan (mm)</label><input id="beetGap" type="number" min="0" max="3" step=".05" value="0" data-persist></div>
       </div>
-      <div class="field"><label for="biteFit">Aansluiting</label><select id="biteFit" data-persist><option value="exact">Exact op scan, zonder uitblokken</option><option value="block">Uitblokken langs de STL-Z-as</option></select></div>
-      <div class="field"><label for="biteDraft">Uitblokhoek (0–10°)</label><input id="biteDraft" type="number" min="0" max="10" step="0.5" value="2" data-persist></div>
+      <div class="field"><label for="biteFit">Aansluiting</label><select id="biteFit" data-persist><option value="exact">Exact op scan (was wordt meegenomen als die er is)</option><option value="block">Ondersnijdingen automatisch met was opvullen</option></select></div>
+      <div class="field hide"><label for="biteDraft">Uitblokhoek</label><input id="biteDraft" type="number" value="2"></div>
       <label class="check"><input type="checkbox" id="rimOn" data-persist> Met beetwal (vereist referentiepunten)</label>
       <div id="rimFields">
       <div class="grid2">
@@ -208,7 +230,15 @@
     <!-- 6. Opstelling -->
     <section class="panel" data-panel="opstelling">
       <h3>🦷 Tandopstelling in 3D</h3>
-      <p class="sub">Eigen parametrische tandenbibliotheek (32 elementen, geen gelicentieerde fabrikantvormen). Elementen uit de opdrachtbon; zonder selectie de hele kaak.</p>
+      <p class="sub">Ingebouwde anatomische tanden of je eigen tandenbibliotheek (exocad-indeling). Elementen uit de opdrachtbon; zonder selectie de hele kaak.</p>
+      <details class="libbox">
+        <summary>📚 Tandenbibliotheek importeren</summary>
+        <p class="sub">Kies de ZIP van de bibliotheek (ook een ZIP in een ZIP of met wachtwoord) of de uitgepakte map. Verwacht: <code>&lt;set&gt;/upperjaw/1.eoff … 8.eoff</code>, <code>lowerjaw/…</code> en <code>metadata/&lt;set&gt;/upperjaw.xml</code> (ideale opstelling). Alles blijft op dit apparaat; er gaat niets naar een server.</p>
+        <div class="field"><label for="libPassword">Wachtwoord (alleen bij een versleutelde ZIP)</label><input id="libPassword" type="password" autocomplete="off" placeholder="leeg laten als er geen is"></div>
+        <div class="actions"><label class="button primary">ZIP of bestanden kiezen<input id="libFile" type="file" accept=".zip,.eoff,.off,.xml,.stl" multiple hidden></label><label class="button">Map kiezen<input id="libFolder" type="file" webkitdirectory multiple hidden></label></div>
+        <div id="libProgress" class="sub mono"></div>
+        <div id="libList" class="liblist"></div>
+      </details>
       <div class="field"><label for="concept">Opstelconcept</label><select id="concept" data-persist><option value="gysi">Gysi – bilateraal gebalanceerd</option><option value="gerber">Gerber – condyloform/lingualiseerd</option><option value="lingual">Lingualiseerde occlusie</option><option value="monoplane">Monoplane (vlakke knobbels)</option><option value="custom">Individueel</option></select></div>
       <div id="customConcept" class="grid2 hide">
         <div class="field"><label for="cSpee">Spee-curve (mm)</label><input id="cSpee" type="number" min="0" max="4" step=".25" value="1" data-persist></div>
@@ -217,6 +247,8 @@
         <div class="field"><label for="cCusp">Knobbelhoogte (0–1,2)</label><input id="cCusp" type="number" min="0" max="1.2" step=".05" value=".8" data-persist></div>
       </div>
       <div class="grid2">
+        <div class="field"><label for="toothLib">Tandvormen</label><select id="toothLib" data-persist><option value="anatomic">Anatomisch (Wheeler's, 32 elementen)</option><option value="simple">Eenvoudig (snel)</option></select></div>
+        <div class="field"><label for="setupMode">Opstellen</label><select id="setupMode" data-persist><option value="ideal">Automatisch ideaal (bibliotheekstanden of concept)</option><option value="concept">Automatisch volgens opstelconcept</option><option value="manual">Handmatig: zelf element voor element</option></select></div>
         <div class="field"><label for="anteriorShape">Fronttandvorm</label><select id="anteriorShape" data-persist><option value="oval">Ovaal</option><option value="square">Vierkant</option><option value="tapered">Driehoekig</option></select></div>
         <div class="field"><label for="archForm">Boogvorm</label><select id="archForm" data-persist><option value="crest">Kamlijn (gemeten) – aanbevolen</option><option value="oval">Ovaal</option><option value="square">Breed / U</option><option value="tapered">Smal / V</option></select></div>
       </div>
@@ -229,18 +261,70 @@
         <div class="field"><label for="frontOffset">Front labiaal van de kam (mm)</label><input id="frontOffset" type="number" min="-2" max="10" step=".5" placeholder="auto (BK 4, OK 1)" data-persist></div>
       </div>
       <p class="sub">Met <b>Kamlijn</b> volgt de boog de gemeten kamtop: zijdelingse tanden met de centrale fissuur boven de kam (OK binnen de Pound-lijn), front labiaal van de kam.</p>
+      <label class="check"><input type="checkbox" id="libAutoSize" checked data-persist> Bibliotheekmaat automatisch aan de kam aanpassen</label>
+      <label class="check"><input type="checkbox" id="bothJaws" checked data-persist> Ook de tegenkaak opstellen (BK én OK, in occlusie)</label>
       <button id="teethBuild" class="primary wide">Stel tanden op</button>
       <div id="teethInfo" class="sub"></div>
-      <h4>Element aanpassen</h4>
+      <h4>Selecteren en slepen</h4>
+      <div class="seg" role="group" aria-label="Selectie"><button data-selmode="tooth" aria-pressed="true">Element</button><button data-selmode="group" aria-pressed="false">Groep</button><button data-selmode="jaw" aria-pressed="false">Kaak (blok)</button><button data-selmode="all" aria-pressed="false">BK + OK</button></div>
+      <div id="selInfo" class="sub"></div>
       <div id="toothList" class="toothlist"></div>
+      <div class="actions"><button id="repackToggle" aria-pressed="true" title="Bij slepen, morphen en plaatsen sluit de rij weer aan">⇔ Rij aansluiten</button><button id="dragImmediate" aria-pressed="false" title="Aan: direct slepen. Uit: vasthouden en slepen (aanraakscherm)">✋ Direct slepen</button><button id="pairMode" aria-pressed="false" title="Tik element A, dan B: A komt naast B">↔ Naast elkaar zetten</button><button id="packNow">Alles aansluiten</button></div>
+      <p class="sub">Tik = selecteren · <b>vasthouden + slepen</b> = verplaatsen (de rij schuift mee) · met de muis direct slepen · buiten de elementen slepen = beeld draaien.</p>
+      <details id="placeBox"><summary>Handmatig plaatsen</summary><p class="sub">Kies een element en tik op de kam (of tussen de elementen). Het volgende element wordt voorgesteld.</p><div id="placeList" class="placelist"></div></details>
+      <h4>Morphen en draaien</h4>
+      <div class="morph">
+        <span>Grootte</span><button data-morph="all:0.98">−</button><button data-morph="all:1.02">+</button>
+        <span>Breedte</span><button data-morph="w:0.98">−</button><button data-morph="w:1.02">+</button>
+        <span>Hoogte</span><button data-morph="h:0.98">−</button><button data-morph="h:1.02">+</button>
+        <span>Dikte</span><button data-morph="d:0.98">−</button><button data-morph="d:1.02">+</button>
+      </div>
+      <div class="morph">
+        <span>Angulatie</span><button data-turn="tip:-1" title="Kroon 1° naar distaal">↶ 1°</button><button data-turn="tip:1" title="Kroon 1° naar mesiaal">↷ 1°</button>
+        <span>Torque</span><button data-turn="torque:-1" title="Kroon 1° naar linguaal">↶ 1°</button><button data-turn="torque:1" title="Kroon 1° naar buccaal">↷ 1°</button>
+        <span>Om de as</span><button data-turn="axis:-1">↶ 1°</button><button data-turn="axis:1">↷ 1°</button>
+      </div>
+      <div class="actions"><span class="sub">Met de vinger draaien:</span><button data-rotfinger="axis" aria-pressed="false">om de as</button><button data-rotfinger="tip" aria-pressed="false">angulatie</button><button data-rotfinger="torque" aria-pressed="false">torque</button><button id="morphReset">Maat 100 %</button></div>
       <div class="actions"><button id="gizmoMove" aria-pressed="false">✥ Verplaatsen</button><button id="gizmoRotate" aria-pressed="false">⟳ Roteren</button><button id="toothDeselect">Deselecteer</button></div>
-      <div class="nudge" aria-label="Stapsgewijs verplaatsen (0,25 mm)">
+      <div class="grid2"><div class="field"><label for="nudgeStep">Stap verplaatsen (mm)</label><input id="nudgeStep" type="number" min="0.05" max="2" step="0.05" value="0.25" data-persist></div></div>
+      <div class="nudge" aria-label="Stapsgewijs verplaatsen">
         <button data-nudge="mesial">Mesiaal</button><button data-nudge="distal">Distaal</button><button data-nudge="buccal">Buccaal</button><button data-nudge="lingual">Linguaal</button><button data-nudge="up">Occlusaal</button><button data-nudge="down">Cervicaal</button>
       </div>
       <div class="actions"><button id="teethUndo">↶ Terug</button><button id="teethRedo">↷ Vooruit</button><button id="teethReset">Herstel opstelling</button></div>
-      <h4>Occlusie</h4>
+      <h4>Occlusie en contact</h4>
       <div class="grid2"><div class="field"><label for="occlClearance">Contactspeling (mm)</label><input id="occlClearance" type="number" min="-0.2" max="1" step=".05" value="0" data-persist></div></div>
-      <div class="actions"><button id="autoOcclude" class="primary">Automatisch in occlusie</button><button id="contactMap">Contactkaart</button><button id="contactClear">Wis kaart</button></div>
+      <div class="actions"><button id="oppBuild">Tegenkaak (opnieuw) opstellen</button><button id="oppOcclude" class="primary">Tegenkaak in occlusie</button><button id="oppClear">Tegenkaak weg</button></div>
+      <div class="actions"><button id="liveContacts" aria-pressed="true">🎨 Live contactkleuren</button><button id="autoOcclude">Werkkaak op antagonistscan</button><button id="contactMap">Contactkaart</button><button id="contactClear">Wis kaart</button></div>
+      <div class="legend" aria-label="Kleurschaal contact"><span style="background:#b81a9e">penetratie</span><span style="background:#e61f29">&gt;0,05</span><span style="background:#ff731a">contact</span><span style="background:#ffd12e;color:#222">&lt;0,05</span><span style="background:#80cc4d;color:#222">&lt;0,15</span><span style="background:#479ee6">&lt;0,35 mm</span></div>
+      <h4>Articulator</h4>
+      <div class="seg" role="group" aria-label="Beweging"><button data-artic="protrusion" aria-pressed="true">Protrusie</button><button data-artic="right" aria-pressed="false">Latero rechts</button><button data-artic="left" aria-pressed="false">Latero links</button><button data-artic="open" aria-pressed="false">Openen</button></div>
+      <div class="field"><label for="articAmount">Stand <span id="articLabel" class="mono">0,0 mm</span></label><input id="articAmount" type="range" min="0" max="100" value="0"></div>
+      <div class="actions"><button id="articPlay" class="primary">▶ Afspelen</button><button id="articCentric">Centrisch</button><button id="articPaths">Bewegingscontacten</button></div>
+      <div class="actions sub"><label class="check"><input type="checkbox" data-path="protrusion" checked> protrusie</label><label class="check"><input type="checkbox" data-path="right" checked> rechts</label><label class="check"><input type="checkbox" data-path="left" checked> links</label></div>
+      <details><summary>Instellingen articulator</summary>
+        <div class="grid2">
+          <div class="field"><label for="articMax">Uitslag (mm)</label><input id="articMax" type="number" min="1" max="10" step="0.5" value="5" data-persist></div>
+          <div class="field"><label for="artCondylar">Condylusbaan (°)</label><input id="artCondylar" type="number" min="0" max="60" step="1" value="30" data-persist></div>
+          <div class="field"><label for="artBennett">Bennett-hoek (°)</label><input id="artBennett" type="number" min="0" max="30" step="1" value="15" data-persist></div>
+          <div class="field"><label for="artShift">Directe zijverschuiving (mm)</label><input id="artShift" type="number" min="0" max="2" step="0.1" value="0.5" data-persist></div>
+          <div class="field"><label for="artIncisal">Incisale geleiding (°)</label><input id="artIncisal" type="number" min="0" max="45" step="1" value="10" data-persist></div>
+          <div class="field"><label for="artLateral">Hoektandgeleiding (°)</label><input id="artLateral" type="number" min="0" max="45" step="1" value="15" data-persist></div>
+        </div>
+        <p class="sub">Half-instelbaar: Bonwill-driehoek 105 mm, condylusafstand 110 mm, Balkwill-hoek 22°. De bovenkaak staat vast, de onderkaak beweegt.</p>
+      </details>
+      <h4>Inslijpen</h4>
+      <div class="grid2">
+        <div class="field"><label for="grindTarget">Slijpen in</label><select id="grindTarget" data-persist><option value="lower">Onderkaak (OK)</option><option value="upper">Bovenkaak (BK)</option><option value="both">Beide (helft-helft)</option></select></div>
+        <div class="field"><label for="grindClearance">Rest-speling (mm)</label><input id="grindClearance" type="number" min="0" max="0.3" step="0.01" value="0" data-persist></div>
+        <div class="field"><label for="grindMax">Max. wegnemen (mm)</label><input id="grindMax" type="number" min="0.1" max="3" step="0.1" value="1" data-persist></div>
+      </div>
+      <label class="check"><input type="checkbox" id="grindFront" data-persist> Front ook slijpen in de bewegingen (anders alleen zijdelingse delen)</label>
+      <div class="actions"><button id="grindAuto" class="primary">Automatisch (centrisch)</button><button id="grindAutoMove">Automatisch + bewegingen</button><button id="grindUndo">↶ Slijpen terug</button></div>
+      <div class="actions"><button id="grindManual" aria-pressed="false">🪨 Handmatig slijpen</button><select id="grindMode" aria-label="Slijpkop"><option value="grind">Wegnemen</option><option value="add">Opbouwen</option><option value="smooth">Gladmaken</option></select></div>
+      <div class="grid2">
+        <div class="field"><label for="grindRadius">Slijpkop (mm)</label><input id="grindRadius" type="range" min="0.4" max="3" step="0.1" value="1.2"></div>
+        <div class="field"><label for="grindStrength">Sterkte</label><input id="grindStrength" type="range" min="1" max="15" step="1" value="4"></div>
+      </div>
       <div id="occlInfo" class="note mono">Laad een antagonist in stap 2 voor occlusie en contactkaart.</div>
       <button id="exportSetup" class="wide">↓ Opstelplan (JSON)</button>
     </section>

@@ -1,5 +1,5 @@
 // Scanvolgende plaat: offset van een open kaakoppervlak tot een gesloten schaal.
-import { weld, clean, orient, flipAll, boundaryLoops, fillHoles, vertexNormals, loopLength, tidySheet } from './mesh.js';
+import { weld, clean, orient, flipAll, boundaryLoops, fillHoles, vertexNormals, loopLength, tidySheet, toSoup, pointToSurfaceDistances } from './mesh.js';
 
 export function shell(soup, { gap = 0, wall = 2, reverse = false, draftAngle = null, smoothing = 2, allowNegativeGap = false, maxScale = 1.3 } = {}, report = {}) {
   if (!Number.isFinite(gap) || (gap < 0 && !allowNegativeGap) || !Number.isFinite(wall) || wall <= 0) throw Error('Vul een geldige ruimte en positieve dikte in.');
@@ -42,6 +42,35 @@ export function shell(soup, { gap = 0, wall = 2, reverse = false, draftAngle = n
     for (let j = 0; j < 3; j++) { const i = v * 3 + j; inner[i] = positions[i] + normals[i] * gap * k; outer[i] = positions[i] + normals[i] * (gap + wall) * k; }
   }
   const rim = loops[0];
+  // Ruimte exact maken (nauwkeurigheid 0,05 mm): de verschuiving langs de puntnormaal komt in holtes te dicht bij
+  // en op bolle delen te ver van de scan. Per punt de echte afstand tot het (onverschoven) oppervlak meten en
+  // binnen- en buitenkant samen bijstellen, zodat de wanddikte gelijk blijft.
+  report.gapCorrected = 0;
+  if (gap > 0) {
+    const surfaceSoup = toSoup(work), onRim = new Uint8Array(vCount); for (const v of rim) onRim[v] = 1;
+    const cp = new Float32Array(inner.length);
+    for (let it = 0; it < 5; it++) {
+      const d = pointToSurfaceDistances(inner, surfaceSoup, { maxDist: gap + 2, closest: cp });
+      let changed = 0;
+      for (let v = 0; v < vCount; v++) {
+        if (!Number.isFinite(d[v])) continue;
+        let delta = [0, 0, 0];
+        if (d[v] < gap - 0.01) {
+          // te dicht (holte, of de tegenoverliggende wand van een smalle plooi): weg van het dichtstbijzijnde scanpunt
+          // tot precies de ingestelde ruimte (Minkowski-offset); zo overbrugt de lepel smalle plooien
+          const o = [inner[v * 3] - cp[v * 3], inner[v * 3 + 1] - cp[v * 3 + 1], inner[v * 3 + 2] - cp[v * 3 + 2]], l = Math.hypot(...o);
+          const dir = l > 1e-6 ? o.map(x => x / l) : [normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2]];
+          delta = [0, 1, 2].map(k => cp[v * 3 + k] + dir[k] * gap - inner[v * 3 + k]);
+        } else if (d[v] > gap + 0.03 && !onRim[v]) { const k2 = -(d[v] - gap) * 0.5; delta = [normals[v * 3] * k2, normals[v * 3 + 1] * k2, normals[v * 3 + 2] * k2]; }
+        else continue;
+        const len = Math.hypot(...delta); if (len < 1e-6) continue;
+        const sc = Math.min(1, 1.0 / len); changed++;
+        for (let j = 0; j < 3; j++) { inner[v * 3 + j] += delta[j] * sc; outer[v * 3 + j] += delta[j] * sc; }
+      }
+      report.gapCorrected = Math.max(report.gapCorrected, changed);
+      if (!changed) break;
+    }
+  }
   const out = new Float32Array((f.length / 3 * 2 + rim.length * 2) * 9);
   let o = 0;
   const put = (arr, v) => { out[o++] = arr[v * 3]; out[o++] = arr[v * 3 + 1]; out[o++] = arr[v * 3 + 2]; };

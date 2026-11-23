@@ -2,6 +2,8 @@
 import * as THREE from 'three';
 import { vec } from './analysis.js';
 import { makeTooth, layoutArch, archPoint, toothType, toothDimensions } from './teeth.js';
+import { anatomicTooth } from './crowns.js';
+import { libraryTooth, hasTooth } from './library.js';
 
 export const CONCEPTS = {
   gysi: { label: 'Gysi', spee: 2.0, wilson: 10, labial: 10, cusp: 1.0, lingualShift: 0 },
@@ -42,11 +44,15 @@ export function frameBuccal(frame, x, y, tangent2) {
 }
 
 export function placeTeeth(ids, frame, opts, scanMesh = null) {
-  const { form = 'oval', scale = 1, shape = 'oval', concept = 'gysi', occlusalHeight = 9, gap = 0, wall = 2, custom = null, arch = null } = opts;
+  const { form = 'oval', scale = 1, shape = 'oval', concept = 'gysi', occlusalHeight = 9, gap = 0, wall = 2, custom = null, arch = null, library = 'anatomic', librarySet = null, ideal = null, rootMax = Infinity } = opts;
   // occlusalHeight: vast getal (mm boven het boogvlak) of functie (booglengte vanaf de middellijn, maximale booglengte) → mm.
   const planeAt = typeof occlusalHeight === 'function' ? occlusalHeight : () => occlusalHeight;
   const c = { ...CONCEPTS[concept], ...(concept === 'custom' && custom ? custom : {}) };
-  const layout = layoutArch(ids, { jaw: frame.jaw, width: frame.width, depth: frame.depth, form, scale, arch });
+  // externe bibliotheek: alleen elementen die de set heeft; breedtes langs de boog uit de echte kronen
+  if (librarySet) ids = ids.filter(id => hasTooth(librarySet, id));
+  const libWidth = librarySet ? (id => libraryTooth(librarySet, id, { scale, rootLength: 1 })?.md ?? null) : null;
+  const widthCache = new Map(), widthOf = libWidth ? (id => { if (!widthCache.has(id)) widthCache.set(id, libWidth(id)); return widthCache.get(id); }) : null;
+  const layout = layoutArch(ids, { jaw: frame.jaw, width: frame.width, depth: frame.depth, form, scale, arch, widthOf, gap: librarySet ? 0 : 0.15 });
   const maxD = Math.max(1, ...layout.map(t => t.distance));
   const canineD = layout.find(t => toothType(t.fdi) === 3)?.distance ?? maxD * 0.35;
   const ray = new THREE.Raycaster(); ray.firstHitOnly = true;
@@ -57,10 +63,14 @@ export function placeTeeth(ids, frame, opts, scanMesh = null) {
     const P = framePoint(frame, item.position[0], item.position[1]);
     const zAxis = new THREE.Vector3(...frameBuccal(frame, item.position[0], item.position[1], [item.mesial[0], item.mesial[1]]));
     const yAxis = N.clone(), xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis);
-    const dims = toothDimensions(item.fdi, scale);
+    const mesialW = new THREE.Vector3(...[0, 1, 2].map(i => frame.X[i] * item.mesial[0] + frame.Y[i] * item.mesial[1])).normalize();
+    const mirror = xAxis.dot(mesialW) < 0; // lokale +x van het element wijst distaal → kroon spiegelen
+    const lib = librarySet ? libraryTooth(librarySet, item.fdi, { scale, rootLength: 1, mirror }) : null;
+    const dims = lib ? { md: lib.md, bl: lib.bl, height: lib.height } : toothDimensions(item.fdi, scale);
+    const id = ideal?.[item.fdi];
     // Hoogte langs N: occlusaal vlak + curve van Spee.
     const f = item.distance > canineD ? ((item.distance - canineD) / Math.max(1, maxD - canineD)) ** 2 : 0;
-    const shift = upperSign * c.spee * f, plane = planeAt(item.distance, maxD);
+    const shift = id ? 0 : upperSign * c.spee * f, plane = planeAt(item.distance, maxD) + (id ? id.level : 0);
     const lingual = posterior && frame.jaw === 'upper' ? -c.lingualShift : 0;
     // Wortellengte: tot halverwege de basis, gemeten met een straal naar de scan.
     let root = 4;
@@ -77,17 +87,26 @@ export function placeTeeth(ids, frame, opts, scanMesh = null) {
       }
       if (Number.isFinite(best)) root = Math.max(0.8, best - gap - wall * 0.5);
     } else root = Math.max(1.2, cervicalN - gap - wall * 0.5);
-    const tooth = makeTooth(item.fdi, { scale, shape: type <= 3 ? shape : 'oval', cuspHeight: c.cusp, rootLength: root });
+    root = Math.min(root, rootMax);
+    // anatomische kronen (Wheeler's/DentCraft); knobbelhoogte en slijtage volgen het opstelconcept
+    const tooth = lib ? libraryTooth(librarySet, item.fdi, { scale, rootLength: root, mirror }) : library === 'simple' ? makeTooth(item.fdi, { scale, shape: type <= 3 ? shape : 'oval', cuspHeight: c.cusp, rootLength: root })
+      : anatomicTooth(item.fdi, { scale, shape: type <= 3 ? shape : 'oval', rootLength: root, cusp: Math.max(0.3, c.cusp), wear: concept === 'monoplane' ? 1 : Math.max(0, 1 - c.cusp) * 0.6 });
     const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
     const q = new THREE.Quaternion().setFromRotationMatrix(basis);
     // Labiale inclinatie (front) en curve van Wilson (zijdelings): rotatie om de mesiodistale as.
     let tilt = 0;
-    if (type <= 3) tilt = c.labial * (type === 3 ? 0.5 : 1) * (frame.jaw === 'upper' ? 1 : 0.6);
+    if (id) tilt = id.torque;
+    else if (type <= 3) tilt = c.labial * (type === 3 ? 0.5 : 1) * (frame.jaw === 'upper' ? 1 : 0.6);
     else tilt = (frame.jaw === 'upper' ? 1 : -1) * c.wilson * (type >= 6 ? 1 : 0.5);
     q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), tilt * Math.PI / 180));
-    const position = new THREE.Vector3(...P).addScaledVector(N, plane - tooth.occlusalY + shift).addScaledVector(zAxis, lingual);
-    const mesial = new THREE.Vector3(...[0, 1, 2].map(i => frame.X[i] * item.mesial[0] + frame.Y[i] * item.mesial[1])).normalize();
-    return { fdi: item.fdi, soup: tooth.soup, position, quaternion: q, dims, root, mesial, buccal: zAxis.clone(), planeHeight: plane, arch2d: item.position };
+    // angulatie (tip) uit de bibliotheek: + = kroon naar mesiaal; rotatie om lokale z kantelt y naar −x
+    if (id) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -(mirror ? -1 : 1) * id.tip * Math.PI / 180));
+    // exacte hoogte: hoogste kroonpunt langs N op het occlusievlak (na kanteling)
+    let top = -Infinity; const tv = new THREE.Vector3(), st = Math.max(3, Math.floor(tooth.soup.length / 3 / 2000) * 3);
+    for (let i = 0; i < tooth.soup.length; i += st) { tv.set(tooth.soup[i], tooth.soup[i + 1], tooth.soup[i + 2]).applyQuaternion(q); top = Math.max(top, tv.dot(N)); }
+    const position = new THREE.Vector3(...P).addScaledVector(N, plane + shift - top).addScaledVector(zAxis, lingual);
+    const mesial = mesialW;
+    return { fdi: item.fdi, soup: tooth.soup, mesh: tooth.mesh ?? null, position, quaternion: q, dims, root, mesial, buccal: zAxis.clone(), planeHeight: plane, arch2d: item.position, distance: item.distance };
   });
 }
 

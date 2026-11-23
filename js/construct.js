@@ -85,9 +85,9 @@ export function biteRim(frame, { width = 7, height = 10, embed = 1.5, form = 'ov
 }
 
 // Gingivaband: verbindt de basis met de halslijn van de tanden.
-export function gingivaBand(frame, { width = 9, top = 4, embed = 1.5, form = 'oval', conform = null, arch = null } = {}) {
+export function gingivaBand(frame, { width = 9, top = 4, embed = 1.5, form = 'oval', conform = null, arch = null, samples = 240 } = {}) {
   const topAt = typeof top === 'function' ? top : () => top;
-  return sweep(frame, t => roundedRect(width * (0.85 + 0.25 * Math.min(1, Math.abs(t) * 1.5)), -embed, topAt(t), width * 0.7, 1.5), { form, tStart: -0.97, tEnd: 0.97, conform, arch });
+  return sweep(frame, t => roundedRect(width * (0.85 + 0.25 * Math.min(1, Math.abs(t) * 1.5)), -embed, topAt(t), width * 0.7, 1.5), { form, tStart: -0.97, tEnd: 0.97, conform, arch, samples });
 }
 
 export function box(center, axes, size, conform = null) {
