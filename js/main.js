@@ -137,6 +137,7 @@ function showStep(id) {
   if (id === 'productie') renderOutputs();
   if (id === 'controle') runChecks();
   updateContourUI(); refreshScanColors(); refreshOverlay(); syncPlateVisibility(); updateDone();
+  syncHeaderNav();
   autoStep(id);
 }
 // Bij het openen van Lepel/Beetplaat/Basis zonder werkstuk: zelf de rand volgens de anatomie zetten en het werkstuk maken.
@@ -312,8 +313,8 @@ $('meshScaleBtn').onclick = () => { const k = num('meshScale'); if (!(k > 0 && k
 $('meshMirror').onclick = () => { const s = [1, 1, 1]; s[+$('meshAxis').value] = -1; transformScan(about(new THREE.Matrix4().makeScale(...s)), 'Scan gespiegeld.'); };
 $('meshFlip').onclick = () => transformScan(null, 'Normaalrichting omgekeerd.', { winding: true });
 $('meshCenter').onclick = () => { const c = center(); transformScan(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z), 'Scan gecentreerd rond de oorsprong.'); };
-$('meshUndo').onclick = () => { const h = S.history.pop(); if (!h) return; S.future.push({ soup: S.scan, aux: snapshotAux() }); restoreAux(h.aux); setScan(h.soup, S.scanName, { reset: false }); status('Bewerking teruggedraaid.'); };
-$('meshRedo').onclick = () => { const h = S.future.pop(); if (!h) return; S.history.push({ soup: S.scan, aux: snapshotAux() }); restoreAux(h.aux); setScan(h.soup, S.scanName, { reset: false }); status('Bewerking hersteld.'); };
+$('meshUndo').onclick = () => { const h = S.history.pop(); if (!h) return status('Niets om terug te zetten in de scan.'); S.future.push({ soup: S.scan, aux: snapshotAux() }); const keep = keepDesign(); restoreAux(h.aux); setScan(h.soup, S.scanName, { reset: false }); status('Scanbewerking teruggedraaid.'); restoreDesign(keep); };
+$('meshRedo').onclick = () => { const h = S.future.pop(); if (!h) return status('Niets om opnieuw te doen in de scan.'); S.history.push({ soup: S.scan, aux: snapshotAux() }); const keep = keepDesign(); restoreAux(h.aux); setScan(h.soup, S.scanName, { reset: false }); status('Scanbewerking hersteld.'); restoreDesign(keep); };
 $('meshExport').onclick = () => { if (!S.scan) return status('Laad eerst een scan.', true); download(writeSTL(S.scan, 'Scan ' + S.scanName), 'SCAN_' + safe(S.scanName.replace(/\.stl$/i, '')) + '.stl'); };
 function qaText(q) {
   return [`Driehoeken: ${int(q.faces)} · punten: ${int(q.vertices)} · delen: ${q.components}`,
@@ -1124,14 +1125,36 @@ $('openProject').addEventListener('change', e => { const f = e.target.files?.[0]
 }); });
 
 // ---------- navigatie en sneltoetsen ----------
-$('prevStep').onclick = () => { const v = workSteps(), i = v.indexOf(S.step); showStep(v[Math.max(0, i - 1)]); };
-$('nextStep').onclick = () => { const v = workSteps(), i = v.indexOf(S.step); showStep(v[Math.min(v.length - 1, i + 1)]); };
+function stepBy(d) { const v = workSteps(), i = Math.max(0, v.indexOf(S.step)); showStep(v[Math.max(0, Math.min(v.length - 1, i + d))]); }
+$('prevStep').onclick = () => stepBy(-1);
+$('nextStep').onclick = () => stepBy(1);
+// Ongedaan maken / opnieuw voor de stap waarin je bent (bovenbalk, Ctrl+Z / Ctrl+Y)
+const UNDO_MAP = { scan: ['meshUndo', 'meshRedo'], analyse: ['markUndo', 'markRedo'], opstelling: ['teethUndo', 'teethRedo'], bewerken: ['sculptUndo', 'sculptRedo'], lepel: ['contourUndo', 'contourRedo'], beetplaat: ['contourUndo', 'contourRedo'], basis: ['contourUndo', 'contourRedo'] };
+function stepUndo(redo = false) {
+  if (S.step === 'opstelling' && S.mode === 'grind' && !redo) return $('grindUndo').click();
+  const map = UNDO_MAP[S.step];
+  if (!map) return status('In deze stap valt niets terug te zetten.');
+  $(map[redo ? 1 : 0]).click();
+}
+$('hdrPrev').onclick = () => stepBy(-1);
+$('hdrNext').onclick = () => stepBy(1);
+$('hdrUndo').onclick = () => stepUndo(false);
+$('hdrRedo').onclick = () => stepUndo(true);
+function syncHeaderNav() {
+  const v = workSteps(), i = v.indexOf(S.step);
+  $('hdrPrev').disabled = i <= 0; $('hdrNext').disabled = i < 0 || i >= v.length - 1;
+  const name = id => STEPS.find(s => s[0] === id)?.[1] ?? '';
+  $('hdrPrev').title = i > 0 ? `Vorige stap: ${name(v[i - 1])}` : 'Eerste stap'; $('hdrNext').title = i >= 0 && i < v.length - 1 ? `Volgende stap: ${name(v[i + 1])}` : 'Laatste stap';
+  $('hdrStep').textContent = i >= 0 ? `${i + 1}/${v.length} ${name(S.step)}` : name(S.step);
+  const can = !!UNDO_MAP[S.step]; $('hdrUndo').disabled = !can; $('hdrRedo').disabled = !can;
+}
 function syncWorkSteps() {
   const v = workSteps();
   // alle stappen blijven zichtbaar (Lepel, Beetplaat én Opstelling/Basis), zodat je direct een ander werkstuk kunt kiezen;
   // stappen van een ander werkstuk zijn gedimd en kiezen bij aantikken dat werkstuk
   for (const b of document.querySelectorAll('[data-step]')) { const li = b.closest('li') ?? b; li.classList.remove('hide'); b.classList.toggle('otherwork', !v.includes(b.dataset.step)); }
   STEPS.forEach(([id], i) => { for (const b of document.querySelectorAll(`[data-step="${id}"] .dot`)) b.textContent = i + 1; });
+  if (typeof syncHeaderNav === 'function' && $('hdrPrev')) syncHeaderNav();
   if (!isDenture()) { viewer.groups.teeth.visible = false; }
   if (S.step && !v.includes(S.step)) showStep(v.find(x => ['lepel', 'beetplaat', 'opstelling'].includes(x)) ?? 'opdracht');
 }
@@ -1144,8 +1167,7 @@ document.addEventListener('keydown', e => {
   if (mod && (k === 'z' || k === 'y')) {
     e.preventDefault();
     const redo = k === 'y' || e.shiftKey;
-    const map = { scan: ['meshUndo', 'meshRedo'], analyse: ['markUndo', 'markRedo'], opstelling: ['teethUndo', 'teethRedo'], bewerken: ['sculptUndo', 'sculptRedo'], lepel: ['contourUndo', 'contourRedo'], beetplaat: ['contourUndo', 'contourRedo'], basis: ['contourUndo', 'contourRedo'] }[S.step];
-    if (map) $(map[redo ? 1 : 0]).click();
+    stepUndo(redo);
     return;
   }
   if (mod) return;

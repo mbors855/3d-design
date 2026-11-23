@@ -23,6 +23,14 @@
 <body>
 <header>
   <div class="brand">🦷 Digital Denture CAD <span>65.3</span></div>
+  <nav class="stepnav" aria-label="Stappen">
+    <button id="hdrPrev" title="Vorige stap">◀<span class="lbl"> Vorige</span></button>
+    <span id="hdrStep" class="hdrstep"></span>
+    <button id="hdrNext" class="primary" title="Volgende stap"><span class="lbl">Volgende </span>▶</button>
+    <span class="sep"></span>
+    <button id="hdrUndo" title="Ongedaan maken in deze stap (Ctrl+Z)">↶</button>
+    <button id="hdrRedo" title="Opnieuw in deze stap (Ctrl+Y)">↷</button>
+  </nav>
   <div class="header-actions">
     <span class="badge">Prototype · niet voor klinisch gebruik</span>
     <a class="btn" href="orders.html" title="3Shape-export inlezen en controleren">📋 Orders</a>

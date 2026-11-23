@@ -204,3 +204,11 @@ label.button.primary { background: var(--accent-strong); border-color: #3dc3d0; 
 /* scanbewerking: overlay voor lasso en penseel */
 .scanedit-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: none; z-index: 4; }
 .scanedit-overlay.on { display: block; }
+
+/* bovenbalk: stap terug/vooruit en ongedaan maken */
+.stepnav { display: flex; align-items: center; gap: 6px; margin: 0 auto; }
+.stepnav button { min-width: 40px; padding: 6px 10px; }
+.stepnav button:disabled { opacity: .35; }
+.stepnav .hdrstep { font-size: 13px; color: #b9d3e3; min-width: 120px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.stepnav .sep { width: 1px; height: 22px; background: #3a5a6f; margin: 0 4px; }
+@media (max-width: 760px) { .stepnav .lbl, .stepnav .hdrstep { display: none; } .stepnav { gap: 4px; } .badge { display: none; } }
