@@ -5,7 +5,7 @@ const J = '../js/';
 const { parseName, parse3ox, parseInf, universalToFDI, jawOfTooth, analyseOrders, simulatePrint, classifyGeometry, levenshtein, orderStem } = await import(J + 'orders.js');
 const { listZip, readZipEntry } = await import(J + 'unzip.js');
 const { makeZip } = await import(J + 'zip.js');
-const { weld, quality, tidySheet, boundaryLoops } = await import(J + 'mesh.js');
+const { weld, quality, tidySheet, boundaryLoops, pointToSurfaceDistances } = await import(J + 'mesh.js');
 const { shell } = await import(J + 'shell.js');
 const { extractIntaglio } = await import(J + 'intaglio.js');
 const { demoJaw } = await import(J + 'demo.js');
@@ -95,8 +95,15 @@ await test('autoLandmarks: geen stack overflow bij veel punten', () => {
   const big = new Float32Array(jaw.length * 4); for (let k = 0; k < 4; k++) big.set(jaw, k * jaw.length);
   const lm = autoLandmarks(big, occlusalAxis(big)); assert.ok(lm.R && lm.M && lm.L);
 });
-await test('wand nergens dunner dan ingesteld (hoekcompensatie)', () => {
-  const rep = {}; shell(jaw, { gap: 0, wall: 2 }, rep); assert.ok(rep.maxScale >= 1 && rep.maxScale <= 1.3 + 1e-6);
+await test('wand nergens dunner dan ingesteld (v69: buitenkant op de afstand tot de scan)', () => {
+  const rep = { debug: true }; shell(jaw, { gap: 0, wall: 2 }, rep);
+  assert.equal(rep.method, 'iso');
+  const d = pointToSurfaceDistances(rep.outerSoup, jaw, { maxDist: 5 });
+  let min = Infinity, max = 0; for (const x of d) { if (x < min) min = x; if (x > max && x !== Infinity) max = x; }
+  assert.ok(min >= 2 - 0.02, 'dunste plek ' + min.toFixed(3));
+  assert.ok(max <= 2 + 1.2, 'dikste plek ' + max.toFixed(3));
+  // oude methode blijft beschikbaar (weefselblok)
+  const r2 = {}; shell(jaw, { gap: 0, wall: 2, method: 'normal' }, r2); assert.ok(r2.maxScale >= 1 && r2.maxScale <= 1.3 + 1e-6);
 });
 await test('geometrie-indeling', () => {
   assert.equal(classifyGeometry({ volume: 0.5, triangles: 100, dims: [1, 1, 1] }), 'fragment');
@@ -692,6 +699,49 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     const r = await C.unionSoups([box([0, 0, 0], 5), box([20, 0, 0], 0.4)]), q = M.quality(M.weld(r.soup, 1e-5));
     assert.equal(q.components, 1, 'mini-blokje (0,5 mm³) weggelaten'); assert.ok(Math.abs(Math.abs(q.volume) - 1000) < 1e-3);
     const r2 = await C.unionSoups([box([0, 0, 0], 5), box([20, 0, 0], 3)]); assert.equal(M.quality(M.weld(r2.soup, 1e-5)).components, 2, 'groot los deel blijft');
+  });
+}
+
+// ---- v69: buitenkant als iso-oppervlak (geen scherven meer op betande scans) ----
+{
+  const M = await import(J + 'mesh.js'), SH = await import(J + 'shell.js'), X = await import(J + 'meshcheck.js'), B = await import(J + 'bvh.js');
+  const { dentateJaw } = await import(J + 'demo-dentate.js');
+  const dent = (await dentateJaw({ missing: [36, 37], noise: 0.02, columns: 40, rows: 24 })).soup;
+  const own = X.selfIntersections(M.weld(dent, 1e-6)).pairs; // de (ruisende) scan zelf
+  await test('v69 zelfdoorsnijding: kruisende driehoeken gevonden, gesloten blok schoon', () => {
+    const tri = (a, b, c) => [...a, ...b, ...c];
+    const two = Float32Array.from([...tri([0, 0, 0], [2, 0, 0], [0, 2, 0]), ...tri([0.5, 0.5, -1], [0.5, 0.5, 1], [3, 3, 0])]);
+    assert.equal(X.selfIntersections(M.weld(two, 1e-6)).pairs, 1);
+    const box = []; const P = [-1, 1].flatMap(x => [-1, 1].flatMap(y => [-1, 1].map(z => [x, y, z])));
+    for (const [a, b, c, d] of [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]]) box.push(...P[a], ...P[b], ...P[c], ...P[a], ...P[c], ...P[d]);
+    assert.equal(X.selfIntersections(M.weld(Float32Array.from(box), 1e-6)).pairs, 0);
+  });
+  await test('v69 betande scan, beetplaat 0 mm: gesloten, geen scherven (zelfdoorsnijding), wand overal 2 mm, pasvlak = scan', () => {
+    const rep = { debug: true }, plate = SH.shell(dent, { gap: 0, wall: 2, checkThin: true }, rep), m = M.weld(plate, 1e-6), q = M.quality(m);
+    assert.ok(q.watertight && q.nonManifold === 0, JSON.stringify(q));
+    const si = X.selfIntersections(m).pairs; assert.ok(si <= own + 5, `zelfdoorsnijding ${si} (scan zelf ${own})`);
+    const d = M.pointToSurfaceDistances(rep.outerSoup, dent, { maxDist: 6 }); let min = Infinity, max = 0; for (const x of d) { min = Math.min(min, x); if (x !== Infinity) max = Math.max(max, x); }
+    assert.ok(min > 1.98 && max < 3.3, `wand ${min.toFixed(3)} … ${max.toFixed(3)} mm`);
+    assert.equal(rep.thin, 0);
+    // pasvlak = scan; alleen de kartelige scanrand is in het raakvlak gladgestreken (hooguit 0,3 mm)
+    const f = M.fitReport(dent, plate, 0); assert.ok(f.p99 < 0.02 && f.within > 0.99 && f.max < 0.45, `pasvlak ${JSON.stringify(f)}`);
+    // de oude methode gaf hier duizenden zelfdoorsnijdingen (de 'scherven' uit de praktijk)
+    const old = X.selfIntersections(M.weld(SH.shell(dent, { gap: 0, wall: 2, method: 'normal' }), 1e-6)).pairs; assert.ok(old > si * 3 + 100, `oud ${old} / nieuw ${si}`);
+  });
+  await test('v69 betande scan, 2 mm afdrukruimte (met en zonder afsluitzone): gesloten, schoon, nergens te dicht', () => {
+    for (const seal of [0, 2]) {
+      const plate = SH.shell(dent, { gap: 2, wall: 2, rimSeal: seal }, {}), m = M.weld(plate, 1e-6), q = M.quality(m);
+      assert.ok(q.watertight && q.nonManifold === 0, `afsluitzone ${seal}: ${JSON.stringify(q)}`);
+      assert.equal(X.selfIntersections(m).pairs, 0, `zelfdoorsnijding (afsluitzone ${seal})`);
+      // (met afsluitzone loopt de plaat in de overgang bewust schuin naar de scanrand: daar mag hij iets dichter komen)
+      const f = M.fitReport(dent, plate, 2, { rimSeal: seal }); assert.ok(f.closeP99 < 0.06 && f.closeMax < (seal ? 0.6 : 0.25), `afsluitzone ${seal}: ${JSON.stringify(f)}`);
+    }
+  });
+  await test('v69 plaatrand: afgerond, onderste ring op de scanrand, rand loopt mee met de scan', () => {
+    const plate = SH.shell(dent, { gap: 0, wall: 2 }, {}), bvh = new B.TriBVH(plate);
+    const m = M.tidySheet(M.orient(M.clean(M.weld(dent, 1e-5)).mesh).mesh).mesh, rim = M.boundaryLoops(m).loops.sort((x, y) => y.length - x.length)[0];
+    let worst = 0; for (const v of rim) worst = Math.max(worst, bvh.closest(m.positions[v * 3], m.positions[v * 3 + 1], m.positions[v * 3 + 2]));
+    assert.ok(worst < 0.4, `scanrand tot plaat ${worst.toFixed(3)} mm (kartels gladgestreken)`);
   });
 }
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

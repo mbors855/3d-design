@@ -4,6 +4,7 @@ import { Viewer, makePolyline, makeDots, makeMesh, COLORS } from './viewer.js';
 import { parseSTL, writeSTL, soupBounds, toBase64, fromBase64, concatSoups } from './stl.js';
 import { fitReport, weld, quality, repair, toSoup, flipSoup, applyMatrixToSoup, boundaryLoops } from './mesh.js';
 import { shell, shellAsync } from './shell.js';
+import { selfIntersections } from './meshcheck.js';
 import { ContourSet, editableOutline } from './contour.js';
 import { simplifySoup, simplifyText, SCAN_LIMIT } from './decimate.js';
 import { occlusalAxis, autoLandmarks, undercutMarks, vec } from './analysis.js';
@@ -700,7 +701,9 @@ async function clipToTissue(kind, soup, reverse) {
   const makers = [[1.5, 8], [1, 4], [0.6, 2.5]].map(([margin, wall], i) => async () => {
     if (i) await tick('Weefselblok opnieuw proberen…');
     const wide = s.edge ? trimByEdge(src, { inset: 0, splitAt: S.designedFrom ?? null }).soup : trimByOutline(src, s.points, s.axis, { margin }).soup;
-    return shellAsync(wide, { gap: 0.005, wall, reverse: !reverse }, {}, () => tick()); // 0,005 mm in het weefsel: geen samenvallende vlakken
+    // 0,005 mm in het weefsel: geen samenvallende vlakken. Weefselblok nog met de normaal-offset (v68): de onderkant
+    // hoeft niet glad te zijn, en een iso-oppervlak op 8 mm aan de weefselkant bestaat bij een smalle kam niet binnen de rand.
+    return shellAsync(wide, { gap: 0.005, wall, reverse: !reverse, method: 'normal' }, {}, () => tick());
   });
   const r = await subtractFirst(soup, makers);
   if (r.used >= 0) return r.soup;
@@ -708,15 +711,20 @@ async function clipToTissue(kind, soup, reverse) {
   toast('Let op: delen die door het pasvlak steken konden niet automatisch worden weggesneden. Controleer het pasvlak.', true);
   return soup;
 }
+// v69: zelfdoorsnijding van de scan zelf (één keer per scan)
+const SCAN_SI = new WeakMap();
+function scanSelfIntersections() { if (!S.scan) return 0; let v = SCAN_SI.get(S.scan); if (v === undefined) { v = selfIntersections(weld(S.scan, 1e-6), { maxPairs: 5e6 }).pairs; SCAN_SI.set(S.scan, v); } return v; }
+// v69: de kartelige scanrand wordt in het raakvlak gladgestreken (hooguit 0,3 mm); die laatste strook niet meetellen
+const rimBandOf = rep => rep?.rimSmoothed > 0.02 ? 0.5 : 0;
 function waxNote() { const st = S.wax && S.wax.soup === S.scan ? S.wax.stats() : null; return st?.points ? ` · was op ${int(st.points)} punten (max ${fmt(st.max, 2)} mm): daar ligt de plaat bewust vrij van de scan` : ''; }
 // Pasvlak-controle: afstand scan → plaat t.o.v. de ingestelde ruimte; het aangevulde (ontworpen) deel telt niet mee.
 S.fit = {};
-function fitCheck(kind, surface, soup, gap, rimSeal = 0) {
+function fitCheck(kind, surface, soup, gap, rimSeal = 0, rimBand = 0) {
   const s = S.contours.get(kind), skip = s?.splitIndex != null && s.splitIndex < surface.length / 9 ? s.splitIndex : null;
-  const f = fitReport(surface, soup, gap, { skipFrom: skip, rimSeal });
+  const f = fitReport(surface, soup, gap, { skipFrom: skip, rimSeal, rimBand });
   S.fit[kind] = f ? { ...f, gap, designed: skip != null } : null;
   if (!f) return '';
-  const tail = skip != null ? ' · aangevuld deel niet meegeteld' : '';
+  const tail = (skip != null ? ' · aangevuld deel niet meegeteld' : '') + (rimBand > 0 ? ` · kartelige scanrand gladgestreken (laatste ${fmt(rimBand, 1)} mm niet meegeteld)` : '');
   if (!gap) { const ok = f.p99 <= 0.05; return ` · <span class="${ok ? 'ok' : 'err'}">pasvlak ${Math.round(f.within * 1000) / 10}% binnen 0,05 mm van de scan, 99% ≤ ${fmt(f.p99, 3)} mm</span>${tail}`; }
   const ok = f.closeP99 <= 0.05;
   return ` · <span class="${ok ? 'ok' : 'err'}">afdrukruimte ${fmt(gap, 2)} mm: ${Math.round(f.within * 1000) / 10}% binnen 0,05 mm, nergens meer dan ${fmt(f.closeP99, 3)} mm te dicht (99%)</span>${f.bridged > 0.005 ? ` · ${Math.round(f.bridged * 1000) / 10}% overbrugd (smalle plooien)` : ''}${tail}`;
@@ -754,7 +762,9 @@ function syncPlateVisibility() {
 function clearPlates() { S.plates = {}; viewer.clearGroup('plates'); for (const id of ['lepelResult', 'beetResult', 'basisResult']) $(id).innerHTML = ''; }
 function plateSummary(soup) {
   const q = quality(weld(soup, 1e-6));
-  const state = q.watertight ? 'gesloten ✓'
+  // v69: alleen platte (nul-oppervlak) driehoekjes van het samenvoegen = gewoon gesloten; dat gaf eerst de verwarrende
+  // melding '0 niet-manifold randen'
+  const state = q.watertight || (q.open === 0 && q.flipped === 0 && q.nonManifold === 0) ? `gesloten ✓${q.degenerate ? ` (${int(q.degenerate)} plat driehoekje${q.degenerate === 1 ? '' : 's'} van het samenvoegen, onschadelijk)` : ''}`
     : q.open === 0 && q.flipped === 0 ? `gesloten, ${int(q.nonManifold)} niet-manifold rand${q.nonManifold === 1 ? '' : 'en'} (delen raken elkaar; controleer in de slicer)`
     : `⚠ niet volledig gesloten (${int(q.open)} open randen)`;
   const loose = q.components > 1 ? ` · ⚠ ${q.components} losse delen (raakt handvat of wal de plaat niet? verklein de afstand of schakel het onderdeel uit)` : '';
@@ -788,7 +798,7 @@ async function buildLepel() {
     soup = (await unionSoups([soup, ...extras])).soup;
     if (cutters.length) soup = await subtractSoups(soup, cutters);
   }
-  const { text } = plateSummary(soup), fitTxt = fitCheck('lepel', surface, shellSoup, gap) + waxNote();
+  const { text } = plateSummary(soup), fitTxt = fitCheck('lepel', surface, shellSoup, gap, 0, rimBandOf(rep)) + waxNote();
   S.plates.lepel = { soup, name: 'Individuele lepel', file: `LEPEL_${safe($('caseName').value)}.stl` };
   showPlate('lepel', soup, COLORS.plate.lepel);
   result('lepelResult', `Lepel klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)}${rep.holesFilled ? ` · ${rep.holesFilled} gaten in de scan gedicht` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('lepel', 'Lepel-STL')}`);
@@ -807,7 +817,8 @@ async function buildBeet() {
   // met afdrukruimte: de ruimte loopt aan de rand naar 0, zodat de plaatrand precies op de scan(rand) ligt
   const seal = gap > 0 && $('beetSeal').checked ? Math.max(0.5, num('beetSealWidth') || 2) : 0;
   await tick(gap > 0 ? `Plaat opbouwen (${fmt(gap, 2)} mm afstand tot de scan)…` : 'Plaat opbouwen…');
-  let soup = await shellAsync(surf2, { gap, wall, reverse, rimSeal: seal, checkThin: true }, rep, () => tick());
+  // langs de scanrand: dunne punten die het bijsnijden liet staan niet meenemen (breekbaar, en ze geven overlapjes)
+  let soup = await shellAsync(surf2, { gap, wall, reverse, rimSeal: seal, checkThin: true, trimSpikes: !!S.contours.get('beetplaat')?.edge }, rep, () => tick());
   const extras = [], notes = [];
   if ($('rimOn').checked && needFrame('Beetwal')) {
     const rs = $('rimRule').checked ? ruleSetup({ forceCrest: true, extend: 0 }) : null;
@@ -833,10 +844,10 @@ async function buildBeet() {
   }
   await tick('Pasvlak controleren…');
   const edge = S.contours.get('beetplaat')?.edge;
-  const { text } = plateSummary(soup), fitTxt = fitCheck('beetplaat', surf2, soup, gap, seal) + waxNote();
+  const { text } = plateSummary(soup), fitTxt = fitCheck('beetplaat', surf2, soup, gap, seal, rimBandOf(rep)) + waxNote();
   S.plates.beetplaat = { soup, name: 'Beetplaat', file: `BEETPLAAT_${safe($('caseName').value)}.stl` };
   showPlate('beetplaat', soup, COLORS.plate.beetplaat);
-  const edgeTxt = edge ? ` · rand langs de scanrand${edge.inset ? ` (${fmt(edge.inset)} mm erbinnen)` : ' (plaatrand = scanrand)'}` : '';
+  const edgeTxt = edge ? ` · rand langs de scanrand${edge.inset ? ` (${fmt(edge.inset)} mm erbinnen)` : ' (plaatrand = scanrand)'}${rep.openedFaces ? ` · ${int(rep.openedFaces)} facetten van dunne punten aan de scanrand weggelaten` : ''}` : '';
   const sealTxt = seal ? ` · rand ligt op de scan (afstand loopt in de laatste ${fmt(seal)} mm naar 0)` : '';
   const tip = gap > 0 && S.fit.beetplaat && S.fit.beetplaat.within < 0.5 ? ' · tip: een beetplaat heeft normaal 0 mm afstand tot de scan' : '';
   result('beetResult', `Beetplaat klaar: ${text}${edgeTxt}${sealTxt}${fitTxt}${thinNote(rep)}${tip}${reducedNote(rep)}${draft ? ` · uitblokken ${draft}° (${rep.changed} punten, max ${fmt(rep.maxLift, 2)} mm)` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('beetplaat', 'Beetplaat-STL')}`);
@@ -1039,7 +1050,7 @@ async function buildBasis() {
     let display = mono; if (teeth.length) try { display = await clipToTissue('basis', (await unionSoups(parts)).soup, reverse); } catch { /* alleen weergave */ }
     showPlate('basis', display, COLORS.plate.basis);
     showPlate('basisTeeth', teeth.length ? concatSoups(teeth.map(t => t.soup)) : null, COLORS.tooth);
-    const { text } = plateSummary(mono), fitTxt = fitCheck('basis', surface, mono, gap);
+    const { text } = plateSummary(mono), fitTxt = fitCheck('basis', surface, mono, gap, 0, rimBandOf(rep));
     result('basisResult', `Monoblock klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('monoblock', 'Monoblock-STL')}`);
   } else {
     const g = num('socketGap');
@@ -1054,7 +1065,7 @@ async function buildBasis() {
     delete S.plates.monoblock;
     showPlate('basis', basis, COLORS.plate.basis);
     showPlate('basisTeeth', concatSoups(teeth.map(t => t.soup)), COLORS.tooth);
-    const { text } = plateSummary(basis), fitTxt = fitCheck('basis', surface, basis, gap);
+    const { text } = plateSummary(basis), fitTxt = fitCheck('basis', surface, basis, gap, 0, rimBandOf(rep));
     result('basisResult', `Basis met ${teeth.length} sockets klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)} · socketspeling ${fmt(g, 2)} mm${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('basis', 'Basis-STL')}`);
   }
   if (teethTrimmed.length) S.plates.elementen = { soup: concatSoups(teethTrimmed.map(t => t.soup)), name: 'Elementen', file: `ELEMENTEN_${safe($('caseName').value)}.stl`, parts: teethTrimmed };
@@ -1090,7 +1101,20 @@ function runChecks() {
     add(S.antagonist ? 'ok' : 'info', S.antagonist ? 'Antagonist aanwezig: occlusie controleerbaar' : 'Geen antagonist: occlusie niet te controleren');
     add($('splitReviewed').checked ? 'ok' : 'warn', $('splitReviewed').checked ? 'Scheidingslijn beoordeeld' : 'Scheidingslijn niet beoordeeld');
   }
-  for (const [k, p] of Object.entries(S.plates)) if (p.soup) { const q = quality(weld(p.soup, 1e-6)); add(q.watertight ? 'ok' : 'warn', `${p.name}: ${q.watertight ? 'gesloten mesh' : `${q.open} open randen, ${q.nonManifold} niet-manifold`}`); }
+  for (const [k, p] of Object.entries(S.plates)) if (p.soup) {
+    const m = weld(p.soup, 1e-6), q = quality(m), closed = q.open === 0 && q.nonManifold === 0 && q.flipped === 0;
+    add(closed ? 'ok' : 'warn', `${p.name}: ${closed ? 'gesloten mesh' : `${q.open} open randen, ${q.nonManifold} niet-manifold`}`);
+    // v69: zelfdoorsnijding (de 'scherven' van een slechte offset) — alleen bij platen; de scan zelf telt mee als hij ruist
+    if (closed && k !== 'elementen' && m.indices.length / 3 < 1_500_000) {
+      const si = selfIntersections(m, { maxPairs: 5e6 });
+      if (!si.pairs) add('ok', `${p.name}: geen zelfdoorsnijding`);
+      else {
+        // het pasvlak is de scan zelf: snijdt de scan zichzelf al (ruis, dubbel gescande stukken), dan erft de plaat dat
+        const own = scanSelfIntersections(), extra = Math.max(0, si.pairs - own), tiny = extra <= Math.max(50, m.indices.length / 3 * 0.0005);
+        add(tiny ? 'ok' : 'warn', `${p.name}: ${int(si.pairs)} elkaar snijdende driehoekparen${si.truncated ? ' (of meer)' : ''}${own ? `, waarvan ${int(Math.min(own, si.pairs))} al in de scan zelf (ruis of dubbel gescand)` : ''}${!extra ? ' — de plaat zelf is schoon' : tiny ? ` — de plaat zelf: ${int(extra)} heel kleine overlapjes (rand of tussen tanden), onschadelijk voor het printen` : ' — controleer in de slicer'}`);
+      }
+    }
+  }
   for (const [k, f] of Object.entries(S.fit)) if (f && (S.plates[k] || (k === 'basis' && (S.plates.monoblock || S.plates.basis)))) add((f.gap ? f.closeP99 : f.p99) <= 0.05 ? 'ok' : 'warn', f.gap ? `Afdrukruimte ${k}: ${fmt(f.gap, 2)} mm, 99% nergens meer dan ${fmt(f.closeP99, 3)} mm te dicht bij de scan (doel ≤ 0,05 mm)${f.bridged > 0.005 ? `, ${Math.round(f.bridged * 1000) / 10}% overbrugd` : ''}` : `Pasvlak ${k}: 99% ≤ ${fmt(f.p99, 3)} mm van de scan (doel ≤ 0,05 mm), mediaan ${fmt(f.median, 3)} mm${f.designed ? ' · aangevuld deel apart' : ''}`);
   if (S.designedFrom != null) add('warn', `Aangevuld (niet gescand) gebied in de scan (paars): ${int(S.scan.length / 9 - S.designedFrom)} facetten. Controleer de rand daar klinisch.`);
   add('info', 'Geen klinische validatie: controleer alle bestanden in slicer/CAM en klinisch');
