@@ -122,7 +122,7 @@ export function initSetupTools(ctx) {
     });
     const ideal = lib.librarySet && $('setupMode').value === 'ideal' ? bowIdeal(lib.librarySet, f.jaw) : null;
     const placed = placeTeeth(ids, f, {
-      arch: r.opp.pts ? oppCurveFn(r.opp) : null, scale: num('toothScale') / 100, shape: $('anteriorShape').value, concept: $('concept').value,
+      arch: r.opp.pts ? oppCurveFn(r.opp) : null, scale: num('toothScale') / 100 * (S.libScale || 1), shape: $('anteriorShape').value, concept: $('concept').value,
       occlusalHeight: meanPlane(), gap: num('basisGap'), wall: num('basisWall'), library: lib.library, librarySet: lib.librarySet, ideal, rootMax: 3,
       custom: { spee: num('cSpee'), wilson: num('cWilson'), labial: num('cLabial'), cusp: num('cCusp') },
     }, null);
@@ -325,7 +325,7 @@ export function initSetupTools(ctx) {
     if (set === 'opp' && !S.teeth.length) return status('Plaats eerst elementen in de werkkaak.', true);
     const r = rows()[set], lib = await librarySetting();
     const [x, y] = r.to2D(point.toArray()), pr = r.project(x, y);
-    const placed = placeTeeth([fdi], r.frame, { arch: oppCurveFn(r), scale: num('toothScale') / 100, shape: $('anteriorShape').value, concept: $('concept').value, occlusalHeight: meanPlaneOr(set), gap: num('basisGap'), wall: num('basisWall'), library: lib.library, librarySet: lib.librarySet, ideal: lib.librarySet ? bowIdeal(lib.librarySet, r.frame.jaw) : null, rootMax: set === 'main' ? Infinity : 3 }, set === 'main' ? viewer.scanMesh : null)[0];
+    const placed = placeTeeth([fdi], r.frame, { arch: oppCurveFn(r), scale: num('toothScale') / 100 * (lib.librarySet ? S.libScale || 1 : 1), shape: $('anteriorShape').value, concept: $('concept').value, occlusalHeight: meanPlaneOr(set), gap: num('basisGap'), wall: num('basisWall'), library: lib.library, librarySet: lib.librarySet, ideal: lib.librarySet ? bowIdeal(lib.librarySet, r.frame.jaw) : null, rootMax: set === 'main' ? Infinity : 3 }, set === 'main' ? viewer.scanMesh : null)[0];
     if (!placed) return status(`Element ${fdi} zit niet in deze bibliotheek.`, true);
     ctx.pushHistory();
     const list = teethOf(set), old = list.find(t => t.userData.fdi === fdi);

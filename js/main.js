@@ -753,19 +753,28 @@ async function buildTeeth() {
   const lib = await tools.librarySetting(), mode = $('setupMode').value;
   const ideal = lib.librarySet && mode === 'ideal' ? bowIdeal(lib.librarySet, frame.jaw) : null;
   if (mode === 'manual') ids = [];
-  let placed = placeTeeth(ids, frame, {
-    form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, scale: num('toothScale') / 100, shape: $('anteriorShape').value, concept: $('concept').value, library: lib.library, librarySet: lib.librarySet, ideal,
-    occlusalHeight: useRule ? rs.rule.at : num('occlHeight'), gap: num('basisGap'), wall: num('basisWall'),
-    custom: { spee: num('cSpee'), wilson: num('cWilson'), labial: num('cLabial'), cusp: num('cCusp') },
-  }, viewer.scanMesh);
-  let dropped = [];
-  if (!explicit && rs && S.anatomy) {
-    const rep = staticsReport(placed.map(t => ({ fdi: t.fdi, x: t.arch2d[0], y: t.arch2d[1] })), S.anatomy.an) || [];
-    dropped = rep.filter(r => r.beyond > 2 && r.fdi % 10 >= 6).map(r => r.fdi);
-    // nooit een eerste molaar weglaten als er daardoor een gat ontstaat: alleen van achteren af
-    dropped = dropped.filter(f => f % 10 === 7 || !placed.some(t => t.fdi === f + 1 && !dropped.includes(t.fdi)));
-    placed = placed.filter(t => !dropped.includes(t.fdi));
+  // Bibliotheektanden: maat automatisch aan de kam aanpassen (zoals 3Shape): verkleinen in stappen van 3 %
+  // (tot 82 %) zolang er een eerste molaar of meer dan de tweede molaren niet op de kam past.
+  const baseScale = num('toothScale') / 100, auto = lib.librarySet && $('libAutoSize').checked && !explicit && mode !== 'manual';
+  let scale = baseScale, placed, dropped;
+  for (let attempt = 0; attempt < 7; attempt++) {
+    placed = placeTeeth(ids, frame, {
+      form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, scale, shape: $('anteriorShape').value, concept: $('concept').value, library: lib.library, librarySet: lib.librarySet, ideal,
+      occlusalHeight: useRule ? rs.rule.at : num('occlHeight'), gap: num('basisGap'), wall: num('basisWall'),
+      custom: { spee: num('cSpee'), wilson: num('cWilson'), labial: num('cLabial'), cusp: num('cCusp') },
+    }, viewer.scanMesh);
+    dropped = [];
+    if (!explicit && rs && S.anatomy) {
+      const rep = staticsReport(placed.map(t => ({ fdi: t.fdi, x: t.arch2d[0], y: t.arch2d[1] })), S.anatomy.an) || [];
+      dropped = rep.filter(r => r.beyond > 2 && r.fdi % 10 >= 6).map(r => r.fdi);
+      // nooit een eerste molaar weglaten als er daardoor een gat ontstaat: alleen van achteren af
+      dropped = dropped.filter(f => f % 10 === 7 || !placed.some(t => t.fdi === f + 1 && !dropped.includes(t.fdi)));
+    }
+    if (!auto || !dropped.some(f => f % 10 === 6) || scale <= baseScale * 0.82) break;
+    scale *= 0.97;
   }
+  placed = placed.filter(t => !dropped.includes(t.fdi));
+  S.libScale = auto ? scale / baseScale : 1;
   clearTeeth();
   const curve = rs?.arch ?? formArch({ width: frame.width, depth: frame.depth, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value });
   S.teethPlan = { ...(S.teethPlan || {}), curve, plane: useRule ? null : num('occlHeight') };
@@ -778,7 +787,7 @@ async function buildTeeth() {
   invalidateTeethDependents();
   renderToothList(); refreshOverlay();
   const planeTxt = useRule ? `occlusievlak volgens plooiregel: voor ${fmt(rs.rule.front)} / achter ${fmt(rs.rule.back)} mm boven de kam${rs.rule.notes.length ? ' (' + rs.rule.notes.join('; ') + ')' : ''}` : `occlusievlak ${fmt(num('occlHeight'))} mm boven de kam${$('planeMode').value === 'rule' ? ' (plooiregel vraagt een scan)' : ''}`;
-  $('teethInfo').textContent = `${placed.length} elementen opgesteld${dropped.length ? ` (${dropped.sort((a, b) => a - b).join(', ')} weggelaten: geen ruimte op de kam, kantelgevaar)` : ''} · ${$('concept').selectedOptions[0].text} · ${rs ? 'boog op de gemeten kamlijn' : `boog ${fmt(frame.width)} × ${fmt(frame.depth)} mm`} · ${planeTxt}.`;
+  $('teethInfo').textContent = `${placed.length} elementen opgesteld${S.libScale < 0.995 ? ` (bibliotheekmaat automatisch ${Math.round(S.libScale * 100)} % zodat de molaren op de kam passen)` : ''}${dropped.length ? ` (${dropped.sort((a, b) => a - b).join(', ')} weggelaten: geen ruimte op de kam, kantelgevaar)` : ''} · ${$('concept').selectedOptions[0].text} · ${rs ? 'boog op de gemeten kamlijn' : `boog ${fmt(frame.width)} × ${fmt(frame.depth)} mm`} · ${planeTxt}.`;
   S.teethPlan = { ...S.teethPlan, rule: useRule ? rs.rule : null, crest: rs?.arch?.crest ?? null };
   if (mode === 'manual') { $('teethInfo').textContent = 'Handmatig opstellen: kies hieronder een element en tik op de kam waar het moet staan. Het volgende element wordt automatisch voorgesteld.'; tools.renderLists(); }
   if (S.liveContacts) tools.refreshContacts();
