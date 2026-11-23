@@ -127,10 +127,20 @@ export class ContourSet {
   invalidate(kind) { const s = this.get(kind); if (s) { s.facets = []; s.surface = null; } }
   addPoint(kind, point, { record = true } = {}) { const s = this.ensure(kind); if (s.closed) throw Error('Omtrek is al gesloten. Versleep punten, of gebruik Terug of Wis.'); if (s.points.length >= 512) throw Error('Maximaal 512 punten.'); if (record) this.snap(kind); s.points.push(point); }
   setPoints(kind, points, axis, { record = true } = {}) { if (record) this.snap(kind); const s = this.ensure(kind); s.points = points.map(p => p.slice()); s.closed = false; this.invalidate(kind); return this.close(kind, axis, { record: false }); }
+  setOpen(kind, points, { record = true } = {}) { if (record) this.snap(kind); const s = this.ensure(kind); s.points = points.map(p => p.slice()); s.closed = false; this.invalidate(kind); return s; }
   close(kind, axis, { record = true } = {}) {
     const s = this.get(kind);
     if (!s || s.points.length < 3) throw Error('Zet minimaal drie punten om de omtrek te sluiten.');
-    const basis = axisBasis(axis), poly = outlinePolygon(s.points, basis, { step: 1 });
+    const basis = axisBasis(axis);
+    // punten die in de insteekrichting (vrijwel) op elkaar vallen zijn voor de snijlijn overbodig en geven anders
+    // een onterechte melding 'kruist zichzelf' (bijv. op een steile wand)
+    if (s.points.length > 3) {
+      const keep = [];
+      for (const p of s.points) { const q = basis.project(p), last = keep.length ? basis.project(keep[keep.length - 1]) : null; if (!last || Math.hypot(q[0] - last[0], q[1] - last[1]) >= 0.15) keep.push(p); }
+      while (keep.length > 3) { const a = basis.project(keep[keep.length - 1]), b = basis.project(keep[0]); if (Math.hypot(a[0] - b[0], a[1] - b[1]) >= 0.15) break; keep.pop(); }
+      if (keep.length >= 3 && keep.length < s.points.length) s.points = keep;
+    }
+    const poly = outlinePolygon(s.points, basis, { step: 1 });
     if (!validContour(poly.map(q => [q[0] * 10, q[1] * 10]))) throw Error('De omtrek kruist zichzelf of is te klein. Versleep of verwijder het punt waar de lijn kruist.');
     if (record) this.snap(kind);
     s.closed = true; s.axis = axis.slice(); this.invalidate(kind);

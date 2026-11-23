@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 import { TransformControls } from '../vendor/TransformControls.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from '../vendor/three-mesh-bvh.module.js';
+import { Line2 } from '../vendor/Line2.js';
+import { LineMaterial } from '../vendor/LineMaterial.js';
+import { LineGeometry } from '../vendor/LineGeometry.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -37,6 +40,7 @@ export class Viewer extends EventTarget {
     this.controls.enableDamping = false;
     this.controls.screenSpacePanning = true;
     this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    this.controls.zoomToCursor = true; // zoomen naar de plek onder muis of vingers (zoals in 3Shape/exocad)
     this.controls.addEventListener('change', () => this.render());
     this.gizmo = new TransformControls(this.camera, this.canvas);
     this.gizmo.setSize(0.8);
@@ -69,10 +73,29 @@ export class Viewer extends EventTarget {
   render() {
     if (this._queued) return;
     this._queued = true;
-    requestAnimationFrame(() => { this._queued = false; this.renderer.render(this.scene, this.camera); this.dispatchEvent(new Event('rendered')); });
+    requestAnimationFrame(() => { this._queued = false; this._draw(); this.dispatchEvent(new Event('rendered')); });
   }
 
-  renderNow() { this.renderer.render(this.scene, this.camera); }
+  renderNow() { this._draw(); }
+
+  // Overlay (omtrek, punten) alleen tegen de diepte van de scan testen, niet tegen werkstukken of tanden: zo blijft
+  // de omtreklijn zichtbaar óp een gegenereerde plaat, maar verdwijnt hij nog wel achter de kam.
+  _draw() {
+    const r = this.renderer, ov = this.groups.overlay, scan = this.scanMesh;
+    let depthTested = false;
+    if (ov.children.length && scan && this.groups.scan.visible && scan.visible) ov.traverse(o => { if (o.material?.depthTest) depthTested = true; });
+    if (!depthTested) { r.render(this.scene, this.camera); return; } // alles altijd zichtbaar: één pass is genoeg
+    ov.visible = false; r.render(this.scene, this.camera); ov.visible = true;
+    if (!this._depth) {
+      this._depth = new THREE.Scene();
+      this._depthMesh = new THREE.Mesh(scan.geometry, new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+      this._depthMesh.matrixAutoUpdate = false; this._depth.add(this._depthMesh);
+    }
+    this._depthMesh.geometry = scan.geometry; this._depthMesh.matrix.copy(scan.matrixWorld); this._depthMesh.matrixWorld.copy(scan.matrixWorld);
+    const auto = r.autoClear; r.autoClear = false;
+    r.clearDepth(); r.render(this._depth, this.camera); r.render(ov, this.camera);
+    r.autoClear = auto;
+  }
 
   // Zachte schaduw: normalen per hoekpunt gemiddeld over aangrenzende vlakken binnen een knikhoek (scherpe randen
   // blijven scherp). Alleen weergave; de geometrie zelf verandert niet.
@@ -325,6 +348,41 @@ export function makeDots(points, color, size = 9, firstColor = null) {
     f.renderOrder = 12; group.add(f);
   }
   return group;
+}
+
+// Dikke lijn met een vaste breedte in schermpixels (Line2). points: [[x,y,z], …] of Vector3.
+// depthTest uit = altijd zichtbaar (ook achter de scan); bias trekt een zichtbare lijn net vóór het oppervlak.
+export function makeFatLine(points, color, { width = 3, closed = false, opacity = 1, depthTest = true, bias = 0, renderOrder = 10 } = {}) {
+  if (!points || points.length < 2) return null;
+  const arr = [];
+  for (const p of points) arr.push(p.isVector3 ? p.x : p[0], p.isVector3 ? p.y : p[1], p.isVector3 ? p.z : p[2]);
+  if (closed && points.length > 2) arr.push(arr[0], arr[1], arr[2]);
+  const g = new LineGeometry(); g.setPositions(arr);
+  const m = new LineMaterial({ color, linewidth: width, transparent: true, opacity, depthTest, depthWrite: false });
+  if (bias) { m.polygonOffset = true; m.polygonOffsetFactor = -bias; m.polygonOffsetUnits = -4 * bias; }
+  const line = new Line2(g, m); line.renderOrder = renderOrder; line.frustumCulled = false;
+  return line;
+}
+// Ronde stippen (vaste grootte in pixels) met een donker randje.
+let dotTexture = null;
+function roundDot() {
+  if (dotTexture || typeof document === 'undefined') return dotTexture;
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d'); x.beginPath(); x.arc(32, 32, 27, 0, Math.PI * 2); x.fillStyle = '#fff'; x.fill(); x.lineWidth = 8; x.strokeStyle = 'rgba(8,26,38,.95)'; x.stroke();
+  dotTexture = new THREE.CanvasTexture(c); dotTexture.colorSpace = THREE.SRGBColorSpace;
+  return dotTexture;
+}
+export function makeRoundDots(points, color, size = 8, { depthTest = false, opacity = 1, renderOrder = 12, lift = 0.35 } = {}) {
+  if (!points?.length) return null;
+  const g = new THREE.BufferGeometry().setFromPoints(points.map(p => p.isVector3 ? p : new THREE.Vector3(p[0], p[1], p[2])));
+  const m = new THREE.PointsMaterial({ color, size, sizeAttenuation: false, map: roundDot(), alphaTest: 0.35, transparent: true, opacity, depthTest, depthWrite: false });
+  if (depthTest && lift) { // stip een fractie naar de kijker toe, zodat hij niet half in het oppervlak verdwijnt
+    m.onBeforeCompile = sh => { sh.vertexShader = sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>\n  mvPosition.xyz -= normalize(mvPosition.xyz) * ${lift.toFixed(3)};\n  gl_Position = projectionMatrix * mvPosition;`); };
+    m.customProgramCacheKey = () => 'dotlift' + lift;
+  }
+  const pts = new THREE.Points(g, m);
+  pts.renderOrder = renderOrder; pts.frustumCulled = false;
+  return pts;
 }
 
 export function makeMesh(soup, color, opts = {}) {

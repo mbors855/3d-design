@@ -1,10 +1,18 @@
 // Scanvolgende plaat: offset van een open kaakoppervlak tot een gesloten schaal.
 import { weld, clean, orient, flipAll, boundaryLoops, fillHoles, vertexNormals, loopLength, tidySheet, toSoup, pointToSurfaceDistances } from './mesh.js';
+import { simplifyMesh, SCAN_LIMIT, SCAN_TARGET } from './decimate.js';
 
 export function shell(soup, { gap = 0, wall = 2, reverse = false, draftAngle = null, smoothing = 2, allowNegativeGap = false, maxScale = 1.3 } = {}, report = {}) {
   if (!Number.isFinite(gap) || (gap < 0 && !allowNegativeGap) || !Number.isFinite(wall) || wall <= 0) throw Error('Vul een geldige ruimte en positieve dikte in.');
-  if (soup.length / 9 > 400000) throw Error('Gebruik een uitgesneden scan met maximaal 400.000 facetten.');
-  let mesh = clean(weld(soup, 1e-5)).mesh;
+  let mesh = weld(soup, 1e-5);
+  // Te groot oppervlak (hoge-resolutie scan): eerst vereenvoudigen met een harde foutgrens (rand blijft exact,
+  // alleen originele scanpunten) in plaats van te stoppen. Normaal gebeurt dit al bij het openen van de scan.
+  if (mesh.indices.length / 3 > SCAN_LIMIT) {
+    const r = simplifyMesh(mesh, { tolerance: 0.01, maxTolerance: 0.02, targetFaces: SCAN_TARGET, maxFaces: SCAN_LIMIT });
+    mesh = r.mesh; report.reduced = r.report;
+    if (mesh.indices.length / 3 > SCAN_LIMIT * 1.5) throw Error(`Het oppervlak binnen de omtrek is te groot (${Math.round(mesh.indices.length / 3).toLocaleString('nl-NL')} facetten, ook na vereenvoudigen). Teken de omtrek kleiner of snijd de scan bij (Scan & mesh).`);
+  }
+  mesh = clean(mesh).mesh;
   // Echte scans: randen opschonen (vlinderpunten, losse eilandjes, oren) vóór het oriënteren.
   const tidy = tidySheet(mesh); mesh = tidy.mesh; report.tidied = tidy.removed;
   if (!mesh.indices.length) throw Error('Na opschonen bleef er geen bruikbaar oppervlak over.');

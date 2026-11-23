@@ -18,6 +18,28 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 67: zware scans en de omtrek tekenen met vinger of muis
+
+**Zware scans (labscanner, 1–3 miljoen facetten).** Voorheen stopte een lepel of beetplaat met *"Gebruik een uitgesneden scan met maximaal 400.000 facetten"*.
+- Bij het openen wordt een scan boven 400.000 facetten automatisch vereenvoudigd tot ca. 300.000 (instelbaar bij Scan & mesh → 🔻 Vereenvoudigen, en uit te zetten). ↶ Terug zet de originele scan terug.
+- Methode (`js/decimate.js`): quadric edge collapse als *half-edge collapse*: er blijven alleen originele scanpunten over, de rand blijft exact, en elk weggehaald scanpunt wordt bij elke stap nagemeten. Standaardgrens 0,01 mm (eis 0,05 mm); alleen als het anders niet onder de grens komt mag hij voor een plaat oplopen tot 0,025 mm. De gemeten afwijking staat in beeld.
+- Gemeten: 1.563.232 facetten (ruisige testkaak) → 311.020, max. 0,010 mm; realistische scan 777.724 → 300.000, max. 0,009 mm, gemiddeld 0,0005 mm. Beetplaat daarna gesloten, pasvlak 100 % binnen 0,05 mm.
+- Vangnet: is de scan bij *Genereer* toch nog te groot (oud project, automatisch uitgezet), dan wordt hij eerst vereenvoudigd, met melding. Ook de schaalberekening zelf vereenvoudigt in plaats van te stoppen.
+- Sneller: lassen van punten 5× sneller (zelfde uitkomst), uitsnijden langs de omtrek per scan gecachet: een omtrekwijziging op een scan van 780.000 facetten kost 0,2 s in plaats van 3,3 s.
+
+**Omtrek bewerken** (`js/steps/contour-tools.js`, rekenkern `js/contour-edit.js`):
+- **Slepen op elke plek van de lijn**, niet alleen op een punt. De meeneemzone licht geel op (bij zweven met de muis en tijdens het slepen) en gaat zacht mee.
+- **✏️ Teken**: één vinger of de linkermuis tekent de lijn in één beweging. Begin óp de lijn en eindig óp de lijn: dat stuk wordt vervangen (overtekenen). Een hele rondgang = nieuwe omtrek. Tikken zet losse punten zoals voorheen.
+- Tijdens het tekenen: twee vingers of de rechtermuisknop draaien het beeld, knijpen of scrollen zoomt naar de vingers/muis toe. Esc breekt een streek af.
+- **Vergrootglas** boven de vinger op een aanraakscherm, tijdens tekenen en slepen.
+- **〰 Glad**: strijkt de hele omtrek gladder.
+- De lijn is dikker, met een donkere rand, en blijft zichtbaar óp een gegenereerde plaat (de overlay test alleen tegen de diepte van de scan). Achter de kam wordt hij een vage schim.
+- Na een wijziging staat bij het werkstuk *"Omtrek gewijzigd: tik op Genereer …"*.
+- Punten die in de insteekrichting op elkaar vallen (steile wand) geven geen onterechte melding *"kruist zichzelf"* meer.
+- Op de telefoon staat de aanwijzing onder de knoppen in plaats van in een smalle, hoge kolom, en de modusmelding is kort.
+
+**Getest:** 54 automatische tests (waarvan 11 nieuw), plus in Chrome: desktop met de scan van 1,5 miljoen facetten (17 controles: laden + vereenvoudigen, beetplaat, slepen, zone, ongedaan maken, overtekenen, nieuwe rondgang, glad, draaien/zoomen tijdens tekenen, Esc, STL), telefoon met aanraken (11 controles, o.a. vergrootglas, twee vingers, tikken) en een rooktest van lepel, beetplaat en prothese met ⚡ (7 controles).
+
 ### Nieuw in 66
 
 - **Bijsnijden met een strakke rand.** De bijsnijlijn van *Scan voorbereiden* loopt vloeiend, zonder inkepingen bij de lipbandjes. Daarna wordt de rand opgeschoond: bijna-dubbele snijpunten samengevoegd, losse "oortjes" en vlinders weg, spleetjes en gaatjes dicht, en de buitenrand gladgetrokken op het oppervlak. Gemeten op de demokaak: 1 rand in plaats van 3, geen nul-lange randen, scherpe knikken van 53 naar 11. Lasso en gum ruimen ook de oortjes langs hun nieuwe rand op.

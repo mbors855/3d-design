@@ -485,4 +485,119 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     assert.ok(loops(holed) > loops(jaw)); const c = E.closeHoles(holed); assert.ok(c.filled >= 1); assert.equal(loops(c.soup), loops(jaw));
   });
 }
+
+// ---------- v67: grote scans (snel lassen, uitsnijden met cache, vereenvoudigen met foutgrens) ----------
+{
+  const M = await import(J + 'mesh.js'), TR = await import(J + 'trim.js'), D = await import(J + 'decimate.js');
+  const { anatomicJaw: AJ } = await import(J + 'demo.js');
+  // referentie: de oude weld met tekstsleutels
+  const weldRef = (soup, tol) => { const inv = 1 / tol, map = new Map(), pos = [], idx = new Uint32Array(soup.length / 3);
+    for (let i = 0; i < soup.length; i += 3) { const k = Math.round(soup[i] * inv) + ',' + Math.round(soup[i + 1] * inv) + ',' + Math.round(soup[i + 2] * inv); let id = map.get(k); if (id === undefined) { id = pos.length / 3; map.set(k, id); pos.push(soup[i], soup[i + 1], soup[i + 2]); } idx[i / 3] = id; }
+    return { positions: Float32Array.from(pos), indices: idx }; };
+  // ruisige testkaak (onregelmatig, zoals een labscan)
+  const noisy = (soup, amp = 0.004) => { const out = Float32Array.from(soup); const h = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v) - 0.5; }; for (let i = 0; i < out.length; i += 3) out[i + 2] += h(out[i], out[i + 1]) * 2 * amp; return out; };
+  await test('v67 weld: snelle versie geeft exact dezelfde punten en indices', () => {
+    const r = new Float32Array(9 * 5000); for (let i = 0; i < r.length; i++) r[i] = Math.round((Math.sin(i * 7.1) * 10) * 1e3) / 1e3 + (i % 7 === 0 ? 4e-6 : 0);
+    for (const soup of [r, AJ({ jaw: 'lower' }).soup, Float32Array.from([-0.5e-5, 0, 0, 0.5e-5, 0, 0, 1, 1, 1])]) for (const tol of [1e-6, 1e-5, 1e-3]) {
+      const a = weldRef(soup, tol), b = M.weld(soup, tol);
+      assert.deepEqual(Array.from(b.indices), Array.from(a.indices)); assert.deepEqual(Array.from(b.positions), Array.from(a.positions));
+    }
+  });
+  await test('v67 uitsnijden: tweede keer (cache) identiek, kant-test gelijk aan het teken van de afstand', () => {
+    const { soup } = AJ({ jaw: 'upper', torus: true });
+    const ring = [[-30, -2, 0], [-32, 14, 0], [-24, 30, 0], [-10, 38, 0], [0, 40, 0], [10, 38, 0], [24, 30, 0], [32, 14, 0], [30, -2, 0]];
+    const a = TR.trimByOutline(soup, ring, [0, 0, 1]), b = TR.trimByOutline(soup, ring, [0, 0, 1]), c = TR.trimByOutline(soup, ring, [0.1, 0, 0.99]);
+    assert.deepEqual(Array.from(a.soup), Array.from(b.soup)); assert.deepEqual(Array.from(a.faces), Array.from(b.faces));
+    assert.ok(c.soup.length > 0 && c.soup.length !== a.soup.length, 'andere as = andere uitsnede (cache per as)');
+    const field = new TR.PolygonField(a.polygon);
+    for (let i = 0; i < 4000; i++) { const x = Math.sin(i) * 40, y = 20 + Math.cos(i * 1.3) * 25, s1 = field.side(x, y), s2 = field.signed(x, y); assert.equal(s1 < 0, s2 < 0 && s2 !== 0); }
+  });
+  await test('v67 vereenvoudigen: elk origineel punt binnen 0,01 mm, rand exact, manifold, alleen originele punten', () => {
+    const soup = noisy(AJ({ jaw: 'lower', step: 0.2 }).soup), mesh = M.weld(soup, 1e-6);
+    const r = D.simplifyMesh(mesh, { tolerance: 0.01 }), q = M.quality(r.mesh), q0 = M.quality(mesh);
+    assert.ok(r.report.after < r.report.before * 0.6, `te weinig vereenvoudigd: ${r.report.before} → ${r.report.after}`);
+    assert.equal(q.nonManifold, 0); assert.equal(q.flipped, 0); assert.equal(q.degenerate, 0); assert.equal(q.components, q0.components); assert.equal(q.open, q0.open); assert.equal(q.holes, q0.holes);
+    const d = M.pointToSurfaceDistances(mesh.positions, M.toSoup(r.mesh), { maxDist: 0.2, cell: 0.5 });
+    let mx = 0; for (const x of d) mx = Math.max(mx, x);
+    assert.ok(mx <= 0.01 + 1e-6, `afwijking ${mx.toFixed(4)} mm`); assert.ok(Math.abs(mx - r.report.maxDeviation) < 1e-4, 'gemeten afwijking klopt met het rapport');
+    const key = (p, v) => p[v * 3] + ',' + p[v * 3 + 1] + ',' + p[v * 3 + 2], orig = new Set(); for (let v = 0; v < mesh.positions.length / 3; v++) orig.add(key(mesh.positions, v));
+    for (let v = 0; v < r.mesh.positions.length / 3; v++) assert.ok(orig.has(key(r.mesh.positions, v)), 'nieuw punt verzonnen');
+    const rim = m => M.boundaryLoops(m).loops.map(l => l.map(v => key(m.positions, v)).sort().join(';')).sort().join('|');
+    assert.equal(rim(r.mesh), rim(mesh), 'rand veranderd');
+    // streefaantal: stopt op het doel en blijft dan ruim binnen de tolerantie
+    const t = D.simplifyMesh(mesh, { tolerance: 0.01, targetFaces: Math.round(r.report.before * 0.8) });
+    assert.ok(Math.abs(t.report.after - r.report.before * 0.8) <= 2 && t.report.maxDeviation <= r.report.maxDeviation + 1e-9);
+  });
+  await test('v67 vereenvoudigen: ontworpen (aangevuld) deel blijft ongewijzigd achteraan, naad dicht', () => {
+    const soup = noisy(AJ({ jaw: 'upper', step: 0.3 }).soup), n = soup.length / 9, lockFrom = Math.floor(n * 0.9);
+    const r = D.simplifySoup(soup, { tolerance: 0.01, lockFrom });
+    assert.equal(r.soup.length / 9 - r.lockFrom, n - lockFrom, 'aantal ontworpen facetten gelijk');
+    assert.deepEqual(Array.from(r.soup.subarray(r.lockFrom * 9)), Array.from(soup.subarray(lockFrom * 9)), 'ontworpen facetten exact gelijk');
+    const q = M.quality(M.weld(r.soup, 1e-6)), q0 = M.quality(M.weld(soup, 1e-6)); assert.equal(q.open, q0.open); assert.equal(q.nonManifold, 0);
+  });
+  await test('v67 schaal: oppervlak boven 400.000 facetten wordt vereenvoudigd en de plaat is gesloten', () => {
+    // fijn hoogteveld (koepel met ruis), ~460.000 facetten
+    const N = 480, out = new Float32Array((N - 1) * (N - 1) * 18); let o = 0; const z = (x, y) => 6 * Math.exp(-(x * x + y * y) / 500) + 0.003 * Math.sin(x * 91.7 + y * 37.3);
+    for (let i = 0; i < N - 1; i++) for (let j = 0; j < N - 1; j++) { const x0 = -24 + i * 0.1, y0 = -24 + j * 0.1, x1 = x0 + 0.1, y1 = y0 + 0.1;
+      out.set([x0, y0, z(x0, y0), x1, y0, z(x1, y0), x1, y1, z(x1, y1), x0, y0, z(x0, y0), x1, y1, z(x1, y1), x0, y1, z(x0, y1)], o); o += 18; }
+    assert.ok(out.length / 9 > 400000);
+    const rep = {}, plate = shell(out, { gap: 0, wall: 2 }, rep);
+    assert.ok(rep.reduced && rep.reduced.after <= 400000 && rep.reduced.maxDeviation <= 0.0101, JSON.stringify(rep.reduced));
+    assert.equal(quality(weld(plate, 1e-6)).watertight, true);
+  });
+}
+
+// ---------- v67: omtrek tekenen, overtekenen, wegtrekken ----------
+{
+  const CE = await import(J + 'contour-edit.js'), { ContourSet } = await import(J + 'contour.js');
+  const circle = (R = 20, n = 120, z = 0) => Array.from({ length: n }, (_, i) => { const a = i / n * 2 * Math.PI; return [R * Math.cos(a), R * Math.sin(a), z]; });
+  const radius = p => Math.hypot(p[0], p[1]);
+  await test('v67 omtrek: herbemonsteren houdt lengte en gelijke afstand', () => {
+    const c = circle(), r = CE.resample(c, 2, { closed: true });
+    assert.ok(Math.abs(CE.pathLength(r, true) - CE.pathLength(c, true)) < 0.2);
+    const gaps = r.map((p, i) => Math.hypot(...p.map((v, k) => v - r[(i + 1) % r.length][k]))); assert.ok(Math.max(...gaps) - Math.min(...gaps) < 0.05);
+    const open = CE.resample([[0, 0, 0], [10, 0, 0], [10, 7, 0]], 1, { closed: false }); assert.deepEqual(open[0], [0, 0, 0]); assert.deepEqual(open.at(-1), [10, 7, 0]);
+  });
+  await test('v67 omtrek: overtekenen vervangt alleen het stuk tussen begin en eind (beide richtingen)', () => {
+    const c = circle(), st = [];
+    for (let a = -20; a <= 20; a++) { const r = a * Math.PI / 180, R = Math.abs(a) > 17 ? 20.5 : 25; st.push([R * Math.cos(r), R * Math.sin(r), 0]); }
+    for (const [s0, flip] of [[st, false], [st.slice().reverse(), true]]) {
+      const u0 = CE.nearestOnPath(c, s0[0], { closed: true }).u, u1 = CE.nearestOnPath(c, s0.at(-1), { closed: true }).u, r = CE.spliceClosed(c, s0, u0, u1);
+      assert.ok(Math.abs(r.replacedLength - 2 * Math.PI * 20 * 40 / 360) < 0.6, `vervangen ${r.replacedLength.toFixed(1)} mm (flip ${flip})`);
+      const far = r.points.filter(p => radius(p) > 21), kept = r.points.filter(p => Math.abs(radius(p) - 20) < 1e-6);
+      assert.ok(far.length >= 30 && far.every(p => Math.abs(Math.atan2(p[1], p[0])) < 0.36), 'nieuwe rand alleen in het overgetekende stuk');
+      assert.ok(kept.length >= 120 - 15, 'rest van de omtrek onveranderd');
+      assert.ok(validContour(r.points.map(p => [p[0] * 10, p[1] * 10])), 'geldige omtrek');
+    }
+  });
+  await test('v67 omtrek: uitstulping (begin en eind op dezelfde plek) wordt ingevoegd, niet de hele lijn vervangen', () => {
+    const c = circle(), st = [];
+    for (let k = 0; k <= 30; k++) { const a = (k / 30) * Math.PI; st.push([20 + 6 * Math.sin(a), 3 * Math.cos(a) - 0.0, 0]); } // lus naar buiten bij hoek 0
+    const u0 = CE.nearestOnPath(c, st[0], { closed: true }).u, u1 = CE.nearestOnPath(c, st.at(-1), { closed: true }).u, r = CE.spliceClosed(c, st, u0, u1);
+    assert.ok(r.replacedLength < 8, `vervangen ${r.replacedLength.toFixed(1)} mm`); assert.ok(r.points.length > 120);
+  });
+  await test('v67 omtrek: wegtrekken verplaatst de greep exact, buren zacht, rest blijft', () => {
+    const c = circle(), d = CE.dragPoints(c, 30, [0, 3, 0], 6, { closed: true });
+    assert.deepEqual(d.points[30], [c[30][0], c[30][1] + 3, 0]);
+    let moved = 0; d.points.forEach((p, i) => { if (p[1] !== c[i][1]) moved++; }); assert.ok(moved > 3 && moved < 15, `${moved} punten`);
+    assert.ok(Math.abs(d.weights[29] - d.weights[31]) < 1e-6 && d.weights[29] < 1 && d.weights[29] > 0.5, 'symmetrisch en zacht');
+    const z = CE.dragPoints(c, 30, [0, 3, 0], 0, { closed: true }); let m0 = 0; z.points.forEach((p, i) => { if (p[1] !== c[i][1]) m0++; }); assert.equal(m0, 1, 'zone 0 = alleen het punt');
+    const w = CE.arcWeights(c, 30.5, 6, { closed: true }); assert.ok(w[30] > 0.9 && w[31] > 0.9 && w[24] < 0.2);
+  });
+  await test('v67 omtrek: verder tekenen, streek opschonen, rondgang herkennen', () => {
+    const open = [[0, 0, 0], [5, 0, 0], [10, 0, 0]];
+    assert.deepEqual(CE.extendOpen(open, [[10.1, 0, 0], [15, 0, 0]]).at(-1), [15, 0, 0]);
+    assert.deepEqual(CE.extendOpen(open, [[-0.1, 0, 0], [-5, 0, 0]]).at(-1), [-5, 0, 0], 'vanaf het begin verder: lijn omgedraaid');
+    const raw = []; for (let i = 0; i <= 400; i++) raw.push([i * 0.05, Math.sin(i * 0.05) * 3 + (i % 2 ? 0.05 : -0.05), 0]);
+    const cl = CE.cleanStroke(raw, { spacing: 1.25 }), gaps = cl.slice(1).map((p, i) => Math.hypot(p[0] - cl[i][0], p[1] - cl[i][1]));
+    assert.ok(gaps.every(g => g > 1 && g < 1.5), 'gelijkmatig'); assert.ok(Math.abs(Math.hypot(cl[0][0] - raw[0][0], cl[0][1] - raw[0][1])) < 0.1, 'begin blijft');
+    assert.equal(CE.isLoop(circle(10, 40).concat([[10, 0.5, 0]])), true); assert.equal(CE.isLoop(raw.slice(0, 100)), false);
+  });
+  await test('v67 omtrek: punten die in de insteekrichting samenvallen geven geen onterechte kruisingsmelding', () => {
+    const cs = new ContourSet(), pts = circle(20, 60);
+    pts.splice(10, 0, [pts[10][0] + 0.02, pts[10][1], 3], [pts[10][0] + 0.03, pts[10][1], 6]); // steile wand: zelfde plek, andere hoogte
+    const s = cs.setPoints('beetplaat', pts, [0, 0, 1]);
+    assert.equal(s.closed, true); assert.ok(s.points.length <= 61);
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);
