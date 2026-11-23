@@ -1,7 +1,7 @@
 // Scanbewerking (rekenkern, zonder interface): selecteren met lasso of gum, wissen, gladmaken, vlak afsnijden,
 // losse delen verwijderen, gaten dichten. Alles werkt op een "soup" (Float32Array, 9 getallen per driehoek) zoals
 // de rest van het programma, en geeft een nieuwe soup terug. Scanpunten buiten de selectie veranderen nooit.
-import { weld, toSoup, fillHoles, boundaryLoops, edgeMap } from './mesh.js';
+import { weld, toSoup, fillHoles, boundaryLoops, edgeMap, tidySheet, compact } from './mesh.js';
 
 export const triCount = soup => soup.length / 9;
 
@@ -79,7 +79,16 @@ export function deleteMaskClean(soup, mask, { iterations = 6 } = {}) {
       loop.forEach((v, k) => { if (next[k]) for (let c = 0; c < 3; c++) P[v * 3 + c] = next[k][c]; });
     }
   }
-  return toSoup(mesh);
+  // losse oortjes langs de NIEUWE rand weg (driehoeken met 2+ randzijden); de oorspronkelijke scanrand blijft exact
+  let I = Array.from(mesh.indices);
+  for (let pass = 0; pass < 10; pass++) {
+    const e = edgeMap({ positions: P, indices: I }), fb = new Uint8Array(I.length / 3), isNew = new Uint8Array(I.length / 3);
+    for (const v of e.values()) if (v.count === 1) { fb[v.faces[0]]++; if (!old.has(key(P, v.from * 3)) || !old.has(key(P, v.to * 3))) isNew[v.faces[0]] = 1; }
+    const keepI = []; let dropped = 0;
+    for (let f = 0; f < fb.length; f++) { if (fb[f] >= 2 && isNew[f]) { dropped++; continue; } keepI.push(I[f * 3], I[f * 3 + 1], I[f * 3 + 2]); }
+    I = keepI; if (!dropped) break;
+  }
+  return toSoup({ positions: P, indices: Uint32Array.from(I) });
 }
 
 // Alleen het grootste aaneengesloten deel houden (of alle delen boven minShare van het totaal).
@@ -146,4 +155,63 @@ export function closeHoles(soup, { maxEdges = 400 } = {}) {
   const res = fillHoles(mesh, { keepLargest: true, maxEdges });
   const after = boundaryLoops(res.mesh, edgeMap(res.mesh)).loops.length;
   return { soup: toSoup(res.mesh), filled: Math.max(0, before - after) };
+}
+
+// ---------- strakke rand na bijsnijden ----------
+// Vloeiende bijsnijlijn: middelt de omtrekpunten over een booglengte (mm), zodat inkepingen (lipbandjes) en
+// zaagtanden verdwijnen. Voor het bijsnijden van de scan, niet voor de werkstukrand.
+export function smoothOutline(points, window = 6) {
+  const n = points.length; if (n < 5) return points;
+  const cum = [0]; for (let i = 1; i <= n; i++) { const a = points[i - 1], b = points[i % n]; cum.push(cum[i - 1] + Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])); }
+  const L = cum[n], out = [];
+  for (let i = 0; i < n; i++) {
+    let sx = 0, sy = 0, sz = 0, sw = 0;
+    for (let j = -n; j <= n; j++) {
+      const k = ((i + j) % n + n) % n; let d = Math.abs(cum[i] - cum[k]); d = Math.min(d, L - d);
+      if (d > window) { if (Math.abs(j) > 3 && d > window * 1.5) { if (j > 0) break; else continue; } else continue; }
+      const w = 1 - (d / window) ** 2; sx += points[k][0] * w; sy += points[k][1] * w; sz += points[k][2] * w; sw += w;
+    }
+    out.push([sx / sw, sy / sw, sz / sw]);
+  }
+  return out;
+}
+
+// Rand opschonen: bijna-dubbele snijpunten samenvoegen, platte en losse randdriehoeken ("oortjes", vlinders)
+// weg, binnengaatjes dicht, alleen het hoofddeel houden en de buitenrand vloeiend trekken (in het raakvlak, dus
+// op het oppervlak). Scanpunten die niet op de rand liggen, veranderen niet.
+export function cleanRim(soup, { relax = 8, holeEdges = 300 } = {}) {
+  let mesh = weld(soup, 2e-4);
+  // platte driehoeken weg
+  { const P = mesh.positions, I = mesh.indices, keep = [];
+    for (let f = 0; f < I.length; f += 3) { const a = I[f] * 3, b = I[f + 1] * 3, c = I[f + 2] * 3;
+      if (I[f] === I[f + 1] || I[f + 1] === I[f + 2] || I[f] === I[f + 2]) continue;
+      const u = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], w = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
+      if (Math.hypot(u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]) < 1e-6) continue;
+      keep.push(I[f], I[f + 1], I[f + 2]); }
+    mesh = compact({ positions: P, indices: Uint32Array.from(keep) }); }
+  const t = tidySheet(mesh); mesh = t.mesh;
+  mesh = fillHoles(mesh, { keepLargest: true, maxEdges: holeEdges }).mesh;
+  // buitenrand vloeiend (Taubin op de randkromme, verplaatsing in het raakvlak van het hoekpunt)
+  const loops = boundaryLoops(mesh, edgeMap(mesh)).loops;
+  if (loops.length && relax > 0) {
+    const P = mesh.positions, I = mesh.indices, nv = P.length / 3, nrm = new Float32Array(nv * 3);
+    for (let f = 0; f < I.length; f += 3) { const a = I[f] * 3, b = I[f + 1] * 3, c = I[f + 2] * 3;
+      const u = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], w = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
+      const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+      for (const v of [a, b, c]) for (let k = 0; k < 3; k++) nrm[v + k] += n[k]; }
+    for (const L of loops) {
+      const m = L.length; if (m < 6) continue;
+      const step = wgt => {
+        const upd = L.map((v, k) => { const a = L[(k - 1 + m) % m] * 3, b = L[(k + 1) % m] * 3, o = v * 3;
+          const d = [0, 1, 2].map(c => ((P[a + c] + P[b + c]) / 2 - P[o + c]) * wgt);
+          const nl = Math.hypot(nrm[o], nrm[o + 1], nrm[o + 2]) || 1, nn = [nrm[o] / nl, nrm[o + 1] / nl, nrm[o + 2] / nl];
+          const dn = d[0] * nn[0] + d[1] * nn[1] + d[2] * nn[2];
+          return d.map((x, c) => x - dn * nn[c]); });
+        L.forEach((v, k) => { for (let c = 0; c < 3; c++) P[v * 3 + c] += upd[k][c]; });
+      };
+      for (let it = 0; it < relax; it++) { step(0.5); step(-0.53); }
+    }
+  }
+  const after = boundaryLoops(mesh, edgeMap(mesh)).loops.length;
+  return { soup: toSoup(mesh), removed: t.removed, loops: after };
 }

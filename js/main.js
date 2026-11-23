@@ -21,6 +21,7 @@ import { WaxLayer } from './wax.js';
 import { initSetupTools, geometrySoup } from './setup-tools.js';
 import { VERSION } from './version.js';
 import { initScanTools } from './steps/scan-tools.js';
+import { smoothOutline, cleanRim } from './scan-edit.js';
 import { bowIdeal } from './library.js';
 import { analyseArch, proposeOutline, tissueZones, idealizeScan, ZONE_LABEL, RULES, crestArch, setupArch, occlusalPlaneRule, staticsReport } from './anatomy.js';
 
@@ -136,6 +137,7 @@ function showStep(id) {
   if (id === 'productie') renderOutputs();
   if (id === 'controle') runChecks();
   updateContourUI(); refreshScanColors(); refreshOverlay(); syncPlateVisibility(); updateDone();
+  syncHeaderNav();
   autoStep(id);
 }
 // Bij het openen van Lepel/Beetplaat/Basis zonder werkstuk: zelf de rand volgens de anatomie zetten en het werkstuk maken.
@@ -311,8 +313,8 @@ $('meshScaleBtn').onclick = () => { const k = num('meshScale'); if (!(k > 0 && k
 $('meshMirror').onclick = () => { const s = [1, 1, 1]; s[+$('meshAxis').value] = -1; transformScan(about(new THREE.Matrix4().makeScale(...s)), 'Scan gespiegeld.'); };
 $('meshFlip').onclick = () => transformScan(null, 'Normaalrichting omgekeerd.', { winding: true });
 $('meshCenter').onclick = () => { const c = center(); transformScan(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z), 'Scan gecentreerd rond de oorsprong.'); };
-$('meshUndo').onclick = () => { const h = S.history.pop(); if (!h) return; S.future.push({ soup: S.scan, aux: snapshotAux() }); restoreAux(h.aux); setScan(h.soup, S.scanName, { reset: false }); status('Bewerking teruggedraaid.'); };
-$('meshRedo').onclick = () => { const h = S.future.pop(); if (!h) return; S.history.push({ soup: S.scan, aux: snapshotAux() }); restoreAux(h.aux); setScan(h.soup, S.scanName, { reset: false }); status('Bewerking hersteld.'); };
+$('meshUndo').onclick = () => { const h = S.history.pop(); if (!h) return status('Niets om terug te zetten in de scan.'); S.future.push({ soup: S.scan, aux: snapshotAux() }); const keep = keepDesign(); restoreAux(h.aux); setScan(h.soup, S.scanName, { reset: false }); status('Scanbewerking teruggedraaid.'); restoreDesign(keep); };
+$('meshRedo').onclick = () => { const h = S.future.pop(); if (!h) return status('Niets om opnieuw te doen in de scan.'); S.history.push({ soup: S.scan, aux: snapshotAux() }); const keep = keepDesign(); restoreAux(h.aux); setScan(h.soup, S.scanName, { reset: false }); status('Scanbewerking hersteld.'); restoreDesign(keep); };
 $('meshExport').onclick = () => { if (!S.scan) return status('Laad eerst een scan.', true); download(writeSTL(S.scan, 'Scan ' + S.scanName), 'SCAN_' + safe(S.scanName.replace(/\.stl$/i, '')) + '.stl'); };
 function qaText(q) {
   return [`Driehoeken: ${int(q.faces)} · punten: ${int(q.vertices)} · delen: ${q.components}`,
@@ -691,7 +693,7 @@ function conformTo(sink) {
 function showPlate(kind, soup, color) {
   const old = viewer.groups.plates.getObjectByName(kind);
   if (old) { viewer.groups.plates.remove(old); old.geometry.dispose(); old.material.dispose(); }
-  if (soup) { const m = makeMesh(soup, color, { opacity: kind === 'basisTeeth' ? 1 : 0.9, roughness: kind === 'basisTeeth' ? 0.32 : 0.45 }); m.name = kind; viewer.groups.plates.add(m); }
+  if (soup) { const m = makeMesh(soup, color, { opacity: kind === 'basis' || kind === 'basisTeeth' ? 1 : 0.9, roughness: kind === 'basisTeeth' ? 0.32 : 0.45 }); m.name = kind; viewer.groups.plates.add(m); }
   syncPlateVisibility(); applyLayers();
 }
 // Toon per stap alleen het bijbehorende werkstuk; in de latere stappen de prothese.
@@ -797,7 +799,9 @@ async function buildTeeth() {
   const explicit = S.selectedTeeth.size > 0;
   let ids = explicit ? [...S.selectedTeeth] : (jaw() === 'upper' ? FDI_UPPER : FDI_LOWER).filter(id => id % 10 !== 8);
   let frame = computeFrame();
-  if (!frame) { if (S.scan) throw Error('Zet eerst de drie referentiepunten op de kam (stap Analyse → Automatisch).'); frame = S.frame = defaultFrame(jaw()); }
+  // geen referentiepunten: zelf zetten en de kaak analyseren (zoals ⚡ Alles automatisch), niet om punten vragen
+  if (!frame && S.scan) { frame = ensureFrame(); if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy(); }
+  if (!frame) frame = S.frame = defaultFrame(jaw());
   const rs = ruleSetup(), useRule = $('planeMode').value === 'rule' && rs?.rule;
   if (rs && S.anatomy) S.anatomy.arch = rs.arch;
   const lib = await tools.librarySetting(), mode = $('setupMode').value;
@@ -912,6 +916,7 @@ async function buildBasis() {
   const base = shell(surface, { gap, wall, reverse }, rep);
   await loadManifold();
   const parts = [base], notes = [];
+  let gingivaFallback = null;
   const teeth = teethWorldSoups();
   if ($('gingivaOn').checked && teeth.length && S.frame) {
     const N = S.frame.N, O = S.frame.O;
@@ -923,12 +928,29 @@ async function buildBasis() {
     const T2 = S.teeth.map((t, i) => { const d = vec.sub(t.position.toArray(), O); return { x: vec.dot(d, S.frame.X), y: vec.dot(d, S.frame.Y), c: cervical[i], r: t.userData.dims.md / 2 }; });
     const over = num('gingivaOver');
     const topAt = t => { const [x, y] = archFn(t); let best = Infinity; for (const q of T2) { const d = Math.hypot(x - q.x, y - q.y); best = Math.min(best, q.c + over + 1.8 * (1 - Math.exp(-((d / (q.r * 1.05)) ** 2)))); } return Number.isFinite(best) ? best : top; };
-    parts.push(gingivaBand(S.frame, { width: num('gingivaWidth'), top: topAt, embed: 3, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: gArch, conform: conformTo(gap + wall * 0.5) }));
-    notes.push(`gingiva met festoenen en papillen (rand ${fmt(over)} mm boven de halslijn)`);
+    // wortelreliëf (juga): hoektand het sterkst, dan snijtanden en premolaren; molaren nauwelijks
+    const JUGA = { 1: 0.7, 2: 0.55, 3: 1.1, 4: 0.5, 5: 0.45, 6: 0.25, 7: 0.15 }, jf = num('gingivaJuga') / 100;
+    const T3 = T2.map((q, i) => ({ ...q, a: (JUGA[S.teeth[i].userData.fdi % 10] ?? 0) * jf }));
+    const bulge = jf > 0 ? (t => { const [x, y] = archFn(t); let b = 0; for (const q of T3) { const d = Math.hypot(x - q.x, y - q.y); b = Math.max(b, q.a * Math.exp(-((d / (q.r * 0.62)) ** 2))); } return b; }) : null;
+    // booglengte-positie van de distale rand van het laatste element per kant (daarachter loopt de gingiva uit)
+    const NS = 400, AP = Array.from({ length: NS + 1 }, (_, i) => archFn(-1 + 2 * i / NS)); let AL = 0; for (let i = 1; i <= NS; i++) AL += Math.hypot(AP[i][0] - AP[i - 1][0], AP[i][1] - AP[i - 1][1]);
+    const fadeFrom = [0, 0];
+    for (const q of T2) { let bi = 0, bd = Infinity; AP.forEach((p, i) => { const d = Math.hypot(p[0] - q.x, p[1] - q.y); if (d < bd) { bd = d; bi = i; } }); const t = -1 + 2 * bi / NS, dt = 2 * q.r / AL; if (t < 0) fadeFrom[0] = Math.max(fadeFrom[0], -t + dt); else fadeFrom[1] = Math.max(fadeFrom[1], t + dt); }
+    const band = opts => gingivaBand(S.frame, { fadeFrom, width: num('gingivaWidth'), top: topAt, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: gArch, conform: conformTo(gap + wall * 0.5), samples: 320, ...opts });
+    parts.push(band({ embed: 9, flare: 3.5, bulge }));
+    // terugval als de anatomische vorm bij een grillige opstelling niet sluit: eenvoudiger profiel, altijd gesloten
+    gingivaFallback = { index: parts.length - 1, steps: [() => band({ embed: 3, simple: true })] };
+    notes.push(`gingiva met festoenen, papillen${jf > 0 ? ' en wortelreliëf' : ''} (rand ${fmt(over)} mm boven de halslijn)`);
   } else if (!teeth.length) notes.push('zonder tanden (alleen basis)');
   const teethTrimmed = teeth;
   if ($('coupling').value === 'monoblock' || !teeth.length) {
-    const mono = await clipToTissue('basis', (await unionSoups([...parts, ...teeth.map(t => t.soup)])).soup, reverse);
+    // Samenvoegen en controleren; sluit het resultaat niet (delen raken elkaar), dan stapsgewijs een eenvoudiger
+    // gingivaprofiel (minder flens, zonder wortelreliëf) tot het wel sluit.
+    const build = async () => { const r = {}; const u = await unionSoups([...parts, ...teeth.map(t => t.soup)], r); const m = await clipToTissue('basis', u.soup, reverse); return { m, ok: !r.loose && quality(weld(m, 1e-6)).nonManifold === 0 }; };
+    let res = await build(), simpler = 0;
+    while (!res.ok && gingivaFallback && simpler < gingivaFallback.steps.length) { parts[gingivaFallback.index] = gingivaFallback.steps[simpler++](); res = await build(); }
+    if (simpler) { const gi = notes.findIndex(n => n.startsWith('gingiva')); if (gi >= 0) notes[gi] = `gingiva met festoenen en papillen (eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling)`; if (!res.ok) notes.push('let op: delen raken elkaar; controleer in de slicer'); }
+    const mono = res.m;
     S.plates.monoblock = { soup: mono, name: 'Monoblock prothese', file: `MONOBLOCK_${safe($('caseName').value)}.stl` };
     delete S.plates.basis;
     // Weergave: basis in gingivakleur, tanden in tandkleur (export blijft één monoblock).
@@ -1123,14 +1145,36 @@ $('openProject').addEventListener('change', e => { const f = e.target.files?.[0]
 }); });
 
 // ---------- navigatie en sneltoetsen ----------
-$('prevStep').onclick = () => { const v = workSteps(), i = v.indexOf(S.step); showStep(v[Math.max(0, i - 1)]); };
-$('nextStep').onclick = () => { const v = workSteps(), i = v.indexOf(S.step); showStep(v[Math.min(v.length - 1, i + 1)]); };
+function stepBy(d) { const v = workSteps(), i = Math.max(0, v.indexOf(S.step)); showStep(v[Math.max(0, Math.min(v.length - 1, i + d))]); }
+$('prevStep').onclick = () => stepBy(-1);
+$('nextStep').onclick = () => stepBy(1);
+// Ongedaan maken / opnieuw voor de stap waarin je bent (bovenbalk, Ctrl+Z / Ctrl+Y)
+const UNDO_MAP = { scan: ['meshUndo', 'meshRedo'], analyse: ['markUndo', 'markRedo'], opstelling: ['teethUndo', 'teethRedo'], bewerken: ['sculptUndo', 'sculptRedo'], lepel: ['contourUndo', 'contourRedo'], beetplaat: ['contourUndo', 'contourRedo'], basis: ['contourUndo', 'contourRedo'] };
+function stepUndo(redo = false) {
+  if (S.step === 'opstelling' && S.mode === 'grind' && !redo) return $('grindUndo').click();
+  const map = UNDO_MAP[S.step];
+  if (!map) return status('In deze stap valt niets terug te zetten.');
+  $(map[redo ? 1 : 0]).click();
+}
+$('hdrPrev').onclick = () => stepBy(-1);
+$('hdrNext').onclick = () => stepBy(1);
+$('hdrUndo').onclick = () => stepUndo(false);
+$('hdrRedo').onclick = () => stepUndo(true);
+function syncHeaderNav() {
+  const v = workSteps(), i = v.indexOf(S.step);
+  $('hdrPrev').disabled = i <= 0; $('hdrNext').disabled = i < 0 || i >= v.length - 1;
+  const name = id => STEPS.find(s => s[0] === id)?.[1] ?? '';
+  $('hdrPrev').title = i > 0 ? `Vorige stap: ${name(v[i - 1])}` : 'Eerste stap'; $('hdrNext').title = i >= 0 && i < v.length - 1 ? `Volgende stap: ${name(v[i + 1])}` : 'Laatste stap';
+  $('hdrStep').textContent = i >= 0 ? `${i + 1}/${v.length} ${name(S.step)}` : name(S.step);
+  const can = !!UNDO_MAP[S.step]; $('hdrUndo').disabled = !can; $('hdrRedo').disabled = !can;
+}
 function syncWorkSteps() {
   const v = workSteps();
   // alle stappen blijven zichtbaar (Lepel, Beetplaat én Opstelling/Basis), zodat je direct een ander werkstuk kunt kiezen;
   // stappen van een ander werkstuk zijn gedimd en kiezen bij aantikken dat werkstuk
   for (const b of document.querySelectorAll('[data-step]')) { const li = b.closest('li') ?? b; li.classList.remove('hide'); b.classList.toggle('otherwork', !v.includes(b.dataset.step)); }
   STEPS.forEach(([id], i) => { for (const b of document.querySelectorAll(`[data-step="${id}"] .dot`)) b.textContent = i + 1; });
+  if (typeof syncHeaderNav === 'function' && $('hdrPrev')) syncHeaderNav();
   if (!isDenture()) { viewer.groups.teeth.visible = false; }
   if (S.step && !v.includes(S.step)) showStep(v.find(x => ['lepel', 'beetplaat', 'opstelling'].includes(x)) ?? 'opdracht');
 }
@@ -1143,8 +1187,7 @@ document.addEventListener('keydown', e => {
   if (mod && (k === 'z' || k === 'y')) {
     e.preventDefault();
     const redo = k === 'y' || e.shiftKey;
-    const map = { scan: ['meshUndo', 'meshRedo'], analyse: ['markUndo', 'markRedo'], opstelling: ['teethUndo', 'teethRedo'], bewerken: ['sculptUndo', 'sculptRedo'], lepel: ['contourUndo', 'contourRedo'], beetplaat: ['contourUndo', 'contourRedo'], basis: ['contourUndo', 'contourRedo'] }[S.step];
-    if (map) $(map[redo ? 1 : 0]).click();
+    stepUndo(redo);
     return;
   }
   if (mod) return;
@@ -1222,7 +1265,8 @@ function autoContour(kind) {
   if (!CONTOUR_KINDS.includes(kind)) return;
   if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
   const ol = proposeOutline(S.anatomy.cast, S.anatomy.an, kind);
-  S.contours.setPoints(kind, ol.points, contourAxis());
+  // licht gladstrijken (2,5 mm): geen zaagtand in de rand, frenulum-uitsparingen blijven (afgerond) bestaan
+  S.contours.setPoints(kind, smoothOutline(ol.points, 2.5), contourAxis());
   if (S.mode === 'contour') setMode('orbit');
   delete S.plates[kind];
   updateContourUI(); refreshScanColors(); refreshOverlay();
@@ -1527,12 +1571,14 @@ function prepareScan() {
   S.frame = null; S.landmarks = {}; ensureFrame(); let a = runAnatomy();
   if ($('prepTrim').checked) {
     const ol = proposeOutline(a.cast, a.an, 'basis');
-    const t = trimByOutline(S.scan, ol.points, S.frame.N, { margin: num('prepMargin'), splitAt: S.designedFrom });
+    // vloeiende bijsnijlijn (geen inkepingen bij de lipbandjes): de scan wordt ruim bijgesneden, het werkstuk krijgt later zijn eigen rand
+    const t = trimByOutline(S.scan, smoothOutline(ol.points, 4), S.frame.N, { margin: num('prepMargin') + 1, splitAt: S.designedFrom }); // +1 mm: gladstrijken trekt bolle delen iets naar binnen
     const df = S.designedFrom != null && t.splitIndex < t.soup.length / 9 ? t.splitIndex : null;
     // binnen de marge kan nog een los stuk sokkel of tafel liggen: alleen de kaak (grootste deel) houden
     const only = keepComponentNear(t.soup, S.landmarks.M ?? S.frame.O);
-    let df2 = df; if (only.removed && df != null) { df2 = null; } // volgorde blijft, maar index verschuift: veilig weglaten
-    setScan(only.soup, name, { reset: false, designedFrom: df2 });
+    // strakke rand: oortjes, vlinders, nul-lange randen en spleetjes weg, buitenrand vloeiend op het oppervlak
+    const rim = cleanRim(only.soup);
+    setScan(rim.soup, name, { reset: false, designedFrom: null });
     lines.push(`<b>Bijsnijden</b>: prothesegebied + ${fmt(num('prepMargin'))} mm · ${int(t.report.removed)} facetten verwijderd (sokkel, wang/tong, artefacten) · ${int(t.report.clipped)} randfacetten exact gesneden`);
     a = runAnatomy();
   }
