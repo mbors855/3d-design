@@ -104,6 +104,21 @@ export class WaxLayer {
   redo() { const h = this.future.pop(); if (!h) return false; this.history.push(this.lift); this.lift = h; return true; }
   clear() { this.snap(); this.lift.fill(0); }
   stats() { let n = 0, max = 0, vol = 0; for (let v = 0; v < this.nv; v++) if (this.lift[v] > 0) { n++; max = Math.max(max, this.lift[v]); vol += this.lift[v]; } return { points: n, max, mean: n ? vol / n : 0 }; }
+  /** Zelfde was op een nieuwe scan waarvan de punten niet verschoven zijn (repareren, bijsnijden, aanvullen):
+   * per punt op exact dezelfde plek wordt de lift overgenomen; nieuwe (aangevulde) punten krijgen geen was. */
+  transferTo(soup, axis = this.axis) {
+    const w = new WaxLayer(soup, axis), P = this.positions, Q = w.positions, inv = 1e6;
+    let size = 16; while (size < this.nv * 1.5 + 16) size *= 2;
+    const mask = size - 1, table = new Int32Array(size).fill(-1), key = (x, y, z) => (Math.imul(Math.round(x * inv) | 0, 73856093) ^ Math.imul(Math.round(y * inv) | 0, 19349663) ^ Math.imul(Math.round(z * inv) | 0, 83492791)) & mask;
+    for (let v = 0; v < this.nv; v++) { if (!this.lift[v]) continue; let h = key(P[v * 3], P[v * 3 + 1], P[v * 3 + 2]); while (table[h] >= 0) h = (h + 1) & mask; table[h] = v; }
+    for (let v = 0; v < w.nv; v++) {
+      for (let h = key(Q[v * 3], Q[v * 3 + 1], Q[v * 3 + 2]); table[h] >= 0; h = (h + 1) & mask) {
+        const u = table[h];
+        if (P[u * 3] === Q[v * 3] && P[u * 3 + 1] === Q[v * 3 + 1] && P[u * 3 + 2] === Q[v * 3 + 2]) { w.lift[v] = this.lift[u]; break; }
+      }
+    }
+    return w;
+  }
   /** Scan + was als soup (zelfde facetvolgorde als de scan). */
   waxedSoup() {
     const out = Float32Array.from(this.soup), A = this.basis.N, idx = this.indices;

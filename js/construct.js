@@ -76,11 +76,15 @@ function roundedRect(width, bottom, top, topWidth = width, r = 1) {
 // Beetwal: wasvormige wal van de kam tot het occlusievlak.
 // height: vast getal of functie(t) → hoogte boven het boogvlak (bijv. volgens de plooiregel, voor hoger dan achter).
 // arch: eigen boogfunctie (bijv. de gemeten kamlijn, verschoven naar de toekomstige tandpositie).
-export function biteRim(frame, { width = 7, height = 10, embed = 1.5, form = 'oval', anteriorWidth = null, conform = null, arch = null } = {}) {
+export function biteRim(frame, { width = 7, height = 10, embed = 1.5, form = 'oval', anteriorWidth = null, conform = null, arch = null, bottomPoints = 7 } = {}) {
   const hAt = typeof height === 'function' ? height : () => height;
   return sweep(frame, t => {
     const w = anteriorWidth ? anteriorWidth + (width - anteriorWidth) * Math.min(1, Math.abs(t) * 1.6) : width;
-    return roundedRect(w, -embed, hAt(t), w * 0.85, 1.2);
+    const prof = roundedRect(w, -embed, hAt(t), w * 0.85, 1.2);
+    // v68: onderkant met tussenpunten die elk op de plaat aansluiten (conform). Met alleen de twee hoeken liep de
+    // rechte onderkant over de kam door de plaat heen tot in de afdrukruimte of het weefsel.
+    if (conform && bottomPoints > 2) { const hw = w / 2, mid = []; for (let k = 1; k < bottomPoints - 1; k++) mid.push({ b: -hw + w * k / (bottomPoints - 1), n: -embed, bottom: true }); prof.splice(1, 0, ...mid); }
+    return prof;
   }, { form, tStart: -0.97, tEnd: 0.97, conform, arch });
 }
 

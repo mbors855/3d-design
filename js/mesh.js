@@ -1,4 +1,5 @@
 // Geïndexeerde mesh-algoritmes: lassen, randen, kwaliteit, reparatie, gaten dichten.
+import { bvhFor } from './bvh.js';
 // Mesh = { positions: Float32Array(v*3), indices: Uint32Array(f*3) }
 
 export function weld(soup, tolerance = 1e-5) {
@@ -33,8 +34,6 @@ export function toSoup(mesh) {
   return out;
 }
 
-const edgeKey = (a, b) => a < b ? a * 4294967296 + b : b * 4294967296 + a;
-
 export function faceNormal(p, f, i, out = [0, 0, 0]) {
   const a = f[i * 3] * 3, b = f[i * 3 + 1] * 3, c = f[i * 3 + 2] * 3;
   const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
@@ -43,35 +42,64 @@ export function faceNormal(p, f, i, out = [0, 0, 0]) {
   return out;
 }
 
-// Randstatistiek: per ongerichte rand het aantal facetten en de richting.
-export function edgeMap(mesh) {
-  const f = mesh.indices, map = new Map();
-  for (let i = 0; i < f.length; i += 3) for (let k = 0; k < 3; k++) {
-    const a = f[i + k], b = f[i + (k + 1) % 3], key = edgeKey(a, b);
-    const e = map.get(key);
-    if (e) { e.count++; e.faces.push(i / 3); if (e.from === a) e.sameDir = true; }
-    else map.set(key, { from: a, to: b, count: 1, faces: [i / 3], sameDir: false });
+// Randentabel in typed arrays (v68): per ongerichte rand de eerste richting (from → to), het aantal facetten, de eerste
+// twee facetten en of een later facet dezelfde richting heeft (omgekeerde buur). Randen genummerd in volgorde van
+// eerste voorkomen; faceEdge[f*3+k] = rand van facetzijde k. Veel sneller dan een Map met een object per rand.
+export class EdgeTable {
+  constructor(mesh) {
+    const f = mesh.indices, nh = f.length;
+    let size = 16; while (size < nh * 1.4 + 16) size *= 2;
+    const mask = size - 1, table = new Int32Array(size).fill(-1);
+    const lo = new Int32Array(nh), hi = new Int32Array(nh), from = new Int32Array(nh), to = new Int32Array(nh);
+    const count = new Int32Array(nh), f0 = new Int32Array(nh), f1 = new Int32Array(nh), same = new Uint8Array(nh), faceEdge = new Int32Array(nh);
+    let n = 0, extra = null;
+    for (let i = 0; i < nh; i++) {
+      const face = (i / 3) | 0, k = i - face * 3, a = f[i], b = f[face * 3 + (k + 1) % 3];
+      const l = a < b ? a : b, h2 = a < b ? b : a;
+      let h = (Math.imul(l, 73856093) ^ Math.imul(h2, 19349663)) & mask, id;
+      for (;;) {
+        id = table[h];
+        if (id < 0) { id = n++; table[h] = id; lo[id] = l; hi[id] = h2; from[id] = a; to[id] = b; count[id] = 1; f0[id] = face; f1[id] = -1; break; }
+        if (lo[id] === l && hi[id] === h2) {
+          const c = ++count[id];
+          if (c === 2) f1[id] = face; else { extra ??= new Map(); let x = extra.get(id); if (!x) extra.set(id, x = []); x.push(face); }
+          if (from[id] === a) same[id] = 1;
+          break;
+        }
+        h = (h + 1) & mask;
+      }
+      faceEdge[i] = id;
+    }
+    Object.assign(this, { n, from, to, count, f0, f1, same, faceEdge, extra });
   }
-  return map;
+  faces(e) { const c = this.count[e]; return c === 1 ? [this.f0[e]] : c === 2 ? [this.f0[e], this.f1[e]] : [this.f0[e], this.f1[e], ...this.extra.get(e)]; }
+  // zelfde vorm als vroeger (edgeMap): { from, to, count, faces, sameDir }
+  *values() { for (let e = 0; e < this.n; e++) yield { from: this.from[e], to: this.to[e], count: this.count[e], faces: this.faces(e), sameDir: !!this.same[e] }; }
+  get size() { return this.n; }
 }
+export function edgeTable(mesh) { return new EdgeTable(mesh); }
+// Randstatistiek (compatibel): iterabel via values() met { from, to, count, faces, sameDir } per rand.
+export function edgeMap(mesh) { return new EdgeTable(mesh); }
 
-export function boundaryLoops(mesh, edges = edgeMap(mesh)) {
-  const next = new Map();
+export function boundaryLoops(mesh, edges = null) {
+  const T = edges instanceof EdgeTable ? edges : edges ? null : new EdgeTable(mesh);
+  const nv = mesh.positions.length / 3;
+  // next[v] = volgend randpunt; starts in volgorde van eerste voorkomen (zelfde lussen en volgorde als voorheen)
+  const next = new Int32Array(nv).fill(-1), starts = [];
   let branching = false;
-  for (const e of edges.values()) if (e.count === 1) {
-    if (next.has(e.from)) branching = true;
-    else next.set(e.from, e.to);
-  }
-  const loops = [], seen = new Set();
-  for (const start of next.keys()) {
-    if (seen.has(start)) continue;
+  const add = (a, b) => { if (next[a] >= 0) branching = true; else { next[a] = b; starts.push(a); } };
+  if (T) { for (let e = 0; e < T.n; e++) if (T.count[e] === 1) add(T.from[e], T.to[e]); }
+  else for (const e of edges.values()) if (e.count === 1) add(e.from, e.to);
+  const loops = [], seen = new Uint8Array(nv);
+  for (const start of starts) {
+    if (seen[start]) continue;
     const loop = [];
     let v = start, ok = true;
     while (true) {
-      if (seen.has(v)) { ok = v === start; break; }
-      seen.add(v); loop.push(v);
-      const n = next.get(v);
-      if (n === undefined) { ok = false; break; }
+      if (seen[v]) { ok = v === start; break; }
+      seen[v] = 1; loop.push(v);
+      const n = next[v];
+      if (n < 0) { ok = false; break; }
       v = n;
       if (v === start) break;
     }
@@ -79,6 +107,67 @@ export function boundaryLoops(mesh, edges = edgeMap(mesh)) {
     else branching = true;
   }
   return { loops, branching };
+}
+
+// Afstand langs het oppervlak van elk punt tot de gegeven randlussen, tot maxDist (verder: Infinity). Voor de
+// afsluitzone langs de plaatrand en 'tot X mm binnen de scanrand'. Dijkstra over de ribben, aangevuld met de
+// driehoeksupdate van fast marching (rechte golffront door een driehoek): over de ribben alleen zou een afstand
+// schuin op het scanraster tot ~40 % te groot uitvallen, zo blijft dat enkele procenten.
+export function rimDistances(mesh, loops, maxDist = Infinity) {
+  const p = mesh.positions, f = mesh.indices, n = p.length / 3;
+  const vs = new Int32Array(n + 1); for (let i = 0; i < f.length; i++) vs[f[i] + 1]++;
+  for (let v = 0; v < n; v++) vs[v + 1] += vs[v];
+  const vf = new Int32Array(f.length), fill = vs.slice(0, n); for (let i = 0; i < f.length; i++) vf[fill[f[i]]++] = (i / 3) | 0;
+  // Float64: met Float32 kon een afgeronde afstand kleiner zijn dan de waarde in de heap, en werd dat punt overgeslagen
+  const dist = new Float64Array(n).fill(Infinity), done = new Uint8Array(n), src = new Uint8Array(n);
+  let hd = new Float64Array(1024), hv = new Int32Array(1024), size = 0;
+  const push = (d, v) => {
+    if (size === hd.length) { const a = new Float64Array(size * 2); a.set(hd); hd = a; const b = new Int32Array(size * 2); b.set(hv); hv = b; }
+    let i = size++;
+    while (i > 0) { const par = (i - 1) >> 1; if (hd[par] <= d) break; hd[i] = hd[par]; hv[i] = hv[par]; i = par; }
+    hd[i] = d; hv[i] = v;
+  };
+  const pop = () => {
+    const v = hv[0], d = hd[0], ld = hd[--size], lv = hv[size];
+    let i = 0;
+    for (;;) { let c = 2 * i + 1; if (c >= size) break; if (c + 1 < size && hd[c + 1] < hd[c]) c++; if (hd[c] >= ld) break; hd[i] = hd[c]; hv[i] = hv[c]; i = c; }
+    hd[i] = ld; hv[i] = lv;
+    return [d, v];
+  };
+  const len = (a, b) => Math.hypot(p[a * 3] - p[b * 3], p[a * 3 + 1] - p[b * 3 + 1], p[a * 3 + 2] - p[b * 3 + 2]);
+  const relax = (w, nd) => { if (nd < dist[w] && nd <= maxDist) { dist[w] = nd; push(nd, w); } };
+  // C bijwerken vanuit A en B (beide definitief): golffront door AB, vlak uitgevouwen
+  const tri = (A, B, C) => {
+    const c = len(A, B); if (c < 1e-12) return;
+    const dA = dist[A], dB = dist[B], b2 = len(A, C) ** 2, a2 = len(B, C) ** 2;
+    const cx = (b2 - a2 + c * c) / (2 * c), cy = Math.sqrt(Math.max(0, b2 - cx * cx)); if (cy < 1e-12) return;
+    let d;
+    if (src[A] && src[B]) { if (!rimEdge.has(A < B ? A * 4294967296 + B : B * 4294967296 + A) || cx < 0 || cx > c) return; d = cy; } // randribbe: afstand tot de randlijn
+    else {
+      const sx = (dA * dA - dB * dB + c * c) / (2 * c), s2 = dA * dA - sx * sx; if (s2 < 0) return;
+      const sy = -Math.sqrt(s2), t = -sy / (cy - sy), x = sx + t * (cx - sx);
+      if (x < 0 || x > c) return; // het rechte pad gaat niet door AB: dan geldt de ribbe
+      d = Math.hypot(cx - sx, cy - sy);
+      if (d < Math.max(dA, dB)) return; // het front bereikt C niet vóór A en B (stompe driehoek)
+    }
+    relax(C, d);
+  };
+  const rimEdge = new Set();
+  for (const loop of loops) for (let i = 0; i < loop.length; i++) { const v = loop[i], w = loop[(i + 1) % loop.length]; rimEdge.add(v < w ? v * 4294967296 + w : w * 4294967296 + v); dist[v] = 0; src[v] = 1; push(0, v); }
+  while (size) {
+    const [d, v] = pop();
+    if (done[v] || d > dist[v]) continue;
+    done[v] = 1;
+    for (let j = vs[v]; j < vs[v + 1]; j++) {
+      const t = vf[j], a = f[t * 3], b = f[t * 3 + 1], c = f[t * 3 + 2];
+      const [o1, o2] = a === v ? [b, c] : b === v ? [c, a] : [a, b];
+      if (!done[o1]) relax(o1, d + len(v, o1));
+      if (!done[o2]) relax(o2, d + len(v, o2));
+      if (done[o1] && !done[o2]) tri(v, o1, o2);
+      else if (done[o2] && !done[o1]) tri(v, o2, o1);
+    }
+  }
+  return dist;
 }
 
 export function loopLength(mesh, loop) {
@@ -117,12 +206,13 @@ export function quality(mesh) {
     const a = f[i * 3] * 3;
     volume += (p[a] * n[0] + p[a + 1] * n[1] + p[a + 2] * n[2]) / 6;
   }
-  const edges = edgeMap(mesh);
+  const edges = new EdgeTable(mesh);
   let open = 0, nonManifold = 0, flipped = 0;
-  for (const e of edges.values()) {
-    if (e.count === 1) open++;
-    else if (e.count > 2) nonManifold++;
-    else if (e.sameDir) flipped++;
+  for (let e = 0; e < edges.n; e++) {
+    const c = edges.count[e];
+    if (c === 1) open++;
+    else if (c > 2) nonManifold++;
+    else if (edges.same[e]) flipped++;
   }
   const { loops } = boundaryLoops(mesh, edges);
   return {
@@ -135,47 +225,62 @@ export function quality(mesh) {
 
 // Verwijdert ongeldige, platte en dubbele facetten en ongebruikte punten.
 export function clean(mesh, areaEps = 1e-10) {
-  const p = mesh.positions, f = mesh.indices, keep = [], seen = new Set(), n = [0, 0, 0];
-  let flat = 0, duplicate = 0;
-  for (let i = 0; i < f.length / 3; i++) {
+  const p = mesh.positions, f = mesh.indices, nf = f.length / 3, keep = new Uint32Array(f.length);
+  // dubbele facetten (zelfde drie punten, elke volgorde): hashtabel op het gesorteerde drietal
+  let size = 16; while (size < nf * 1.5 + 16) size *= 2;
+  const mask = size - 1, table = new Int32Array(size).fill(-1), A = new Int32Array(nf), B = new Int32Array(nf), C = new Int32Array(nf);
+  let flat = 0, duplicate = 0, kept = 0, m = 0;
+  for (let i = 0; i < nf; i++) {
     const a = f[i * 3], b = f[i * 3 + 1], c = f[i * 3 + 2];
     if (a === b || b === c || a === c) { flat++; continue; }
-    faceNormal(p, f, i, n);
-    if (Math.hypot(n[0], n[1], n[2]) / 2 < areaEps) { flat++; continue; }
-    const s = [a, b, c].sort((x, y) => x - y).join(',');
-    if (seen.has(s)) { duplicate++; continue; }
-    seen.add(s); keep.push(a, b, c);
+    const ax = p[a * 3], ay = p[a * 3 + 1], az = p[a * 3 + 2];
+    const ux = p[b * 3] - ax, uy = p[b * 3 + 1] - ay, uz = p[b * 3 + 2] - az, vx = p[c * 3] - ax, vy = p[c * 3 + 1] - ay, vz = p[c * 3 + 2] - az;
+    if (Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2 < areaEps) { flat++; continue; }
+    let x = a, y = b, z = c, t;
+    if (x > y) { t = x; x = y; y = t; } if (y > z) { t = y; y = z; z = t; } if (x > y) { t = x; x = y; y = t; }
+    let h = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) & mask, dup = false;
+    for (;;) { const id = table[h]; if (id < 0) { table[h] = m; A[m] = x; B[m] = y; C[m] = z; m++; break; } if (A[id] === x && B[id] === y && C[id] === z) { dup = true; break; } h = (h + 1) & mask; }
+    if (dup) { duplicate++; continue; }
+    keep[kept++] = a; keep[kept++] = b; keep[kept++] = c;
   }
-  return { mesh: compact({ positions: p, indices: Uint32Array.from(keep) }), flat, duplicate };
+  return { mesh: compact({ positions: p, indices: keep.subarray(0, kept) }), flat, duplicate };
 }
 
 export function compact(mesh) {
-  const remap = new Int32Array(mesh.positions.length / 3).fill(-1), pos = [];
-  const idx = new Uint32Array(mesh.indices.length);
-  for (let i = 0; i < mesh.indices.length; i++) {
-    const v = mesh.indices[i];
-    if (remap[v] < 0) { remap[v] = pos.length / 3; pos.push(mesh.positions[v * 3], mesh.positions[v * 3 + 1], mesh.positions[v * 3 + 2]); }
+  const nv = mesh.positions.length / 3, remap = new Int32Array(nv).fill(-1), I = mesh.indices, P = mesh.positions;
+  const idx = new Uint32Array(I.length), pos = new Float32Array(Math.min(nv, I.length) * 3);
+  let n = 0;
+  for (let i = 0; i < I.length; i++) {
+    const v = I[i];
+    if (remap[v] < 0) { remap[v] = n; pos[n * 3] = P[v * 3]; pos[n * 3 + 1] = P[v * 3 + 1]; pos[n * 3 + 2] = P[v * 3 + 2]; n++; }
     idx[i] = remap[v];
   }
-  return { positions: Float32Array.from(pos), indices: idx };
+  return { positions: pos.slice(0, n * 3), indices: idx };
 }
 
 // Maakt de facetoriëntatie consistent per samenhangend deel (BFS over gedeelde randen).
 export function orient(mesh) {
   const f = Uint32Array.from(mesh.indices), faceCount = f.length / 3;
-  const edges = edgeMap({ positions: mesh.positions, indices: f });
-  const adj = Array.from({ length: faceCount }, () => []);
-  for (const e of edges.values()) if (e.count === 2) { const [x, y] = e.faces; adj[x].push(y); adj[y].push(x); }
+  const T = new EdgeTable({ positions: mesh.positions, indices: f });
+  // buren per facet in volgorde van randnummer (zoals vroeger de Map-volgorde)
+  const nb = new Int32Array(faceCount * 3).fill(-1), ord = [0, 0, 0];
+  for (let face = 0; face < faceCount; face++) {
+    ord[0] = T.faceEdge[face * 3]; ord[1] = T.faceEdge[face * 3 + 1]; ord[2] = T.faceEdge[face * 3 + 2];
+    ord.sort((x, y) => x - y);
+    let k = 0;
+    for (let j = 0; j < 3; j++) { const e = ord[j]; if (j && e === ord[j - 1]) continue; if (T.count[e] === 2) nb[face * 3 + k++] = T.f0[e] === face ? T.f1[e] : T.f0[e]; }
+  }
   const has = (face, a, b) => { for (let k = 0; k < 3; k++) if (f[face * 3 + k] === a && f[face * 3 + (k + 1) % 3] === b) return true; return false; };
-  const visited = new Uint8Array(faceCount);
+  const visited = new Uint8Array(faceCount), queue = new Int32Array(faceCount);
   let flips = 0;
   for (let s = 0; s < faceCount; s++) {
     if (visited[s]) continue;
     visited[s] = 1;
-    const queue = [s];
-    while (queue.length) {
-      const face = queue.pop();
-      for (const other of adj[face]) {
+    let q = 0; queue[q++] = s;
+    while (q) {
+      const face = queue[--q];
+      for (let j = 0; j < 3; j++) {
+        const other = nb[face * 3 + j]; if (other < 0) break;
         if (visited[other]) continue;
         // Gedeelde rand moet in tegengestelde richting voorkomen.
         let conflict = false;
@@ -184,7 +289,7 @@ export function orient(mesh) {
           if (has(other, a, b)) { conflict = true; break; }
         }
         if (conflict) { const t = f[other * 3 + 1]; f[other * 3 + 1] = f[other * 3 + 2]; f[other * 3 + 2] = t; flips++; }
-        visited[other] = 1; queue.push(other);
+        visited[other] = 1; queue[q++] = other;
       }
     }
   }
@@ -277,36 +382,36 @@ export function fillHoles(mesh, { keepLargest = false, maxEdges = Infinity } = {
 // Maakt een open oppervlak geschikt als plaatbasis: alleen het grootste via randen verbonden stuk,
 // geen vlinderpunten (rand raakt zichzelf), geen niet-manifold randen en geen losse 'oren' aan de rand.
 export function tidySheet(mesh, { maxPasses = 25 } = {}) {
-  let f = Array.from(mesh.indices), removed = 0, passes = 0;
-  const p = mesh.positions;
+  let f = Uint32Array.from(mesh.indices), removed = 0, passes = 0;
+  const p = mesh.positions, nv = p.length / 3, bc = new Int32Array(nv);
   for (; passes < maxPasses; passes++) {
-    const edges = edgeMap({ positions: p, indices: f });
-    const bad = new Set(), boundaryCount = new Map();
-    for (const e of edges.values()) {
-      if (e.count > 2) e.faces.forEach(x => bad.add(x));
-      else if (e.count === 1) for (const v of [e.from, e.to]) boundaryCount.set(v, (boundaryCount.get(v) || 0) + 1);
+    const T = new EdgeTable({ positions: p, indices: f }), n = f.length / 3;
+    const bad = new Uint8Array(n), faceBoundary = new Uint8Array(n);
+    bc.fill(0);
+    for (let e = 0; e < T.n; e++) {
+      const c = T.count[e];
+      if (c > 2) { bad[T.f0[e]] = 1; bad[T.f1[e]] = 1; for (const x of T.extra.get(e)) bad[x] = 1; }
+      else if (c === 1) { bc[T.from[e]]++; bc[T.to[e]]++; faceBoundary[T.f0[e]]++; }
     }
-    const bowtie = new Set([...boundaryCount].filter(([, c]) => c > 2).map(([v]) => v));
-    const faceBoundary = new Uint8Array(f.length / 3);
-    for (const e of edges.values()) if (e.count === 1) faceBoundary[e.faces[0]]++;
-    for (let i = 0; i < f.length / 3; i++) {
-      if (faceBoundary[i] >= 2) bad.add(i); // los 'oortje' aan de rand: geeft platte driehoeken bij het dichten
-      else if (bowtie.size && (bowtie.has(f[i * 3]) || bowtie.has(f[i * 3 + 1]) || bowtie.has(f[i * 3 + 2]))) bad.add(i);
+    let bowtie = false; for (let v = 0; v < nv; v++) if (bc[v] > 2) { bowtie = true; break; }
+    for (let i = 0; i < n; i++) {
+      if (faceBoundary[i] >= 2) bad[i] = 1; // los 'oortje' aan de rand: geeft platte driehoeken bij het dichten
+      else if (bowtie && (bc[f[i * 3]] > 2 || bc[f[i * 3 + 1]] > 2 || bc[f[i * 3 + 2]] > 2)) bad[i] = 1;
     }
     // grootste stuk dat via gedeelde (manifold) randen samenhangt
-    const n = f.length / 3, parent = new Int32Array(n).map((_, i) => i);
+    const parent = new Int32Array(n); for (let i = 0; i < n; i++) parent[i] = i;
     const find = x => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
-    for (const e of edges.values()) if (e.count === 2 && !bad.has(e.faces[0]) && !bad.has(e.faces[1])) parent[find(e.faces[0])] = find(e.faces[1]);
-    const size = new Map();
-    for (let i = 0; i < n; i++) if (!bad.has(i)) { const r = find(i); size.set(r, (size.get(r) || 0) + 1); }
-    let best = -1, bestSize = 0; for (const [r, c] of size) if (c > bestSize) { best = r; bestSize = c; }
-    const keep = [];
-    for (let i = 0; i < n; i++) if (!bad.has(i) && find(i) === best) keep.push(f[i * 3], f[i * 3 + 1], f[i * 3 + 2]);
-    const dropped = n - keep.length / 3;
-    removed += dropped; f = keep;
+    for (let e = 0; e < T.n; e++) if (T.count[e] === 2 && !bad[T.f0[e]] && !bad[T.f1[e]]) parent[find(T.f0[e])] = find(T.f1[e]);
+    const size = new Int32Array(n), order = [];
+    for (let i = 0; i < n; i++) if (!bad[i]) { const r = find(i); if (!size[r]) order.push(r); size[r]++; }
+    let best = -1, bestSize = 0; for (const r of order) if (size[r] > bestSize) { best = r; bestSize = size[r]; }
+    const keep = new Uint32Array(f.length); let k = 0;
+    for (let i = 0; i < n; i++) if (!bad[i] && find(i) === best) { keep[k++] = f[i * 3]; keep[k++] = f[i * 3 + 1]; keep[k++] = f[i * 3 + 2]; }
+    const dropped = n - k / 3;
+    removed += dropped; f = keep.slice(0, k);
     if (!dropped) break;
   }
-  return { mesh: compact({ positions: p, indices: Uint32Array.from(f) }), removed, passes };
+  return { mesh: compact({ positions: p, indices: f }), removed, passes };
 }
 
 // Volledige reparatie: lassen, reinigen, oriënteren, gaten dichten en naar buiten richten.
@@ -367,59 +472,37 @@ export function applyMatrixToSoup(soup, m) {
 
 // Afstand van punten tot een oppervlak (soup), exact punt-tot-driehoek, met een rasterversnelling.
 // Geeft Float32Array met afstanden (Infinity als niets binnen maxDist ligt).
-export function pointToSurfaceDistances(points, soup, { cell = 1, maxDist = 6, closest = null } = {}) {
-  const grid = new Map(), key = (x, y, z) => (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
-  const nf = soup.length / 9;
-  for (let i = 0; i < nf; i++) {
-    const o = i * 9;
-    const x0 = Math.floor(Math.min(soup[o], soup[o + 3], soup[o + 6]) / cell), x1 = Math.floor(Math.max(soup[o], soup[o + 3], soup[o + 6]) / cell);
-    const y0 = Math.floor(Math.min(soup[o + 1], soup[o + 4], soup[o + 7]) / cell), y1 = Math.floor(Math.max(soup[o + 1], soup[o + 4], soup[o + 7]) / cell);
-    const z0 = Math.floor(Math.min(soup[o + 2], soup[o + 5], soup[o + 8]) / cell), z1 = Math.floor(Math.max(soup[o + 2], soup[o + 5], soup[o + 8]) / cell);
-    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) { const k = key(x, y, z); let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(i); }
-  }
-  const out = new Float32Array(points.length / 3).fill(Infinity), seen = new Int32Array(nf).fill(-1);
-  const R = Math.ceil(maxDist / cell);
-  for (let pi = 0; pi < points.length / 3; pi++) {
-    const px = points[pi * 3], py = points[pi * 3 + 1], pz = points[pi * 3 + 2];
-    const cx = Math.floor(px / cell), cy = Math.floor(py / cell), cz = Math.floor(pz / cell);
-    let best = Infinity;
-    for (let ring = 0; ring <= R; ring++) {
-      for (let x = cx - ring; x <= cx + ring; x++) for (let y = cy - ring; y <= cy + ring; y++) for (let z = cz - ring; z <= cz + ring; z++) {
-        if (Math.max(Math.abs(x - cx), Math.abs(y - cy), Math.abs(z - cz)) !== ring) continue;
-        for (const i of grid.get(key(x, y, z)) || []) { if (seen[i] === pi) continue; seen[i] = pi; const d = pointTriangle(px, py, pz, soup, i * 9, closest ? _cp : null); if (d < best) { best = d; if (closest) { closest[pi * 3] = _cp[0]; closest[pi * 3 + 1] = _cp[1]; closest[pi * 3 + 2] = _cp[2]; } } }
-      }
-      if (best <= ring * cell) break;
-    }
-    out[pi] = best;
+// Afstand van elk punt tot een oppervlak (soup), exact binnen maxDist (verder weg: Infinity). Met een BVH:
+// v67 en eerder zochten in een raster van 1 mm en testten per punt duizenden driehoeken, wat bij een afdrukruimte
+// van 2 mm op een scan van 300.000 facetten minutenlang duurde (pagina reageert niet).
+// bound (optioneel): per punt een bovengrens voor de afstand (bv. tot het scanpunt waar het punt vandaan komt);
+// dat maakt het zoeken nog veel kleiner. closest (optioneel): Float32Array(3n) voor de dichtstbijzijnde punten.
+export function pointToSurfaceDistances(points, soup, { maxDist = 6, closest = null, bound = null } = {}) {
+  const n = points.length / 3, out = new Float32Array(n).fill(Infinity);
+  if (!soup.length || !n) return out;
+  const bvh = bvhFor(soup), q = bvh.point;
+  for (let i = 0; i < n; i++) {
+    const lim = bound && bound[i] < maxDist ? bound[i] * (1 + 1e-6) + 1e-6 : maxDist;
+    let d = bvh.closest(points[i * 3], points[i * 3 + 1], points[i * 3 + 2], lim);
+    if (d === Infinity && lim < maxDist) d = bvh.closest(points[i * 3], points[i * 3 + 1], points[i * 3 + 2], maxDist); // bovengrens klopte niet
+    out[i] = d;
+    if (closest && d !== Infinity) { closest[i * 3] = q[0]; closest[i * 3 + 1] = q[1]; closest[i * 3 + 2] = q[2]; }
   }
   return out;
 }
-const _cp = [0, 0, 0];
-function pointTriangle(px, py, pz, s, o, cp = null) {
-  // Ericson, Real-Time Collision Detection: dichtstbijzijnd punt op een driehoek
-  const ax = s[o], ay = s[o + 1], az = s[o + 2], bx = s[o + 3], by = s[o + 4], bz = s[o + 5], cx = s[o + 6], cy = s[o + 7], cz = s[o + 8];
-  const abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az, apx = px - ax, apy = py - ay, apz = pz - az;
-  const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
-  const dist = (x, y, z) => { if (cp) { cp[0] = x; cp[1] = y; cp[2] = z; } return Math.hypot(px - x, py - y, pz - z); };
-  if (d1 <= 0 && d2 <= 0) return dist(ax, ay, az);
-  const bpx = px - bx, bpy = py - by, bpz = pz - bz, d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
-  if (d3 >= 0 && d4 <= d3) return dist(bx, by, bz);
-  const vc = d1 * d4 - d3 * d2;
-  if (vc <= 0 && d1 >= 0 && d3 <= 0) { const v = d1 / (d1 - d3); return dist(ax + v * abx, ay + v * aby, az + v * abz); }
-  const cpx = px - cx, cpy = py - cy, cpz = pz - cz, d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
-  if (d6 >= 0 && d5 <= d6) return dist(cx, cy, cz);
-  const vb = d5 * d2 - d1 * d6;
-  if (vb <= 0 && d2 >= 0 && d6 <= 0) { const w = d2 / (d2 - d6); return dist(ax + w * acx, ay + w * acy, az + w * acz); }
-  const va = d3 * d6 - d5 * d4;
-  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { const w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); return dist(bx + w * (cx - bx), by + w * (cy - by), bz + w * (cz - bz)); }
-  const den = 1 / (va + vb + vc), v = vb * den, w = vc * den;
-  return dist(ax + abx * v + acx * w, ay + aby * v + acy * w, az + abz * v + acz * w);
-}
 
 // Pasvlak-nauwkeurigheid: afstand van de scanpunten (binnen de omtrek) tot de plaat, vergeleken met de ingestelde ruimte.
-export function fitReport(surfaceSoup, plateSoup, gap = 0, { skipFrom = null, sample = 4000 } = {}) {
+// rimSeal (mm): punten in de afsluitzone langs de rand (afstand loopt daar bewust naar 0) tellen niet mee voor de afdrukruimte.
+export function fitReport(surfaceSoup, plateSoup, gap = 0, { skipFrom = null, sample = 4000, rimSeal = 0 } = {}) {
   const n = (skipFrom ?? surfaceSoup.length / 9) * 3, stride = Math.max(1, Math.floor(n / sample));
-  const pts = []; for (let v = 0; v < n; v += stride) pts.push(surfaceSoup[v * 3], surfaceSoup[v * 3 + 1], surfaceSoup[v * 3 + 2]);
+  let zone = null;
+  if (rimSeal > 0 && gap > 0) {
+    const m = weld(surfaceSoup, 1e-5), { loops } = boundaryLoops(m);
+    // de afsluitzone beïnvloedt de afstand tot ongeveer 'gap' verder naar binnen (schuine binnenkant)
+    const reach = rimSeal + gap;
+    if (loops.length) { const lens = loops.map(l => loopLength(m, l)), dr = rimDistances(m, [loops[lens.indexOf(Math.max(...lens))]], reach); zone = v => dr[m.indices[v]] < reach; }
+  }
+  const pts = []; for (let v = 0; v < n; v += stride) if (!zone || !zone(v)) pts.push(surfaceSoup[v * 3], surfaceSoup[v * 3 + 1], surfaceSoup[v * 3 + 2]);
   const d = pointToSurfaceDistances(Float32Array.from(pts), plateSoup, { maxDist: gap + 3 });
   const fin = Array.from(d).filter(Number.isFinite);
   const dev = fin.map(x => Math.abs(x - gap)).sort((a, b) => a - b), close = fin.map(x => Math.max(0, gap - x)).sort((a, b) => a - b);

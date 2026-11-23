@@ -1,8 +1,25 @@
 // Scanvolgende plaat: offset van een open kaakoppervlak tot een gesloten schaal.
-import { weld, clean, orient, flipAll, boundaryLoops, fillHoles, vertexNormals, loopLength, tidySheet, toSoup, pointToSurfaceDistances } from './mesh.js';
+import { weld, clean, orient, flipAll, boundaryLoops, fillHoles, vertexNormals, loopLength, tidySheet, toSoup, rimDistances } from './mesh.js';
+import { bvhFor } from './bvh.js';
 import { simplifyMesh, SCAN_LIMIT, SCAN_TARGET } from './decimate.js';
 
-export function shell(soup, { gap = 0, wall = 2, reverse = false, draftAngle = null, smoothing = 2, allowNegativeGap = false, maxScale = 1.3 } = {}, report = {}) {
+// rimSeal (mm, optioneel): de ruimte loopt in de laatste rimSeal mm (langs het oppervlak gemeten) vloeiend naar 0, zodat
+// de rand van de plaat precies op de scan ligt (plaatrand = scanrand), ook met afdrukruimte.
+export function shell(soup, opts = {}, report = {}) {
+  const g = shellSteps(soup, opts, report);
+  let r = g.next(); while (!r.done) r = g.next();
+  return r.value;
+}
+// Zelfde berekening, maar met pauzes (pause() wordt elke ±0,1 s aangeroepen): de pagina blijft reageren.
+export async function shellAsync(soup, opts = {}, report = {}, pause = () => new Promise(r => setTimeout(r, 0))) {
+  const g = shellSteps(soup, opts, report);
+  let r = g.next(); while (!r.done) { await pause(r.value); r = g.next(); }
+  return r.value;
+}
+
+function* shellSteps(soup, { gap = 0, wall = 2, reverse = false, draftAngle = null, smoothing = 2, allowNegativeGap = false, maxScale = 1.3, rimSeal = 0, checkThin = false } = {}, report = {}) {
+  let lastPause = performance.now();
+  const due = () => { const t = performance.now(); if (t - lastPause < 100) return false; lastPause = t; return true; };
   if (!Number.isFinite(gap) || (gap < 0 && !allowNegativeGap) || !Number.isFinite(wall) || wall <= 0) throw Error('Vul een geldige ruimte en positieve dikte in.');
   let mesh = weld(soup, 1e-5);
   // Te groot oppervlak (hoge-resolutie scan): eerst vereenvoudigen met een harde foutgrens (rand blijft exact,
@@ -12,10 +29,12 @@ export function shell(soup, { gap = 0, wall = 2, reverse = false, draftAngle = n
     mesh = r.mesh; report.reduced = r.report;
     if (mesh.indices.length / 3 > SCAN_LIMIT * 1.5) throw Error(`Het oppervlak binnen de omtrek is te groot (${Math.round(mesh.indices.length / 3).toLocaleString('nl-NL')} facetten, ook na vereenvoudigen). Teken de omtrek kleiner of snijd de scan bij (Scan & mesh).`);
   }
+  if (due()) yield 'opschonen';
   mesh = clean(mesh).mesh;
   // Echte scans: randen opschonen (vlinderpunten, losse eilandjes, oren) vóór het oriënteren.
   const tidy = tidySheet(mesh); mesh = tidy.mesh; report.tidied = tidy.removed;
   if (!mesh.indices.length) throw Error('Na opschonen bleef er geen bruikbaar oppervlak over.');
+  if (due()) yield 'oriënteren';
   mesh = orient(mesh).mesh;
   if (reverse) mesh = flipAll(mesh);
   let { loops, branching } = boundaryLoops(mesh);
@@ -36,6 +55,7 @@ export function shell(soup, { gap = 0, wall = 2, reverse = false, draftAngle = n
     if (!(draftAngle <= 10)) throw Error('Kies een uitblokhoek van 0 tot 10 graden.');
     positions = blockout(positions, f, reverse ? -1 : 1, draftAngle, report);
   } else { report.changed = 0; report.maxLift = 0; }
+  if (due()) yield 'normalen';
   const work = { positions, indices: f };
   let normals = vertexNormals(work);
   normals = smoothNormals(work, normals, smoothing);
@@ -44,40 +64,68 @@ export function shell(soup, { gap = 0, wall = 2, reverse = false, draftAngle = n
   // Hoekcompensatie: een verschuiving langs de (gladgemaakte) puntnormaal is loodrecht op een schuin facet korter.
   // Schaal per punt met 1 / min(n_punt · n_facet), begrensd, zodat de wand nergens dunner wordt dan ingesteld.
   const scale = offsetScale(work, normals, maxScale);
+  const rim = loops[0];
+  // ruimte per punt: overal 'gap', behalve in de afsluitzone langs de rand (rimSeal) waar hij naar 0 loopt
+  const gapAt = new Float32Array(vCount).fill(gap);
+  if (gap > 0 && rimSeal > 0) {
+    const dr = rimDistances(work, [rim], rimSeal);
+    for (let v = 0; v < vCount; v++) if (dr[v] < rimSeal) { const t = dr[v] / rimSeal; gapAt[v] = gap * t * t * (3 - 2 * t); }
+    report.rimSeal = rimSeal;
+  }
   report.maxScale = 0;
   for (let v = 0; v < vCount; v++) {
-    const k = scale[v]; if (k > report.maxScale) report.maxScale = k;
-    for (let j = 0; j < 3; j++) { const i = v * 3 + j; inner[i] = positions[i] + normals[i] * gap * k; outer[i] = positions[i] + normals[i] * (gap + wall) * k; }
+    const k = scale[v], g = gapAt[v]; if (k > report.maxScale) report.maxScale = k;
+    for (let j = 0; j < 3; j++) { const i = v * 3 + j; inner[i] = positions[i] + normals[i] * g * k; outer[i] = positions[i] + normals[i] * (g + wall) * k; }
   }
-  const rim = loops[0];
   // Ruimte exact maken (nauwkeurigheid 0,05 mm): de verschuiving langs de puntnormaal komt in holtes te dicht bij
   // en op bolle delen te ver van de scan. Per punt de echte afstand tot het (onverschoven) oppervlak meten en
   // binnen- en buitenkant samen bijstellen, zodat de wanddikte gelijk blijft.
   report.gapCorrected = 0;
+  let surfBvh = null;
   if (gap > 0) {
-    const surfaceSoup = toSoup(work), onRim = new Uint8Array(vCount); for (const v of rim) onRim[v] = 1;
-    const cp = new Float32Array(inner.length);
-    for (let it = 0; it < 5; it++) {
-      const d = pointToSurfaceDistances(inner, surfaceSoup, { maxDist: gap + 2, closest: cp });
+    // Alleen punten die in de vorige ronde zijn verschoven opnieuw meten (de rest verandert niet); de afstand tot het
+    // eigen scanpunt is een bovengrens voor het zoeken. Samen met de BVH: seconden in plaats van minuten.
+    const bvh = surfBvh = bvhFor(toSoup(work)), q = bvh.point, onRim = new Uint8Array(vCount); for (const v of rim) onRim[v] = 1;
+    let active = new Int32Array(vCount); for (let v = 0; v < vCount; v++) active[v] = v;
+    let nActive = vCount;
+    const moved = new Int32Array(vCount), maxDist = gap + 2;
+    for (let it = 0; it < 5 && nActive; it++) {
       let changed = 0;
-      for (let v = 0; v < vCount; v++) {
-        if (!Number.isFinite(d[v])) continue;
-        let delta = [0, 0, 0];
-        if (d[v] < gap - 0.01) {
+      for (let a = 0; a < nActive; a++) {
+        if ((a & 1023) === 0 && due()) yield 'afstand';
+        const v = active[a], g = gapAt[v], ix = inner[v * 3], iy = inner[v * 3 + 1], iz = inner[v * 3 + 2];
+        const bound = Math.hypot(ix - positions[v * 3], iy - positions[v * 3 + 1], iz - positions[v * 3 + 2]);
+        let d = bvh.closest(ix, iy, iz, Math.min(maxDist, bound * (1 + 1e-6) + 1e-6));
+        if (d === Infinity) d = bvh.closest(ix, iy, iz, maxDist);
+        if (d === Infinity) continue;
+        let dx, dy, dz;
+        if (d < g - 0.01) {
           // te dicht (holte, of de tegenoverliggende wand van een smalle plooi): weg van het dichtstbijzijnde scanpunt
           // tot precies de ingestelde ruimte (Minkowski-offset); zo overbrugt de lepel smalle plooien
-          const o = [inner[v * 3] - cp[v * 3], inner[v * 3 + 1] - cp[v * 3 + 1], inner[v * 3 + 2] - cp[v * 3 + 2]], l = Math.hypot(...o);
-          const dir = l > 1e-6 ? o.map(x => x / l) : [normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2]];
-          delta = [0, 1, 2].map(k => cp[v * 3 + k] + dir[k] * gap - inner[v * 3 + k]);
-        } else if (d[v] > gap + 0.03 && !onRim[v]) { const k2 = -(d[v] - gap) * 0.5; delta = [normals[v * 3] * k2, normals[v * 3 + 1] * k2, normals[v * 3 + 2] * k2]; }
+          let ox = ix - q[0], oy = iy - q[1], oz = iz - q[2]; const l = Math.hypot(ox, oy, oz);
+          if (l > 1e-6) { ox /= l; oy /= l; oz /= l; } else { ox = normals[v * 3]; oy = normals[v * 3 + 1]; oz = normals[v * 3 + 2]; }
+          dx = q[0] + ox * g - ix; dy = q[1] + oy * g - iy; dz = q[2] + oz * g - iz;
+        } else if (d > g + 0.03 && !onRim[v]) { const k2 = -(d - g) * 0.5; dx = normals[v * 3] * k2; dy = normals[v * 3 + 1] * k2; dz = normals[v * 3 + 2] * k2; }
         else continue;
-        const len = Math.hypot(...delta); if (len < 1e-6) continue;
-        const sc = Math.min(1, 1.0 / len); changed++;
-        for (let j = 0; j < 3; j++) { inner[v * 3 + j] += delta[j] * sc; outer[v * 3 + j] += delta[j] * sc; }
+        const len = Math.hypot(dx, dy, dz); if (len < 1e-6) continue;
+        const sc = Math.min(1, 1.0 / len);
+        inner[v * 3] += dx * sc; inner[v * 3 + 1] += dy * sc; inner[v * 3 + 2] += dz * sc;
+        outer[v * 3] += dx * sc; outer[v * 3 + 1] += dy * sc; outer[v * 3 + 2] += dz * sc;
+        moved[changed++] = v;
       }
       report.gapCorrected = Math.max(report.gapCorrected, changed);
-      if (!changed) break;
+      [active, nActive] = [moved.slice(0, changed), changed];
     }
+  }
+  // Controle buitenkant (v68): in smalle ruimtes (tussen tanden) kan de buitenkant over de scan heen schieten. Op
+  // een steekproef: hoeveel buitenpunten liggen dichter dan ⅓ van (ruimte + dikte) bij de scan?
+  if (checkThin) {
+    if (due()) yield 'controle';
+    surfBvh ??= bvhFor(toSoup(work));
+    const stride = Math.max(1, Math.floor(vCount / 4000)), lim = (gap + wall) / 3, onR = new Uint8Array(vCount); for (const v of rim) onR[v] = 1;
+    let thin = 0, cnt = 0;
+    for (let v = 0; v < vCount; v += stride) { if (onR[v]) continue; cnt++; if (surfBvh.closest(outer[v * 3], outer[v * 3 + 1], outer[v * 3 + 2], lim) !== Infinity) thin++; }
+    report.thin = cnt ? thin / cnt : 0;
   }
   const out = new Float32Array((f.length / 3 * 2 + rim.length * 2) * 9);
   let o = 0;
