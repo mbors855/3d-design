@@ -3,21 +3,21 @@ import * as THREE from 'three';
 import { Viewer, makePolyline, makeDots, makeMesh, COLORS } from './viewer.js';
 import { parseSTL, writeSTL, soupBounds, toBase64, fromBase64, concatSoups } from './stl.js';
 import { fitReport, weld, quality, repair, toSoup, flipSoup, applyMatrixToSoup, boundaryLoops } from './mesh.js';
-import { shell } from './shell.js';
-import { ContourSet } from './contour.js';
+import { shell, shellAsync } from './shell.js';
+import { ContourSet, editableOutline } from './contour.js';
 import { simplifySoup, simplifyText, SCAN_LIMIT } from './decimate.js';
 import { occlusalAxis, autoLandmarks, undercutMarks, vec } from './analysis.js';
 import { archFrame, defaultFrame, placeTeeth, autoOcclude, contactMap, clearContactMap, framePoint, archPoint } from './setup.js';
 import { FDI_UPPER, FDI_LOWER, formArch } from './teeth.js';
 import { biteRim, gingivaBand, trayHandle, perforations, tissueStops } from './construct.js';
-import { unionSoups, subtractSoups, loadManifold } from './csg.js';
+import { unionSoups, subtractSoups, subtractFirst, loadManifold } from './csg.js';
 import { demoJaw, demoAntagonist, anatomicJaw } from './demo.js';
 import { makeZip } from './zip.js';
 import { extractIntaglio } from './intaglio.js';
 import { takeHandoff } from './handoff.js';
 import { Sculpt, TOOLS } from './sculpt.js';
 import { analyzeScan, repairScan, extendBorder, keepComponentNear } from './prep.js';
-import { trimByOutline } from './trim.js';
+import { trimByOutline, trimByEdge } from './trim.js';
 import { WaxLayer } from './wax.js';
 import { initSetupTools, geometrySoup } from './setup-tools.js';
 import { VERSION } from './version.js';
@@ -77,6 +77,12 @@ async function busy(text, fn) {
   try { return await fn(); }
   catch (e) { console.error(e); status(e.message, true); toast(e.message, true); return undefined; }
   finally { $('busy').classList.add('hide'); }
+}
+// Even ademhalen tussen zware rekenstappen (v68): de browser verwerkt aanrakingen/klikken en tekent de voortgang,
+// zodat Edge/Chrome niet meer 'Deze pagina reageert niet' tonen. Ook in een tabblad op de achtergrond gaat hij door.
+function tick(text) {
+  if (text) $('busyText').textContent = text;
+  return new Promise(r => { let done = false; const go = () => { if (!done) { done = true; setTimeout(r, 0); } }; requestAnimationFrame(go); setTimeout(go, 60); });
 }
 const WHERE = /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'Bestanden → Downloads' : /Android/.test(navigator.userAgent) ? 'Mijn bestanden → Downloads' : 'je map Downloads';
 // Als de app als claude.ai-artifact draait, gaan downloads via de downloads-capability (alleen toegestane
@@ -154,10 +160,16 @@ function autoStep(id) {
   autoStepBusy = true;
   setTimeout(() => busy(`Rand ${id === 'basis' ? 'basis' : id} automatisch…`, async () => {
     try {
-      if (S.prepared !== S.scan && !S.frame) { prepareScan(); S.prepared = S.scan; }
-      ensureFrame(); if (!hasContour) autoContour(id);
+      const t0 = performance.now();
+      // scan voorbereiden alleen als er nog niets aan gedaan is (was en bewerkingen blijven altijd behouden)
+      if (S.prepared !== S.scan && !S.frame) { await prepareScan({ forKind: id }); S.prepared = S.scan; }
+      await tick('Referentiepunten op de kam…'); ensureFrame();
+      if (!hasContour) { await tick(`Rand ${id === 'basis' ? 'basis' : id} bepalen…`); autoContour(id); }
+      await tick(`${id === 'lepel' ? 'Lepel' : id === 'beetplaat' ? 'Beetplaat' : 'Prothesebasis'} opbouwen…`);
       await ({ lepel: buildLepel, beetplaat: buildBeet, basis: buildBasis })[id]();
-      status(`${id === 'lepel' ? 'Lepel' : id === 'beetplaat' ? 'Beetplaat' : 'Prothesebasis'} automatisch gemaakt: rand volgens de anatomie. Sleep de lijn om de rand aan te passen (of ✏️ Teken om een stuk over te tekenen) en tik daarna op Genereer.`);
+      console.info(`automatisch ${id}: ${Math.round(performance.now() - t0)} ms`);
+      const edge = S.contours.get(id)?.edge;
+      status(`${id === 'lepel' ? 'Lepel' : id === 'beetplaat' ? 'Beetplaat' : 'Prothesebasis'} automatisch gemaakt: ${edge ? `rand langs de scanrand${edge.inset ? ` (${fmt(edge.inset)} mm erbinnen)` : ' (plaatrand = scanrand)'}` : 'rand volgens de anatomie'}. Sleep de lijn om de rand aan te passen (of ✏️ Teken om een stuk over te tekenen) en tik daarna op Genereer.`);
     } finally { autoStepBusy = false; }
   }), 50);
 }
@@ -208,11 +220,13 @@ for (const e of document.querySelectorAll('[data-persist]')) e.addEventListener(
 // ---------- scan ----------
 const SIMPLIFIED = new WeakMap(); // scan → rapport van het vereenvoudigen (nauwkeurigheidsmelding bij het werkstuk)
 const ORIGINALS = new WeakSet();  // onbewerkte scans zoals geopend (terugzetten daarnaartoe = niet vereenvoudigd)
-function setScan(soup, name, { reset = true, designedFrom = null } = {}) {
+function setScan(soup, name, { reset = true, designedFrom = null, keepWax = false } = {}) {
   // een bewerking op een vereenvoudigde scan blijft 'vereenvoudigd' (zelfde foutgrens t.o.v. het origineel)
   if (soup && !reset && S.scan && !SIMPLIFIED.has(soup) && !ORIGINALS.has(soup) && SIMPLIFIED.has(S.scan)) SIMPLIFIED.set(soup, SIMPLIFIED.get(S.scan));
   if (soup && reset) ORIGINALS.add(soup);
-  if (S.wax && S.wax.soup !== soup) { S.wax = null; S.waxSoup = null; viewer.clearGroup('wax'); }
+  // keepWax: de scanpunten zelf zijn niet verschoven (repareren/bijsnijden): was per punt overnemen in plaats van wissen
+  if (S.wax && S.wax.soup !== soup && keepWax && soup && !reset && S.wax.stats().points) { S.wax = S.wax.transferTo(soup); S.waxSoup = S.wax.stats().points ? S.wax.waxedSoup() : null; S.waxMoved = true; }
+  else if (S.wax && S.wax.soup !== soup) { S.wax = null; S.waxSoup = null; viewer.clearGroup('wax'); }
   S.scan = soup; S.scanName = name || S.scanName; S.designedFrom = designedFrom;
   viewer.setScan(soup, { keepView: !reset });
   $('emptyHint').classList.toggle('hide', !!soup);
@@ -221,6 +235,7 @@ function setScan(soup, name, { reset = true, designedFrom = null } = {}) {
     S.contours.reset(); clearPlates(); clearTeeth();
   } else reopenContours();
   S.undercut = null;
+  if (S.waxMoved) { S.waxMoved = false; showWax(); }
   applyLayers();
   updateScanInfo(); refreshScanColors(); refreshOverlay(); updateDone();
 }
@@ -330,7 +345,7 @@ $('viewport').addEventListener('dragover', e => e.preventDefault());
 $('viewport').addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f && /\.stl$/i.test(f.name)) loadScanFile(f); });
 
 function snapshotAux() { return JSON.parse(JSON.stringify({ landmarks: S.landmarks, marks: S.marks, axis: S.axis, contours: S.contours.toJSON(), designedFrom: S.designedFrom ?? null })); }
-function restoreAux(a) { S.designedFrom = a.designedFrom ?? null; S.landmarks = a.landmarks; S.marks = a.marks; S.axis = a.axis; S.contours.reset(); for (const c of a.contours) { const s = S.contours.ensure(c.kind); s.points = c.points; s.closed = !!c.closed; s.axis = c.axis ?? null; } }
+function restoreAux(a) { S.designedFrom = a.designedFrom ?? null; S.landmarks = a.landmarks; S.marks = a.marks; S.axis = a.axis; S.contours.reset(); for (const c of a.contours) { const s = S.contours.ensure(c.kind); s.points = c.points; s.closed = !!c.closed; s.axis = c.axis ?? null; s.edge = c.edge ?? null; } }
 // Scan bewerken zonder het ontwerp kwijt te raken: de opstelling blijft (bij verplaatsen/draaien/schalen gaat hij mee)
 // en lepel, beetplaat en basis worden daarna automatisch opnieuw gegenereerd op de bijgewerkte scan.
 function keepDesign(matrix = null) {
@@ -448,6 +463,7 @@ function setMode(mode, arg = null) {
   if (narrow && MODE_SHORT[mode]) $('modeText').textContent = MODE_SHORT[mode];
   else $('modeText').textContent = (mode === 'landmark' ? MODE_TEXT.landmark + ({ R: 'rechts distaal', M: 'midden (incisief)', L: 'links distaal' })[arg] : mode === 'mark' ? (arg === 'reference' ? MODE_TEXT.reference : MODE_TEXT.mark) : MODE_TEXT[mode] || '') + (mode === 'landmark' || (mode === 'mark' && arg === 'reference') ? MODE_TEXT.contourHint : '');
   $('contourToggle').setAttribute('aria-pressed', String(mode === 'contour'));
+  if (viewer.scanMesh) refreshScanOutside(); // tijdens tekenen de hele scan zien
   $('waxEdit').setAttribute('aria-pressed', String(mode === 'wax'));
   $('contourToggle').textContent = mode === 'contour' ? '✓ Klaar' : '✏️ Teken';
   contourTools?.onMode(mode);
@@ -471,6 +487,7 @@ function dropPlate(kind) {
 }
 function finishContourEdit(kind, msg) {
   const s = S.contours.get(kind);
+  if (s) s.edge = null; // met de hand aangepast: vanaf nu een gewone omtrek (uitsnede langs de lijn)
   try { S.contours.close(kind, s.axis ?? contourAxis(), { record: false }); }
   catch (err) { S.contours.undo(kind); S.contours.redo.set(kind, []); contourError(err.message + ' De wijziging is teruggedraaid.'); refreshOverlay(); return false; }
   dropPlate(kind);
@@ -577,7 +594,22 @@ function refreshScanColors() {
   // aangevuld (niet gescand, ontworpen) deel altijd zichtbaar in paars
   if (S.designedFrom != null && S.designedFrom < n) { marks ??= new Uint8Array(n); for (let f = S.designedFrom; f < n; f++) marks[f] = marks[f] && marks[f] <= 3 ? 11 : 10; }
   viewer.colorFaces(marks, [COLORS.lepel, COLORS.beetplaat, COLORS.basis, COLORS.undercut, ...ZONE_COLORS, [0.72, 0.58, 0.96], [0.52, 0.36, 0.88]]);
+  refreshScanOutside();
 }
+// v68: met een werkstuk de scan buiten de plaatrand doorschijnend (laag 'Scan buiten de rand'): plaatrand en scanrand
+// vallen samen; met de fader is de originele scan terug te zien (100) of helemaal weg (0).
+function refreshScanOutside() {
+  if (!viewer.scanMesh) return;
+  const work = $('work').value, kind = CONTOUR_KINDS.includes(S.step) ? S.step : ['controle', 'productie'].includes(S.step) ? (work === 'lepel' ? 'lepel' : work === 'beetplaat' ? 'beetplaat' : 'basis') : null;
+  const s = kind && S.contours.get(kind), plate = kind && (kind === 'basis' ? S.plates.basis || S.plates.monoblock : S.plates[kind]);
+  if (!s?.closed || !plate || !$('layerOutside').checked || S.mode === 'contour') return viewer.setScanOutside(null);
+  try { S.contours.surface(kind, S.scan); } catch { return viewer.setScanOutside(null); }
+  const n = S.scan.length / 9, out = new Uint8Array(n).fill(1);
+  for (const f of s.facets) if (f < n) out[f] = 0;
+  viewer.setScanOutside(out, num('opOutside') / 100);
+}
+$('layerOutside').addEventListener('change', refreshScanOutside);
+$('opOutside').addEventListener('input', refreshScanOutside);
 
 // ---------- analyse ----------
 function updateAxisInfo() { const a = S.axis; $('axisInfo').textContent = a ? `Occlusale richting: (${a.map(v => fmt(v, 2)).join(', ')})` : 'Automatisch bepaald uit de scan.'; }
@@ -663,25 +695,25 @@ function scanForPlates() { return S.wax && S.wax.soup === S.scan && S.waxSoup ? 
 async function clipToTissue(kind, soup, reverse) {
   const s = S.contours.get(kind); if (!s?.closed) return soup;
   await loadManifold();
-  let lastErr = null;
-  for (const [margin, wall] of [[1.5, 8], [1, 4], [0.6, 2.5]]) {
-    try {
-      const wide = trimByOutline(scanForPlates(), s.points, s.axis, { margin }).soup;
-      const block = shell(wide, { gap: 0.005, wall, reverse: !reverse }); // 0,005 mm in het weefsel: geen samenvallende vlakken
-      const rep = {}, out = await subtractSoups(soup, [block], rep);
-      if (out?.length && !rep.skipped) return out;
-      lastErr = Error('weefselblok niet manifold');
-    } catch (e) { lastErr = e; console.warn('weefselblok', margin, wall, e?.message ?? e); }
-  }
+  const src = scanForPlates();
+  // v68: de plaat wordt één keer omgezet; een weefselblok wordt pas gemaakt als de vorige poging mislukte
+  const makers = [[1.5, 8], [1, 4], [0.6, 2.5]].map(([margin, wall], i) => async () => {
+    if (i) await tick('Weefselblok opnieuw proberen…');
+    const wide = s.edge ? trimByEdge(src, { inset: 0, splitAt: S.designedFrom ?? null }).soup : trimByOutline(src, s.points, s.axis, { margin }).soup;
+    return shellAsync(wide, { gap: 0.005, wall, reverse: !reverse }, {}, () => tick()); // 0,005 mm in het weefsel: geen samenvallende vlakken
+  });
+  const r = await subtractFirst(soup, makers);
+  if (r.used >= 0) return r.soup;
+  console.warn('weefselblok', r.error);
   toast('Let op: delen die door het pasvlak steken konden niet automatisch worden weggesneden. Controleer het pasvlak.', true);
   return soup;
 }
 function waxNote() { const st = S.wax && S.wax.soup === S.scan ? S.wax.stats() : null; return st?.points ? ` · was op ${int(st.points)} punten (max ${fmt(st.max, 2)} mm): daar ligt de plaat bewust vrij van de scan` : ''; }
 // Pasvlak-controle: afstand scan → plaat t.o.v. de ingestelde ruimte; het aangevulde (ontworpen) deel telt niet mee.
 S.fit = {};
-function fitCheck(kind, surface, soup, gap) {
+function fitCheck(kind, surface, soup, gap, rimSeal = 0) {
   const s = S.contours.get(kind), skip = s?.splitIndex != null && s.splitIndex < surface.length / 9 ? s.splitIndex : null;
-  const f = fitReport(surface, soup, gap, { skipFrom: skip });
+  const f = fitReport(surface, soup, gap, { skipFrom: skip, rimSeal });
   S.fit[kind] = f ? { ...f, gap, designed: skip != null } : null;
   if (!f) return '';
   const tail = skip != null ? ' · aangevuld deel niet meegeteld' : '';
@@ -706,7 +738,7 @@ function showPlate(kind, soup, color) {
   const old = viewer.groups.plates.getObjectByName(kind);
   if (old) { viewer.groups.plates.remove(old); old.geometry.dispose(); old.material.dispose(); }
   if (soup) { const m = makeMesh(soup, color, { opacity: kind === 'basis' || kind === 'basisTeeth' ? 1 : 0.9, roughness: kind === 'basisTeeth' ? 0.32 : 0.45 }); m.name = kind; viewer.groups.plates.add(m); }
-  syncPlateVisibility(); applyLayers();
+  syncPlateVisibility(); applyLayers(); refreshScanOutside();
 }
 // Toon per stap alleen het bijbehorende werkstuk; in de latere stappen de prothese.
 function syncPlateVisibility() {
@@ -732,6 +764,8 @@ function plateLink(kind, label) { return `<a class="download" href="#" data-down
 document.addEventListener('click', e => { const a = e.target.closest('[data-download]'); if (!a) return; e.preventDefault(); const p = S.plates[a.dataset.download]; if (p) download(writeSTL(p.soup, p.name), p.file); });
 function needFrame(feature) { if (computeFrame() || S.frame) return true; toast(`${feature} overgeslagen: zet eerst de referentiepunten (stap Analyse).`); return false; }
 
+// v68: waarschuwing als de buitenkant in smalle ruimtes (tussen tanden, diepe plooien) te dicht bij de scan komt
+const thinNote = rep => rep?.thin > 0.003 ? ` · <span class="err">⚠ op ${fmt(rep.thin * 100, 1)}% van de buitenkant minder dan ⅓ van de dikte tot de scan: in smalle ruimtes (tussen tanden) schiet de buitenkant over de scan heen. Vul die ruimtes eerst met was (Analyse) of kies een kleinere afstand/dikte</span>` : '';
 const reducedNote = rep => {
   const sc = S.scan && SIMPLIFIED.get(S.scan);
   return (sc ? ` · scan vereenvoudigd (${int(sc.before)} → ${int(sc.after)} facetten): elk origineel scanpunt binnen ${fmt(sc.maxDeviation, 3)} mm` : '')
@@ -741,7 +775,8 @@ async function buildLepel() {
   ensureWorkableScan();
   const surface = surfaceFor('lepel'), gap = num('lepelGap'), wall = num('lepelWall'), reverse = $('lepelReverse').checked;
   const rep = {};
-  let soup = shell(surface, { gap, wall, reverse }, rep);
+  await tick(gap > 0 ? `Lepel opbouwen (${fmt(gap, 2)} mm afdrukruimte)…` : 'Lepel opbouwen…');
+  let soup = await shellAsync(surface, { gap, wall, reverse, checkThin: true }, rep, () => tick());
   const shellSoup = soup; // pasvlak meten zonder weefselstops (die raken de scan bewust)
   const extras = [], notes = [];
   if ($('lepelHandle').checked && needFrame('Handvat')) { extras.push(trayHandle(S.frame, { base: gap, height: num('handleHeight'), width: num('handleWidth'), conform: conformTo(gap + wall * 0.5) })); notes.push('handvat'); }
@@ -756,39 +791,64 @@ async function buildLepel() {
   const { text } = plateSummary(soup), fitTxt = fitCheck('lepel', surface, shellSoup, gap) + waxNote();
   S.plates.lepel = { soup, name: 'Individuele lepel', file: `LEPEL_${safe($('caseName').value)}.stl` };
   showPlate('lepel', soup, COLORS.plate.lepel);
-  result('lepelResult', `Lepel klaar: ${text}${fitTxt}${reducedNote(rep)}${rep.holesFilled ? ` · ${rep.holesFilled} gaten in de scan gedicht` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('lepel', 'Lepel-STL')}`);
+  result('lepelResult', `Lepel klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)}${rep.holesFilled ? ` · ${rep.holesFilled} gaten in de scan gedicht` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('lepel', 'Lepel-STL')}`);
   status('Lepel gegenereerd.'); updateDone();
 }
 $('lepelBuild').onclick = () => busy('Lepel berekenen…', buildLepel);
 $('biteFit').addEventListener('change', () => { $('biteDraft').disabled = $('biteFit').value !== 'block'; });
 async function buildBeet() {
   ensureWorkableScan();
-  const surface = surfaceFor('beetplaat'), gap = num('beetGap'), wall = num('beetWall'), reverse = $('beetReverse').checked;
-  if ($('biteFit').value === 'block' && !(S.wax?.stats().points)) { waxBlockout(); }
+  surfaceFor('beetplaat'); // controle: is er een (gesloten) omtrek?
+  const gap = num('beetGap'), wall = num('beetWall'), reverse = $('beetReverse').checked;
+  if ($('biteFit').value === 'block' && !(S.wax?.stats().points)) { await tick('Ondersnijdingen opvullen met was…'); waxBlockout(); }
   const draft = null, rep = {};
+  await tick('Plaatoppervlak uitsnijden…');
   const surf2 = surfaceFor('beetplaat'); // na eventueel uitblokken: scan + was
-  let soup = shell(surf2, { gap, wall, reverse }, rep);
+  // met afdrukruimte: de ruimte loopt aan de rand naar 0, zodat de plaatrand precies op de scan(rand) ligt
+  const seal = gap > 0 && $('beetSeal').checked ? Math.max(0.5, num('beetSealWidth') || 2) : 0;
+  await tick(gap > 0 ? `Plaat opbouwen (${fmt(gap, 2)} mm afstand tot de scan)…` : 'Plaat opbouwen…');
+  let soup = await shellAsync(surf2, { gap, wall, reverse, rimSeal: seal, checkThin: true }, rep, () => tick());
   const extras = [], notes = [];
   if ($('rimOn').checked && needFrame('Beetwal')) {
     const rs = $('rimRule').checked ? ruleSetup({ forceCrest: true, extend: 0 }) : null;
     const height = rs?.rule ? t => rs.rule.at(Math.abs(t), 1) : num('rimHeight');
-    if (rs && S.anatomy) S.anatomy.arch = rs.arch;
-    extras.push(biteRim(S.frame, { width: num('rimWidth'), anteriorWidth: num('rimFrontWidth'), height, embed: 3, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, conform: conformTo(gap + wall * 0.5) }));
-    notes.push(rs?.rule ? `beetwal volgens regels (kamlijn; hoogte voor ${fmt(rs.rule.front)} / achter ${fmt(rs.rule.back)} mm boven de kam${rs.rule.notes.length ? '; ' + rs.rule.notes.join('; ') : ''})` : `beetwal ${fmt(num('rimHeight'))} mm`);
+    // v68: volgens de regels ligt het occlusievlak soms ónder de kam (betande scan: de 'kam' zijn de tanden). Zo'n wal
+    // zou helemaal in de plaat verdwijnen en de plaat kapotmaken: dan geen wal, met uitleg.
+    const crest = rs?.arch?.crest, buried = rs?.rule && crest?.heightAt ? (() => { let low = 0; for (let i = 0; i <= 40; i++) { const t = -1 + i / 20; if (height(t) - crest.heightAt(t) < gap + wall + 1) low++; } return low > 20; })() : false;
+    const noFold = rs?.rule?.edge && S.contours.get('beetplaat')?.edge; // plooi niet gescand: de plooiregel heeft geen basis
+    if (buried || noFold) notes.push(`<span class="warn">beetwal overgeslagen: ${noFold ? 'de plooi is niet gescand, dus de plooiregel (occlusievlak) is niet te bepalen' : `volgens de plooiregel ligt het occlusievlak hier niet boven de kam (${fmt(rs.rule.front)} / ${fmt(rs.rule.back)} mm; betande scan?)`}. Zet "Volgens de regels" uit en kies een walhoogte als je toch een wal wilt</span>`);
+    else {
+      if (rs && S.anatomy) S.anatomy.arch = rs.arch;
+      extras.push(biteRim(S.frame, { width: num('rimWidth'), anteriorWidth: num('rimFrontWidth'), height, embed: 3, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, conform: conformTo(gap + wall * 0.5) }));
+      notes.push(rs?.rule ? `beetwal volgens regels (kamlijn; hoogte voor ${fmt(rs.rule.front)} / achter ${fmt(rs.rule.back)} mm boven de kam${rs.rule.notes.length ? '; ' + rs.rule.notes.join('; ') : ''})` : `beetwal ${fmt(num('rimHeight'))} mm`);
+    }
   }
   if ($('beetHandle').checked && needFrame('Handvat')) { extras.push(trayHandle(S.frame, { base: gap + wall, height: num('handleHeight'), width: num('handleWidth'), labial: 6, conform: conformTo(gap + wall * 0.5) })); notes.push('handvat'); }
   if (extras.length) {
+    await tick(`${notes.some(n => n.startsWith('beetwal')) ? 'Beetwal' : 'Handvat'} samenvoegen met de plaat…`);
     await loadManifold();
     soup = (await unionSoups([soup, ...extras])).soup;
+    await tick('Wat door het pasvlak steekt wegsnijden…');
     if (!draft) soup = await clipToTissue('beetplaat', soup, reverse);
   }
-  const { text } = plateSummary(soup), fitTxt = fitCheck('beetplaat', surf2, soup, gap) + waxNote();
+  await tick('Pasvlak controleren…');
+  const edge = S.contours.get('beetplaat')?.edge;
+  const { text } = plateSummary(soup), fitTxt = fitCheck('beetplaat', surf2, soup, gap, seal) + waxNote();
   S.plates.beetplaat = { soup, name: 'Beetplaat', file: `BEETPLAAT_${safe($('caseName').value)}.stl` };
   showPlate('beetplaat', soup, COLORS.plate.beetplaat);
-  result('beetResult', `Beetplaat klaar: ${text}${fitTxt}${reducedNote(rep)}${draft ? ` · uitblokken ${draft}° (${rep.changed} punten, max ${fmt(rep.maxLift, 2)} mm)` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('beetplaat', 'Beetplaat-STL')}`);
+  const edgeTxt = edge ? ` · rand langs de scanrand${edge.inset ? ` (${fmt(edge.inset)} mm erbinnen)` : ' (plaatrand = scanrand)'}` : '';
+  const sealTxt = seal ? ` · rand ligt op de scan (afstand loopt in de laatste ${fmt(seal)} mm naar 0)` : '';
+  const tip = gap > 0 && S.fit.beetplaat && S.fit.beetplaat.within < 0.5 ? ' · tip: een beetplaat heeft normaal 0 mm afstand tot de scan' : '';
+  result('beetResult', `Beetplaat klaar: ${text}${edgeTxt}${sealTxt}${fitTxt}${thinNote(rep)}${tip}${reducedNote(rep)}${draft ? ` · uitblokken ${draft}° (${rep.changed} punten, max ${fmt(rep.maxLift, 2)} mm)` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('beetplaat', 'Beetplaat-STL')}`);
   status('Beetplaat gegenereerd.'); updateDone();
 }
 $('beetBuild').onclick = () => busy('Beetplaat berekenen…', buildBeet);
+// Rand-keuze gewijzigd: rand opnieuw bepalen en een bestaande beetplaat direct opnieuw maken
+for (const id of ['beetEdge', 'beetEdgeInset']) $(id).addEventListener('change', () => {
+  if (!S.scan || !S.contours.get('beetplaat')?.closed) return;
+  const had = !!S.plates.beetplaat;
+  busy('Rand beetplaat bepalen…', async () => { ensureFrame(); autoContour('beetplaat'); if (had) { await tick('Beetplaat opnieuw opbouwen…'); await buildBeet(); } });
+});
 
 // ---------- tandopstelling ----------
 const toothMaterial = () => new THREE.MeshStandardMaterial({ color: COLORS.tooth, roughness: 0.32, metalness: 0 });
@@ -933,7 +993,8 @@ function teethWorldSoups(list = S.teeth) { tools?.centric(); return list.map(t =
 async function buildBasis() {
   ensureWorkableScan();
   const surface = surfaceFor('basis'), gap = num('basisGap'), wall = num('basisWall'), reverse = $('basisReverse').checked, rep = {};
-  const base = shell(surface, { gap, wall, reverse }, rep);
+  await tick('Basis opbouwen…');
+  const base = await shellAsync(surface, { gap, wall, reverse, checkThin: true }, rep, () => tick());
   await loadManifold();
   const parts = [base], notes = [];
   let gingivaFallback = null;
@@ -979,7 +1040,7 @@ async function buildBasis() {
     showPlate('basis', display, COLORS.plate.basis);
     showPlate('basisTeeth', teeth.length ? concatSoups(teeth.map(t => t.soup)) : null, COLORS.tooth);
     const { text } = plateSummary(mono), fitTxt = fitCheck('basis', surface, mono, gap);
-    result('basisResult', `Monoblock klaar: ${text}${fitTxt}${reducedNote(rep)}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('monoblock', 'Monoblock-STL')}`);
+    result('basisResult', `Monoblock klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('monoblock', 'Monoblock-STL')}`);
   } else {
     const g = num('socketGap');
     const expanded = S.teeth.map(t => {
@@ -994,7 +1055,7 @@ async function buildBasis() {
     showPlate('basis', basis, COLORS.plate.basis);
     showPlate('basisTeeth', concatSoups(teeth.map(t => t.soup)), COLORS.tooth);
     const { text } = plateSummary(basis), fitTxt = fitCheck('basis', surface, basis, gap);
-    result('basisResult', `Basis met ${teeth.length} sockets klaar: ${text}${fitTxt}${reducedNote(rep)} · socketspeling ${fmt(g, 2)} mm${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('basis', 'Basis-STL')}`);
+    result('basisResult', `Basis met ${teeth.length} sockets klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)} · socketspeling ${fmt(g, 2)} mm${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('basis', 'Basis-STL')}`);
   }
   if (teethTrimmed.length) S.plates.elementen = { soup: concatSoups(teethTrimmed.map(t => t.soup)), name: 'Elementen', file: `ELEMENTEN_${safe($('caseName').value)}.stl`, parts: teethTrimmed };
   viewer.groups.teeth.visible = false;
@@ -1150,7 +1211,7 @@ $('openProject').addEventListener('change', e => { const f = e.target.files?.[0]
   if (d.scan) setScan(parseSTL(fromBase64(d.scan)), d.scanName);
   if (d.antagonist) setAntagonist(parseSTL(fromBase64(d.antagonist)), d.antagonistName);
   S.landmarks = d.landmarks || {}; S.axis = d.axis || null; S.marks = d.marks || [];
-  S.contours.reset(); for (const c of d.contours || []) { const s = S.contours.ensure(c.kind); s.points = c.points; s.closed = !!c.closed && !!c.axis; s.axis = c.axis ?? null; }
+  S.contours.reset(); for (const c of d.contours || []) { const s = S.contours.ensure(c.kind); s.points = c.points; s.closed = !!c.closed && !!c.axis; s.axis = c.axis ?? null; s.edge = c.edge ?? null; }
   computeFrame(); updateLandmarkInfo(); updateAxisInfo(); updateMarkInfo();
   if (d.teeth && (S.frame || !S.scan)) {
     const both = $('bothJaws').checked; $('bothJaws').checked = !!d.oppTeeth || d.teeth.some(t => t.opp);
@@ -1281,8 +1342,34 @@ $('anaIdeal').onclick = () => busy('Scan aanpassen…', async () => {
   restoreDesign(keep);
   status(`Scan aangepast: ${report.smoothed ? 'gladgemaakt, ' : ''}${int(report.relieved)} punten ontlast${report.postDam ? `, post-dam op ${int(report.postDam)} punten` : ''}. Genereer de werkstukken opnieuw.`);
 });
+// Houdt de scan op bij of net voorbij de kam, met de plooi grotendeels niet gescand (intraorale scan, 3Shape-
+// weefselzijde, strak bijgesneden model)? Dan is de scanrand zelf de plaatrand.
+function scanEndsAtEdge(an) {
+  const ok = an.profiles.filter(p => !p.missing); if (ok.length < 5) return false;
+  const share = side => ok.filter(p => p[side]?.edge).length / ok.length;
+  return share('buccal') > 0.5 && (an.frame.jaw === 'upper' || share('lingual') > 0.5);
+}
+function edgeWanted(kind) {
+  if (kind !== 'beetplaat') return false;
+  const m = $('beetEdge').value; if (m === 'edge') return true; if (m !== 'auto') return false;
+  if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
+  return scanEndsAtEdge(S.anatomy.an);
+}
+// Rand langs de scanrand (v68): de plaat loopt precies tot de rand van de scan (of 'Afstand tot scanrand' erbinnen).
+function edgeContour(kind) {
+  const inset = Math.max(0, num('beetEdgeInset') || 0), axis = contourAxis();
+  const r = trimByEdge(scanForPlates(), { inset, splitAt: S.designedFrom ?? null });
+  // de getoonde lijn ligt 0,25 mm buiten de scanrand: sleep je later een stuk, dan blijft de rest exact de scanrand
+  S.contours.setEdge(kind, editableOutline(r.outline, axis, { push: inset > 0 ? 0 : 0.25 }), axis, inset);
+  if (S.mode === 'contour') setMode('orbit');
+  delete S.plates[kind];
+  updateContourUI(); refreshScanColors(); refreshOverlay();
+  const why = $('beetEdge').value === 'auto' ? 'de plooi is niet gescand, dus ' : '';
+  status(`Rand langs de scanrand: ${why}de beetplaat loopt ${inset > 0 ? `tot ${fmt(inset)} mm binnen` : 'precies tot'} de rand van de scan (plaatrand = scanrand). Sleep de lijn om een stuk aan te passen.`);
+}
 function autoContour(kind) {
   if (!CONTOUR_KINDS.includes(kind)) return;
+  if (edgeWanted(kind)) return edgeContour(kind);
   if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
   const ol = proposeOutline(S.anatomy.cast, S.anatomy.an, kind);
   // licht gladstrijken (2,5 mm): geen zaagtand in de rand, frenulum-uitsparingen blijven (afgerond) bestaan
@@ -1557,12 +1644,12 @@ async function autoAllInner() {
     done.push(label); return true;
   };
   $('autoLog').innerHTML = '';
-  if (S.prepared !== S.scan && !await step('Scan voorbereiden (repareren, bijsnijden, aanvullen)', async () => { prepareScan(); S.prepared = S.scan; })) return false;
+  if (S.prepared !== S.scan && !await step('Scan voorbereiden (repareren, bijsnijden, aanvullen)', async () => { await prepareScan({ forKind: work }); S.prepared = S.scan; })) return false;
   if (!await step('Referentiepunten op de kam', async () => ensureFrame())) return false;
   if (!await step('Anatomie analyseren', async () => runAnatomy())) return false;
   if (work === 'lepel' || work === 'beetplaat') {
     showStep(work);
-    if (!await step(`Omtrek ${work} volgens de anatomie`, async () => autoContour(work))) return false;
+    if (!await step(`Omtrek ${work} (anatomie of scanrand)`, async () => autoContour(work))) return false;
     if (!await step(work === 'lepel' ? 'Lepel genereren' : 'Beetplaat genereren', work === 'lepel' ? buildLepel : buildBeet)) return false;
     if (!S.plates[work]) return false;
   } else {
@@ -1582,18 +1669,24 @@ async function autoAllInner() {
 $('autoAll').onclick = () => autoAll();
 
 // ---------- 🧹 scan voorbereiden ----------
-function prepareScan() {
+// forKind: voor welk werkstuk (autoStep / ⚡). Bij een beetplaat met 'rand langs de scanrand' (automatisch of gekozen)
+// wordt de scan niet aangevuld: de plaat hoort dan precies tot de echte scanrand te lopen, niet op een ontworpen rand.
+async function prepareScan({ forKind = null } = {}) {
   if (!S.scan) throw Error('Laad eerst een scan.');
   const t0 = performance.now(), name = S.scanName.replace(/(_voorbereid)?\.stl$/i, '') + '_voorbereid.stl', lines = [];
+  await tick('Scan analyseren…');
   const before = analyzeScan(S.scan);
   S.history.push({ soup: S.scan, aux: snapshotAux() }); if (S.history.length > 8) S.history.shift(); S.future = [];
   const keep = keepDesign(); S.pendingKeep = keep;
   lines.push(`<b>Analyse</b>: ${int(before.faces)} facetten · ${before.components} deel/delen${before.smallComponents ? ` (${before.smallComponents} losse vlekjes)` : ''} · ${before.spikes} spikes · ${before.nonManifold} niet-manifold randen · ${before.holes} randen/gaten · ${before.closed ? 'gesloten (model met sokkel?)' : 'open scan'}`);
+  await tick('Scan repareren…');
   const { soup: rep, report: r } = repairScan(S.scan);
-  setScan(rep, name, { reset: false, designedFrom: r.designedFrom < rep.length / 9 ? r.designedFrom : null });
+  setScan(rep, name, { reset: false, designedFrom: r.designedFrom < rep.length / 9 ? r.designedFrom : null, keepWax: true });
   lines.push(`<b>Reparatie</b>: ${r.duplicate + r.flat + r.invalid} kapotte/dubbele facetten · ${r.islands} losse delen (${int(r.islandFaces)} facetten) · ${r.spikes} spikes · ${r.nonManifold} niet-manifold · ${r.holesFilled} gaten gedicht`);
+  await tick('Referentiepunten en anatomie…');
   S.frame = null; S.landmarks = {}; ensureFrame(); let a = runAnatomy();
   if ($('prepTrim').checked) {
+    await tick('Scan bijsnijden…');
     const ol = proposeOutline(a.cast, a.an, 'basis');
     // vloeiende bijsnijlijn (geen inkepingen bij de lipbandjes): de scan wordt ruim bijgesneden, het werkstuk krijgt later zijn eigen rand
     const t = trimByOutline(S.scan, smoothOutline(ol.points, 4), S.frame.N, { margin: num('prepMargin') + 1, splitAt: S.designedFrom }); // +1 mm: gladstrijken trekt bolle delen iets naar binnen
@@ -1602,37 +1695,45 @@ function prepareScan() {
     const only = keepComponentNear(t.soup, S.landmarks.M ?? S.frame.O);
     // strakke rand: oortjes, vlinders, nul-lange randen en spleetjes weg, buitenrand vloeiend op het oppervlak
     const rim = cleanRim(only.soup);
-    setScan(rim.soup, name, { reset: false, designedFrom: null });
+    setScan(rim.soup, name, { reset: false, designedFrom: null, keepWax: true });
     lines.push(`<b>Bijsnijden</b>: prothesegebied + ${fmt(num('prepMargin'))} mm · ${int(t.report.removed)} facetten verwijderd (sokkel, wang/tong, artefacten) · ${int(t.report.clipped)} randfacetten exact gesneden`);
+    await tick('Anatomie bijwerken…');
     a = runAnatomy();
   }
-  if ($('prepComplete').checked && num('prepExtend') > 0) {
+  const edgeRule = forKind === 'beetplaat' && $('beetEdge').value !== 'anatomy';
+  if ($('prepComplete').checked && num('prepExtend') > 0 && edgeRule) lines.push('<b>Aanvullen</b>: niet gedaan, de beetplaat loopt tot de echte scanrand (Beetplaat → Rand)');
+  else if ($('prepComplete').checked && num('prepExtend') > 0) {
     const st = a.an.stats;
     if (st.edge > st.profiles * 0.3) {
+      await tick('Rand aanvullen…');
       const ext = extendBorder(S.scan, { length: num('prepExtend') });
-      setScan(ext.soup, name, { reset: false, designedFrom: Math.min(S.designedFrom ?? Infinity, ext.report.designedFrom) });
+      setScan(ext.soup, name, { reset: false, designedFrom: Math.min(S.designedFrom ?? Infinity, ext.report.designedFrom), keepWax: true });
       a = runAnatomy();
       lines.push(`<b>Aanvullen</b>: plooi op ${Math.round(st.edge / st.profiles * 100)}% van de boog niet gescand → rand ${fmt(num('prepExtend'))} mm vloeiend verlengd (paars = ontworpen, niet gescand) · verwachte plooidiepte ${fmt(proposeOutline(a.cast, a.an, 'basis').sulcus.buccal.depth)} mm`);
     } else lines.push('<b>Aanvullen</b>: niet nodig, de plooi is gescand');
   }
-  const after = analyzeScan(S.scan);
-  lines.push(`<b>Resultaat</b>: ${int(after.faces)} facetten · ${after.components} deel · ${after.holes} rand · ${after.nonManifold} niet-manifold · ${((performance.now() - t0) / 1000).toFixed(1).replace('.', ',')} s · scanpunten niet verschoven`);
+  await tick('Controle…');
+  const after = analyzeScan(S.scan, { spikes: false });
+  lines.push(`<b>Resultaat</b>: ${int(after.faces)} facetten · ${after.components} deel · ${after.holes} rand · ${after.nonManifold} niet-manifold · ${((performance.now() - t0) / 1000).toFixed(1).replace('.', ',')} s · scanpunten niet verschoven${S.wax?.soup === S.scan && S.wax.stats().points ? ' · was behouden' : ''}`);
   $('prepReport').innerHTML = lines.join('<br>');
   refreshScanColors(); refreshOverlay(); updateDone();
   restoreDesign(S.pendingKeep); S.pendingKeep = null;
   return after;
 }
-$('prepRun').onclick = () => busy('Scan voorbereiden…', async () => { prepareScan(); status('Scan voorbereid. Controleer het paarse (aangevulde) deel en ga verder met de omtrek.'); });
+$('prepRun').onclick = () => busy('Scan voorbereiden…', async () => { await prepareScan(); status('Scan voorbereid. Controleer het paarse (aangevulde) deel en ga verder met de omtrek.'); });
 
 // ---------- 🕯 was (ondersnijdingen opvullen, bewerkbaar) ----------
 let waxTool = 'add', waxStroke = null, waxQueued = null;
 function ensureWax() { if (!S.scan) throw Error('Laad eerst een scan.'); if (!S.wax || S.wax.soup !== S.scan) S.wax = new WaxLayer(S.scan, contourAxis()); return S.wax; }
-function waxChanged(final = false) {
-  S.waxSoup = S.wax.stats().points ? S.wax.waxedSoup() : null;
+function showWax() {
   viewer.clearGroup('wax');
-  const d = S.wax.displaySoup();
+  const d = S.wax ? S.wax.displaySoup() : [];
   if (d.length) { const m = makeMesh(d, 0xf0b25a, { roughness: 0.65, opacity: 1 }); m.material.polygonOffset = true; m.material.polygonOffsetFactor = -2; m.material.polygonOffsetUnits = -2; m.name = 'was'; viewer.groups.wax.add(m); }
   applyLayers();
+}
+function waxChanged(final = false) {
+  S.waxSoup = S.wax.stats().points ? S.wax.waxedSoup() : null;
+  showWax();
   if (final) {
     const st = S.wax.stats();
     $('waxInfo').textContent = st.points ? `Was op ${int(st.points)} punten · max ${fmt(st.max, 2)} mm · gem. ${fmt(st.mean, 2)} mm. De plaat wordt op scan + was gebouwd.` : 'Geen was. De plaat ligt exact op de scan.';

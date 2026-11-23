@@ -11,43 +11,68 @@ const nrm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l
 function faceComponents(mesh, edges = edgeMap(mesh)) {
   const n = mesh.indices.length / 3, parent = new Int32Array(n).map((_, i) => i);
   const find = x => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
-  for (const e of edges.values()) for (let k = 1; k < e.faces.length; k++) parent[find(e.faces[0])] = find(e.faces[k]);
+  for (let e = 0; e < edges.n; e++) { const c = edges.count[e]; if (c < 2) continue; const fs = c === 2 ? null : edges.faces(e), f0 = edges.f0[e]; for (let k = 1; k < c; k++) parent[find(f0)] = find(k === 1 ? edges.f1[e] : fs[k]); }
   const comp = new Int32Array(n); for (let i = 0; i < n; i++) comp[i] = find(i);
   return comp;
 }
 function faceArea(p, f, i) { const a = f[i * 3] * 3, b = f[i * 3 + 1] * 3, c = f[i * 3 + 2] * 3; const u = [p[b] - p[a], p[b + 1] - p[a + 1], p[b + 2] - p[a + 2]], v = [p[c] - p[a], p[c + 1] - p[a + 1], p[c + 2] - p[a + 2]]; return Math.hypot(...crs(u, v)) / 2; }
 
-/** Spikes: punten die ver buiten het vlak van hun buren steken (scanruis, 'naalden'). */
+/** Spikes: punten die ver buiten het vlak van hun buren steken (scanruis, 'naalden').
+ * v68: zonder tijdelijke arrays per punt (zelfde rekenvolgorde en uitkomst als v67, ±6× sneller). */
 function findSpikes(mesh, { factor = 3, minHeight = 0.25 } = {}) {
-  const p = mesh.positions, f = mesh.indices, nv = p.length / 3, nb = Array.from({ length: nv }, () => []);
+  const p = mesh.positions, f = mesh.indices, nv = p.length / 3;
+  // buren (opvolger in elk facet), per punt in volgorde van eerste voorkomen, zonder dubbele
+  const deg = new Int32Array(nv + 1);
+  for (let i = 0; i < f.length; i++) deg[f[i] + 1]++;
+  for (let v = 0; v < nv; v++) deg[v + 1] += deg[v];
+  const nb = new Int32Array(f.length), fill = deg.slice(0, nv);
   const lens = [];
-  for (let i = 0; i < f.length; i += 3) for (let k = 0; k < 3; k++) { const a = f[i + k], b = f[i + (k + 1) % 3]; nb[a].push(b); if (lens.length < 20000) lens.push(Math.hypot(p[a * 3] - p[b * 3], p[a * 3 + 1] - p[b * 3 + 1], p[a * 3 + 2] - p[b * 3 + 2])); }
+  for (let i = 0; i < f.length; i += 3) for (let k = 0; k < 3; k++) {
+    const a = f[i + k], b = f[i + (k + 1) % 3]; nb[fill[a]++] = b;
+    if (lens.length < 20000) lens.push(Math.hypot(p[a * 3] - p[b * 3], p[a * 3 + 1] - p[b * 3 + 1], p[a * 3 + 2] - p[b * 3 + 2]));
+  }
   lens.sort((x, y) => x - y); const med = lens[lens.length >> 1] || 0.3;
-  const spikes = [];
+  let maxDeg = 0; for (let v = 0; v < nv; v++) maxDeg = Math.max(maxDeg, deg[v + 1] - deg[v]);
+  const spikes = [], ring = new Int32Array(maxDeg + 1), lim = Math.max(minHeight, factor * med);
   for (let v = 0; v < nv; v++) {
-    const ring = [...new Set(nb[v])]; if (ring.length < 3) continue;
-    const c = [0, 0, 0]; for (const w of ring) { c[0] += p[w * 3] / ring.length; c[1] += p[w * 3 + 1] / ring.length; c[2] += p[w * 3 + 2] / ring.length; }
+    let m = 0;
+    for (let j = deg[v]; j < deg[v + 1]; j++) { const w = nb[j]; let dup = false; for (let r = 0; r < m; r++) if (ring[r] === w) { dup = true; break; } if (!dup) ring[m++] = w; }
+    if (m < 3) continue;
+    let cx = 0, cy = 0, cz = 0;
+    for (let r = 0; r < m; r++) { const w = ring[r]; cx += p[w * 3] / m; cy += p[w * 3 + 1] / m; cz += p[w * 3 + 2] / m; }
     // vlak door de buren: kleinste hoofdas van hun spreiding (PCA)
-    const C = [0, 0, 0, 0, 0, 0, 0, 0, 0];
-    for (const w of ring) { const d = [p[w * 3] - c[0], p[w * 3 + 1] - c[1], p[w * 3 + 2] - c[2]]; for (let r = 0; r < 3; r++) for (let k = 0; k < 3; k++) C[r * 3 + k] += d[r] * d[k]; }
-    const mul = x => [C[0] * x[0] + C[1] * x[1] + C[2] * x[2], C[3] * x[0] + C[4] * x[1] + C[5] * x[2], C[6] * x[0] + C[7] * x[1] + C[8] * x[2]];
-    let e1 = [1, 0.3, 0.2]; for (let it = 0; it < 25; it++) e1 = nrm(mul(e1));
-    let e2 = nrm(crs(e1, [0.2, 1, 0.4])); for (let it = 0; it < 25; it++) { const y = mul(e2); const pr = dt(y, e1); e2 = nrm([y[0] - pr * e1[0], y[1] - pr * e1[1], y[2] - pr * e1[2]]); }
-    const n = nrm(crs(e1, e2));
-    const h = Math.abs(dt(sub([p[v * 3], p[v * 3 + 1], p[v * 3 + 2]], c), n));
-    let spread = 0; for (const w of ring) spread = Math.max(spread, Math.hypot(p[w * 3] - c[0], p[w * 3 + 1] - c[1], p[w * 3 + 2] - c[2]));
-    if (h > Math.max(minHeight, factor * med) && h > 1.5 * spread) spikes.push(v);
+    let c0 = 0, c1 = 0, c2 = 0, c3 = 0, c4 = 0, c5 = 0, c6 = 0, c7 = 0, c8 = 0;
+    for (let r = 0; r < m; r++) {
+      const w = ring[r], d0 = p[w * 3] - cx, d1 = p[w * 3 + 1] - cy, d2 = p[w * 3 + 2] - cz;
+      c0 += d0 * d0; c1 += d0 * d1; c2 += d0 * d2; c3 += d1 * d0; c4 += d1 * d1; c5 += d1 * d2; c6 += d2 * d0; c7 += d2 * d1; c8 += d2 * d2;
+    }
+    let ex = 1, ey = 0.3, ez = 0.2;
+    for (let it = 0; it < 25; it++) { const x = c0 * ex + c1 * ey + c2 * ez, y = c3 * ex + c4 * ey + c5 * ez, z = c6 * ex + c7 * ey + c8 * ez, l = Math.hypot(x, y, z) || 1; ex = x / l; ey = y / l; ez = z / l; }
+    // e2 = nrm(e1 × [0.2, 1, 0.4])
+    let fx = ey * 0.4 - ez * 1, fy = ez * 0.2 - ex * 0.4, fz = ex * 1 - ey * 0.2;
+    { const l = Math.hypot(fx, fy, fz) || 1; fx /= l; fy /= l; fz /= l; }
+    for (let it = 0; it < 25; it++) {
+      const x = c0 * fx + c1 * fy + c2 * fz, y = c3 * fx + c4 * fy + c5 * fz, z = c6 * fx + c7 * fy + c8 * fz;
+      const pr = x * ex + y * ey + z * ez, qx = x - pr * ex, qy = y - pr * ey, qz = z - pr * ez, l = Math.hypot(qx, qy, qz) || 1;
+      fx = qx / l; fy = qy / l; fz = qz / l;
+    }
+    let nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
+    { const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l; }
+    const h = Math.abs((p[v * 3] - cx) * nx + (p[v * 3 + 1] - cy) * ny + (p[v * 3 + 2] - cz) * nz);
+    if (!(h > lim)) continue;
+    let spread = 0; for (let r = 0; r < m; r++) { const w = ring[r]; spread = Math.max(spread, Math.hypot(p[w * 3] - cx, p[w * 3 + 1] - cy, p[w * 3 + 2] - cz)); }
+    if (h > 1.5 * spread) spikes.push(v);
   }
   return { spikes, medianEdge: med };
 }
 
 /** Analyse van een (ruwe) scan: wat is er mis en wat zal de reparatie doen. */
-export function analyzeScan(soup) {
+export function analyzeScan(soup, { spikes: withSpikes = true } = {}) {
   const mesh = weld(soup, 1e-5), q = quality(mesh), edges = edgeMap(mesh), comp = faceComponents(mesh, edges);
   const area = new Map(); let total = 0;
   for (let i = 0; i < comp.length; i++) { const a = faceArea(mesh.positions, mesh.indices, i); area.set(comp[i], (area.get(comp[i]) || 0) + a); total += a; }
   const sizes = [...area.values()].sort((a, b) => b - a);
-  const { spikes, medianEdge } = findSpikes(mesh);
+  const { spikes, medianEdge } = withSpikes ? findSpikes(mesh) : { spikes: [], medianEdge: null };
   const { loops } = boundaryLoops(mesh, edges);
   return { faces: q.faces, vertices: q.vertices, components: sizes.length, smallComponents: sizes.slice(1).filter(s => s < total * 0.05).length, mainShare: sizes[0] / (total || 1), open: q.open, holes: loops.length, nonManifold: q.nonManifold, degenerate: q.degenerate, spikes: spikes.length, medianEdge, closed: q.open === 0, area: total };
 }

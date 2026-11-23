@@ -600,4 +600,98 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     assert.equal(s.closed, true); assert.ok(s.points.length <= 61);
   });
 }
+
+// ---------- v68: vastlopen (snelheid) en plaatrand = scanrand ----------
+{
+  const M = await import(J + 'mesh.js'), B = await import(J + 'bvh.js'), T = await import(J + 'trim.js'), SH = await import(J + 'shell.js');
+  const { WaxLayer } = await import(J + 'wax.js'), { ContourSet, editableOutline } = await import(J + 'contour.js'), C = await import(J + 'csg.js');
+  const lower = anatomicJaw({ jaw: 'lower' }).soup;
+  // referentie (v67-vorm): randstatistiek met een Map
+  const refEdges = mesh => { const f = mesh.indices, map = new Map(); for (let i = 0; i < f.length; i += 3) for (let k = 0; k < 3; k++) { const a = f[i + k], b = f[i + (k + 1) % 3], key = a < b ? a * 4294967296 + b : b * 4294967296 + a, e = map.get(key); if (e) { e.count++; e.faces.push(i / 3); if (e.from === a) e.sameDir = true; } else map.set(key, { from: a, to: b, count: 1, faces: [i / 3], sameDir: false }); } return [...map.values()]; };
+  const withDefects = () => { const a = Array.from(lower.subarray(0, 9 * 6000)), n = a.length / 9; for (let i = 0; i < 60; i++) { const f = (i * 97) % n; a.push(...a.slice(f * 9, f * 9 + 9)); } for (let i = 0; i < 40; i++) { const o = ((i * 71 + 3) % n) * 9; a.push(a[o], a[o + 1], a[o + 2], a[o + 3], a[o + 4], a[o + 5], a[o] + 0.3, a[o + 1] + 0.2, a[o + 2] + 1); } for (let i = 0; i < 40; i++) { const o = ((i * 131 + 7) % n) * 9; for (let k = 0; k < 3; k++) { const t = a[o + 3 + k]; a[o + 3 + k] = a[o + 6 + k]; a[o + 6 + k] = t; } } return Float32Array.from(a); };
+
+  await test('v68 randentabel: zelfde randen, volgorde en facetten als de Map-versie (ook met fouten)', () => {
+    for (const soup of [lower, withDefects()]) {
+      const m = M.weld(soup, 1e-5), ref = refEdges(m), got = [...M.edgeMap(m).values()];
+      assert.equal(got.length, ref.length);
+      for (let i = 0; i < ref.length; i++) assert.deepEqual(got[i], ref[i]);
+      const q = M.quality(m); assert.equal(q.open, ref.filter(e => e.count === 1).length); assert.equal(q.nonManifold, ref.filter(e => e.count > 2).length);
+    }
+  });
+  await test('v68 dubbele/platte facetten weg en oriënteren: zelfde aantallen, consistente richting', () => {
+    const m = M.weld(withDefects(), 1e-5), c = M.clean(m);
+    assert.ok(c.duplicate >= 60, `${c.duplicate} dubbel`);
+    const o = M.orient(c.mesh), q = M.quality(o.mesh); assert.ok(o.flips > 0); assert.equal(q.flipped, 0, 'na oriënteren geen omgekeerde buren');
+    const t = M.tidySheet(o.mesh), q2 = M.quality(t.mesh); assert.equal(q2.nonManifold, 0); assert.equal(q2.components, 1);
+  });
+  await test('v68 BVH: dichtstbijzijnd punt exact gelijk aan alle driehoeken aflopen', () => {
+    const soup = lower.subarray(0, 9 * 4000), bvh = new B.TriBVH(soup);
+    let s = 3; const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+    for (let i = 0; i < 300; i++) {
+      const f = Math.floor(rnd() * 4000) * 9, p = [soup[f] + (rnd() - 0.5) * 6, soup[f + 1] + (rnd() - 0.5) * 6, soup[f + 2] + (rnd() - 0.5) * 6];
+      let best = Infinity; for (let g = 0; g < soup.length; g += 9) best = Math.min(best, B.pointTriangle2(p[0], p[1], p[2], soup, g));
+      const d = bvh.closest(p[0], p[1], p[2]); assert.ok(Math.abs(d - Math.sqrt(best)) < 1e-9, `${d} vs ${Math.sqrt(best)}`);
+      const lim = bvh.closest(p[0], p[1], p[2], 0.5); assert.equal(lim === Infinity, Math.sqrt(best) > 0.5);
+    }
+    const pts = Float32Array.from([0, 30, 5, 10, 25, 3]), d1 = M.pointToSurfaceDistances(pts, soup, { maxDist: 8 }), d2 = M.pointToSurfaceDistances(pts, soup, { maxDist: 8, bound: Float32Array.from([1, 1]) });
+    assert.deepEqual(Array.from(d1), Array.from(d2), 'een te krappe bovengrens geeft toch de juiste afstand');
+  });
+  await test('v68 schaal met afdrukruimte: snel, en shellAsync geeft exact hetzelfde', async () => {
+    const t0 = performance.now(), a = SH.shell(lower, { gap: 2, wall: 2 }), ms = performance.now() - t0;
+    let pauses = 0; const b = await SH.shellAsync(lower, { gap: 2, wall: 2 }, {}, async () => { pauses++; });
+    assert.equal(a.length, b.length); for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) throw Error('verschil op ' + i);
+    assert.ok(ms < 4000, `${ms.toFixed(0)} ms`);
+  });
+  await test('v68 rand sluit aan: met 2 mm afstand ligt de plaatrand precies op de scanrand', () => {
+    const rep = {}, plate = SH.shell(lower, { gap: 2, wall: 2, rimSeal: 2 }, rep);
+    // rand zoals de plaat hem gebruikt (na opschonen: losse 'oortjes' aan de trapjesrand van de demokaak vallen weg)
+    const m = M.tidySheet(M.orient(M.clean(M.weld(lower, 1e-5)).mesh).mesh).mesh;
+    const rim = M.boundaryLoops(m).loops.sort((x, y) => y.length - x.length)[0], bvh = new B.TriBVH(plate);
+    let worst = 0; for (const v of rim) worst = Math.max(worst, bvh.closest(m.positions[v * 3], m.positions[v * 3 + 1], m.positions[v * 3 + 2]));
+    assert.ok(worst < 0.01, `scanrand tot plaat ${worst.toFixed(3)} mm`);
+    const plain = new B.TriBVH(SH.shell(lower, { gap: 2, wall: 2 })); let far = 0; for (const v of rim) far = Math.max(far, plain.closest(m.positions[v * 3], m.positions[v * 3 + 1], m.positions[v * 3 + 2]));
+    assert.ok(far > 1.5, 'zonder afsluitzone zweeft de rand ~2 mm boven de scan');
+    const f = M.fitReport(lower, plate, 2, { rimSeal: 2 }); assert.ok(f.within > 0.6, `binnen 0,05: ${f.within}`);
+  });
+  await test('v68 rand langs de scanrand: hele scan (exact) of tot een vaste afstand binnen de rand', () => {
+    const e0 = T.trimByEdge(lower); assert.equal(e0.soup, lower); assert.equal(e0.faces.length, lower.length / 9); assert.ok(e0.outline.length > 100);
+    const m = M.weld(lower, 1e-5), rim = M.boundaryLoops(m).loops.sort((x, y) => y.length - x.length)[0];
+    const P = v => [m.positions[v * 3], m.positions[v * 3 + 1], m.positions[v * 3 + 2]];
+    const near = (p, list) => { let best = Infinity; for (let i = 0; i < list.length; i++) { const a = P(list[i]), b = P(list[(i + 1) % list.length]), d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], t = Math.max(0, Math.min(1, ((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1] + (p[2] - a[2]) * d[2]) / (d[0] ** 2 + d[1] ** 2 + d[2] ** 2 || 1))); best = Math.min(best, Math.hypot(p[0] - a[0] - t * d[0], p[1] - a[1] - t * d[1], p[2] - a[2] - t * d[2])); } return best; };
+    assert.ok(e0.outline.every(p => near(p, rim) < 1e-4), 'lijn exact op de scanrand');
+    // zoals de plaat het gebruikt (shell schoont eerst op: losse snippers en zadelpunten op de snijlijn weg)
+    const e2 = T.trimByEdge(lower, { inset: 2 }), m2 = M.tidySheet(M.weld(e2.soup, 1e-5)).mesh, loops = M.boundaryLoops(m2);
+    assert.equal(loops.loops.length, 1); assert.equal(loops.branching, false);
+    const sample = loops.loops[0].filter((_, i) => i % 7 === 0).map(v => [m2.positions[v * 3], m2.positions[v * 3 + 1], m2.positions[v * 3 + 2]]);
+    // afstand langs het oppervlak ≈ 2 mm (rechte lijn is iets korter op een gebogen oppervlak); trapjesrand geeft uitschieters
+    const ds = sample.map(p => near(p, rim)).sort((a, b) => a - b), q = f => ds[Math.floor(ds.length * f)];
+    assert.ok(q(0.05) > 1.75 && q(0.5) > 1.9 && q(0.5) < 2.05 && q(0.95) < 2.3 && ds[0] > 1.3 && ds.at(-1) < 2.6, `rand p5 ${q(0.05).toFixed(2)}, mediaan ${q(0.5).toFixed(2)}, p95 ${q(0.95).toFixed(2)} mm binnen de scanrand`);
+    assert.ok(e2.report.kept > e2.report.clipped * 10, 'binnenste facetten ongewijzigd');
+    // aangevuld (ontworpen) deel telt niet mee: de rand is de echte scanrand
+    const ext = Float32Array.from([...lower, ...lower.subarray(0, 9 * 50).map((v, i) => i % 3 === 2 ? v - 30 : v)]);
+    const e3 = T.trimByEdge(ext, { splitAt: lower.length / 9 }); assert.equal(e3.soup.length, lower.length); assert.equal(e3.splitIndex, null);
+  });
+  await test('v68 omtrek langs de scanrand: uitsnede volgt de scan, slepen maakt er een gewone omtrek van, terugzetten herstelt', () => {
+    const cs = new ContourSet(), out = editableOutline(T.trimByEdge(lower).outline, [0, 0, 1]);
+    cs.setEdge('beetplaat', out, [0, 0, 1], 0);
+    assert.equal(cs.surface('beetplaat', lower).length, lower.length);
+    cs.snap('beetplaat'); cs.get('beetplaat').points = cs.get('beetplaat').points.map(p => [p[0] * 0.9, p[1] * 0.9 + 3, p[2]]); cs.setPoints('beetplaat', cs.get('beetplaat').points, [0, 0, 1], { record: false });
+    assert.equal(cs.get('beetplaat').edge, null); assert.ok(cs.surface('beetplaat', lower).length < lower.length);
+    cs.undo('beetplaat'); assert.deepEqual(cs.get('beetplaat').edge, { inset: 0 }); assert.equal(cs.surface('beetplaat', lower).length, lower.length);
+    assert.deepEqual(cs.toJSON()[0].edge, { inset: 0 });
+  });
+  await test('v68 was blijft bij scan voorbereiden: lift per punt overgenomen, nieuwe punten zonder was', () => {
+    const w = new WaxLayer(lower, [0, 0, 1]); w.brush('add', [0, 30, 0], { radius: 6, strength: 1 });
+    const before = w.stats(); assert.ok(before.points > 50);
+    const cut = lower.slice(0, lower.length - 9 * 2000), w2 = w.transferTo(cut), after = w2.stats();
+    assert.ok(after.points > 0 && after.points <= before.points); assert.ok(Math.abs(after.max - before.max) < 1e-6);
+    const extra = Float32Array.from([...lower, 0, 0, -20, 1, 0, -20, 0, 1, -20]); assert.equal(w.transferTo(extra).stats().points, before.points);
+  });
+  await test('v68 splinters na een booleaanse bewerking weg (zonder decompose)', async () => {
+    const box = (c, h) => { const out = []; const P = [-1, 1].flatMap(x => [-1, 1].flatMap(y => [-1, 1].map(z => [c[0] + x * h, c[1] + y * h, c[2] + z * h]))); for (const [a, b, cc, d] of [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]]) out.push(...P[a], ...P[b], ...P[cc], ...P[a], ...P[cc], ...P[d]); return Float32Array.from(out); };
+    const r = await C.unionSoups([box([0, 0, 0], 5), box([20, 0, 0], 0.4)]), q = M.quality(M.weld(r.soup, 1e-5));
+    assert.equal(q.components, 1, 'mini-blokje (0,5 mm³) weggelaten'); assert.ok(Math.abs(Math.abs(q.volume) - 1000) < 1e-3);
+    const r2 = await C.unionSoups([box([0, 0, 0], 5), box([20, 0, 0], 3)]); assert.equal(M.quality(M.weld(r2.soup, 1e-5)).components, 2, 'groot los deel blijft');
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

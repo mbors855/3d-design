@@ -171,7 +171,7 @@ export function occlusalPlaneRule(an, { upperFront = 22, upperBack = 18, lowerFr
     if (pads.length) back = pads.reduce((s, e) => s + e.crestH + (e.padTop - e.crestH) * padFraction, 0) / pads.length;
     else { back = front - 4; notes.push('retromolaire pad niet gevonden: achter 4 mm lager dan voor'); }
   }
-  return { front, back, notes, at: (s, sMax) => front + (back - front) * Math.max(0, Math.min(1, s / (sMax || 1))) };
+  return { front, back, notes, edge: !!(ff.edge || fb?.edge), at: (s, sMax) => front + (back - front) * Math.max(0, Math.min(1, s / (sMax || 1))) };
 }
 
 /**

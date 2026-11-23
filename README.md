@@ -18,6 +18,34 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 68: niet meer vastlopen, en plaatrand = scanrand
+
+**Vastlopen opgelost.** Met *Afstand tot scan* > 0 mat het programma de ruimte punt voor punt met een trage rasterzoeker. Op een betande scan van 300.000 facetten met was stond de pagina zo bijna 3 minuten stil ("Deze pagina reageert niet").
+- Afstanden meten met een BVH (`js/bvh.js`): exact dezelfde uitkomst, tientallen keren sneller. Alleen punten die in de vorige ronde zijn verschoven worden opnieuw gemeten.
+- Randentabel, dubbele facetten, oriënteren, rand opschonen en spikes zoeken in typed arrays: 2–9× sneller, met een bit-voor-bit gelijke uitkomst (getest tegen v67).
+- Splinters na een booleaanse bewerking worden in JS weggelaten in plaats van met `decompose()` (dat kostte 4–9 s). Mislukt het weefselblok omdat de plaat zelf niet omgezet kan worden, dan stopt het direct in plaats van drie dure pogingen te doen.
+- Tussen alle zware stappen ademt de browser even. De schaal rekent in stukjes van ±0,1 s (`shellAsync`). De voortgang staat in beeld (analyseren, repareren, bijsnijden, rand bepalen, plaat opbouwen, controle).
+- Gemeten in Chrome, automatische beetplaat met was, afstand 2 mm, betande scan van 300.000 facetten: **178 s, waarvan 174 s aan één stuk vast → 20 s, langste blokkade 2,4 s.** Afstand 0 mm: 15–19 s. Tandeloze demokaak: 4 s.
+
+**Plaatrand = scanrand (Beetplaat → Rand).**
+- *Automatisch*: houdt de scan op vóór de plooi (intraorale scan, 3Shape-weefselzijde, strak bijgesneden model), dan loopt de beetplaat precies tot de rand van de scan. Anders gaat de rand tot in de plooi volgens de anatomie, zoals voorheen. Ook te kiezen: *Langs de scanrand* of *Volgens de anatomie*.
+- *Afstand tot scanrand*: laat de plaat X mm binnen de scanrand stoppen. Gemeten langs het oppervlak, dus niet geprojecteerd; de bolling van een kroon boven de rand blijft heel.
+- Bij een beetplaat langs de scanrand wordt de scan niet meer *aangevuld* (het paarse ontworpen deel). Daar liep de plaat voorbij de echte scanrand.
+- *Rand ligt op de scan*: met afstand > 0 loopt de afstand in de laatste 2 mm (instelbaar) vloeiend naar 0, zodat de plaatrand precies op de scan ligt in plaats van 2 mm erboven te zweven.
+- Laag *Scan buiten de rand* (🗂 Lagen) met een fader: met een werkstuk is de scan buiten de plaatrand doorschijnend (standaard 20 %). Op 0 is de scan precies op de plaatrand afgeknipt, op 100 zie je het origineel.
+- Sleep je de lijn van een rand langs de scanrand, dan wordt het een gewone omtrek; de rest blijft exact de scanrand. ↶ zet de scanrand terug.
+
+**Overig**
+- De was blijft behouden als de beetplaat bij het openen eerst de scan voorbereidt. Voorheen werd de aangebrachte was dan stilletjes gewist.
+- De onderkant van de beetwal sluit nu over de hele breedte op de plaat aan (7 punten in plaats van alleen de 2 hoeken). Hij steekt daardoor niet meer door de afdrukruimte of het pasvlak.
+- Een beetwal *volgens de regels* wordt overgeslagen als de plooi niet gescand is of het occlusievlak onder de kam (tanden) zou liggen. Het programma meldt dat; wil je toch een wal, zet dan *Volgens de regels* uit.
+- Waarschuwing als de buitenkant van de plaat in smalle ruimtes (tussen tanden) te dicht bij de scan komt.
+- Afstand langs het oppervlak (afsluitzone, afstand tot scanrand) met de driehoeksupdate van fast marching. Daarbij is ook een afrondingsfout opgelost waardoor punten werden overgeslagen.
+
+**Bekend:** op een scan mét tanden schiet de buitenkant van de plaat in smalle ruimtes tussen de elementen nog over de scan heen. Het programma toont dan de waarschuwing hierboven. Een afstand > 0 mm geeft op tanden geen nette afdrukruimte. Een echte offset voor tanden (volumetrisch) staat op de lijst.
+
+**Getest:** 63 automatische tests (waarvan 9 nieuw, o.a. BVH tegen alle driehoeken, randentabel tegen de v67-versie, rand langs de scanrand, afsluitzone, was overnemen, splinters). Daarnaast in Chrome een betande intraorale scan (520.000 → 300.000 facetten) met afstand 0 en 2 mm, een betand model, en de demo-onder- en bovenkaak.
+
 ### Nieuw in 67: zware scans en de omtrek tekenen met vinger of muis
 
 **Zware scans (labscanner, 1–3 miljoen facetten).** Voorheen stopte een lepel of beetplaat met *"Gebruik een uitgesneden scan met maximaal 400.000 facetten"*.

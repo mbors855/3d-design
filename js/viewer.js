@@ -49,7 +49,7 @@ export class Viewer extends EventTarget {
     this.gizmoHelper = this.gizmo.getHelper();
     this.scene.add(this.gizmoHelper);
     this.groups = {};
-    for (const name of ['scan', 'wax', 'antagonist', 'plates', 'teeth', 'overlay']) { this.groups[name] = new THREE.Group(); this.groups[name].name = name; this.scene.add(this.groups[name]); }
+    for (const name of ['scan', 'ghost', 'wax', 'antagonist', 'plates', 'teeth', 'overlay']) { this.groups[name] = new THREE.Group(); this.groups[name].name = name; this.scene.add(this.groups[name]); }
     this.scanMesh = null;
     this.antagonistMesh = null;
     this.bounds = null;
@@ -141,10 +141,36 @@ export class Viewer extends EventTarget {
     g.computeBoundsTree();
     const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
     m.name = 'scan';
+    m.userData.clip = outsidePatch(m.material, false);
+    if (this.ghostMesh) { this.groups.ghost.remove(this.ghostMesh); this.ghostMesh.material.dispose(); this.ghostMesh = null; }
     this.scanMesh = m;
     this.groups.scan.add(m);
     this.bounds = g.boundingBox.clone();
     if (!keepView) this.fit();
+    this.render();
+  }
+
+  // Scan buiten de plaatrand (v68): facetten met outside[f] = 1 worden in de gewone scan weggelaten en in een
+  // doorschijnende tweede mesh (zelfde geometrie, geen kopie) getekend. Zo vallen plaatrand en scanrand samen,
+  // en met de fader is de originele scan altijd terug te zien. outside = null: gewone scan.
+  setScanOutside(outside, opacity = 0.2) {
+    const m = this.scanMesh; if (!m) return;
+    const g = m.geometry;
+    if (!outside) { m.userData.clip.value = 0; if (this.ghostMesh) this.ghostMesh.visible = false; this.render(); return; }
+    let a = g.getAttribute('outside');
+    if (!a) { a = new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count), 1); g.setAttribute('outside', a); }
+    const arr = a.array;
+    for (let f = 0; f < outside.length; f++) { const v = outside[f] ? 1 : 0; arr[f * 3] = v; arr[f * 3 + 1] = v; arr[f * 3 + 2] = v; }
+    a.needsUpdate = true;
+    m.userData.clip.value = 1;
+    if (!this.ghostMesh) {
+      const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0, side: THREE.DoubleSide, transparent: true, depthWrite: false });
+      outsidePatch(mat, true);
+      this.ghostMesh = new THREE.Mesh(g, mat); this.ghostMesh.name = 'scanGhost'; this.ghostMesh.raycast = () => {};
+      this.groups.ghost.add(this.ghostMesh);
+    }
+    this.ghostMesh.material.opacity = opacity;
+    this.ghostMesh.visible = opacity > 0.005;
     this.render();
   }
 
@@ -383,6 +409,20 @@ export function makeRoundDots(points, color, size = 8, { depthTest = false, opac
   const pts = new THREE.Points(g, m);
   pts.renderOrder = renderOrder; pts.frustumCulled = false;
   return pts;
+}
+
+// Shader-aanpassing voor 'scan buiten de rand': per facet een attribuut 'outside' (0/1, gelijk op de drie hoeken).
+// keepOutside = false: de gewone scan laat die facetten weg (als uClip = 1); true: de doorschijnende mesh toont alleen die.
+function outsidePatch(material, keepOutside) {
+  const uni = { value: 0 };
+  material.onBeforeCompile = sh => {
+    sh.uniforms.uClip = uni;
+    sh.vertexShader = 'attribute float outside;\nvarying float vOutside;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvOutside = outside;');
+    sh.fragmentShader = 'uniform float uClip;\nvarying float vOutside;\n' + sh.fragmentShader.replace('void main() {', keepOutside ? 'void main() {\n  if (vOutside < 0.5) discard;' : 'void main() {\n  if (uClip > 0.5 && vOutside > 0.5) discard;');
+  };
+  material.customProgramCacheKey = () => keepOutside ? 'scan-outside' : 'scan-inside';
+  material.needsUpdate = true;
+  return uni;
 }
 
 export function makeMesh(soup, color, opts = {}) {

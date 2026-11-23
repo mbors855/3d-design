@@ -9,7 +9,7 @@
 //  4. Facetten die geheel binnen liggen worden ongewijzigd overgenomen (exact, 0,000 mm afwijking); facetten
 //     die de lijn kruisen worden langs het nulniveau gesneden (punten op de originele facetranden).
 // Zo is de uitsnede onafhankelijk van het camerastandpunt en blijft het pasvlak bit-voor-bit gelijk aan de scan.
-import { weld } from './mesh.js';
+import { weld, boundaryLoops, rimDistances, loopLength } from './mesh.js';
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -247,4 +247,95 @@ export function trimByOutline(soup, outline, N, { margin = 0, step = 0.3, splitA
     }
   }
   return { soup: out.slice(0, o), faces, polygon: poly, splitIndex: splitIndex ?? (splitAt != null ? o / 9 : null), report: { kept, clipped, removed: nf - kept - clipped, seeds: seedFaces.size } };
+}
+
+/**
+ * Rand langs de scanrand (v68): het werkstuk loopt tot de rand van de scan (inset = 0: de hele scan, plaatrand =
+ * scanrand, exact) of tot 'inset' mm binnen die rand, langs het oppervlak gemeten. Er wordt niet langs de as
+ * geprojecteerd: ondersnijdingen (bolling van een kroon boven de rand) blijven dus heel.
+ * Geeft hetzelfde als trimByOutline ({ soup, faces, splitIndex, report }) plus outline: de randlijn (3D-punten).
+ */
+export function trimByEdge(soup, { inset = 0, splitAt = null, step = 0.6 } = {}) {
+  // alleen de echte scan: een aangevuld (ontworpen) deel hoort niet bij de scanrand
+  if (splitAt != null && splitAt * 9 < soup.length) { soup = realPart(soup, splitAt); splitAt = null; }
+  const topo = scanTopology(soup), mesh = topo.mesh, p = mesh.positions, f = mesh.indices, nf = f.length / 3;
+  const { loops } = boundaryLoops(mesh);
+  if (!loops.length) throw Error('Deze scan heeft geen open rand (gesloten model). Kies "Volgens de anatomie" of teken de omtrek.');
+  const lens = loops.map(l => loopLength(mesh, l)), outer = loops[lens.indexOf(Math.max(...lens))];
+  const P3 = v => [p[v * 3], p[v * 3 + 1], p[v * 3 + 2]];
+  if (!(inset > 0)) {
+    const faces = new Int32Array(nf); for (let i = 0; i < nf; i++) faces[i] = i;
+    return { soup, faces, splitIndex: splitAt != null ? Math.min(splitAt, nf) : null, outline: resampleLoop(outer.map(P3), step), report: { kept: nf, clipped: 0, removed: 0, edge: true, inset: 0 } };
+  }
+  const d = rimDistances(mesh, [outer], inset + 2), inside = v => !(d[v] < inset);
+  const cut = new Map(), seg = new Map(), out = [], faces = [];
+  const cutPoint = (a, b) => {
+    const lo = Math.min(a, b), hi = Math.max(a, b), key = lo * 4294967296 + hi;
+    let c = cut.get(key);
+    if (!c) { const da = d[lo], db = d[hi], t = Math.max(0, Math.min(1, (inset - da) / ((db - da) || 1e-12))); c = [0, 1, 2].map(k => p[lo * 3 + k] + t * (p[hi * 3 + k] - p[lo * 3 + k])); c.key = key; cut.set(key, c); }
+    return c;
+  };
+  let kept = 0, clipped = 0, splitIndex = null;
+  for (let i = 0; i < nf; i++) {
+    const vv = [f[i * 3], f[i * 3 + 1], f[i * 3 + 2]], ins = vv.map(inside);
+    if (!ins[0] && !ins[1] && !ins[2]) continue;
+    if (splitAt != null && splitIndex == null && i >= splitAt) splitIndex = out.length / 9;
+    faces.push(i);
+    if (ins[0] && ins[1] && ins[2]) { for (let k = 0; k < 9; k++) out.push(soup[i * 9 + k]); kept++; continue; } // origineel, exact
+    clipped++;
+    const poly = [], cuts = [];
+    for (let k = 0; k < 3; k++) {
+      const a = vv[k], b = vv[(k + 1) % 3];
+      if (ins[k]) poly.push(P3(a));
+      if (ins[k] !== ins[(k + 1) % 3]) { const c = cutPoint(a, b); poly.push(c); cuts.push(c); }
+    }
+    if (cuts.length === 2) { seg.set(cuts[0].key, [...(seg.get(cuts[0].key) || []), cuts[1].key]); seg.set(cuts[1].key, [...(seg.get(cuts[1].key) || []), cuts[0].key]); }
+    for (let k = 1; k < poly.length - 1; k++) {
+      const A = poly[0], B = poly[k], C = poly[k + 1], u = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], q = [C[0] - A[0], C[1] - A[1], C[2] - A[2]];
+      if (Math.hypot(u[1] * q[2] - u[2] * q[1], u[2] * q[0] - u[0] * q[2], u[0] * q[1] - u[1] * q[0]) > 1e-9) out.push(...A, ...B, ...C);
+    }
+  }
+  if (!out.length) throw Error(`Binnen ${inset} mm van de scanrand blijft geen oppervlak over. Kies een kleinere afstand.`);
+  // randlijn: de langste keten van snijpunten
+  let best = [];
+  const used = new Set();
+  for (const start of seg.keys()) {
+    if (used.has(start)) continue;
+    const chain = [start]; used.add(start);
+    let cur = start;
+    for (;;) { const nx = (seg.get(cur) || []).find(k => !used.has(k)); if (nx === undefined) break; used.add(nx); chain.push(nx); cur = nx; }
+    if (chain.length > best.length) best = chain;
+  }
+  const outline = best.length >= 3 ? resampleLoop(best.map(k => cut.get(k)), step) : resampleLoop(outer.map(P3), step);
+  return { soup: Float32Array.from(out), faces: Int32Array.from(faces), splitIndex: splitIndex ?? (splitAt != null ? out.length / 9 : null), outline, report: { kept, clipped, removed: nf - kept - clipped, edge: true, inset } };
+}
+
+const REAL = new WeakMap();
+function realPart(soup, splitAt) { let r = REAL.get(soup); if (!r || r.splitAt !== splitAt) { r = { splitAt, sub: soup.slice(0, splitAt * 9) }; REAL.set(soup, r); } return r.sub; }
+
+/** Gesloten 3D-lijn op gelijke afstanden (mm) herbemonsteren, hooguit maxPoints punten. */
+export function resampleLoop(pts, step = 0.6, maxPoints = 600) {
+  const n = pts.length; if (n < 3) return pts.map(q => q.slice());
+  let total = 0; const seg = [];
+  for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n], l = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]); seg.push(l); total += l; }
+  const h = Math.max(step, total / maxPoints), m = Math.max(3, Math.round(total / h)), out = [];
+  let i = 0, acc = 0;
+  for (let k = 0; k < m; k++) {
+    const target = k * total / m;
+    while (i < n - 1 && acc + seg[i] < target) { acc += seg[i]; i++; }
+    const t = seg[i] > 0 ? (target - acc) / seg[i] : 0, a = pts[i], b = pts[(i + 1) % n];
+    out.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), a[2] + t * (b[2] - a[2])]);
+  }
+  return out;
+}
+
+/** Omtrekpunten in het projectievlak (loodrecht op N) 'offset' mm naar buiten schuiven (hoogte blijft gelijk). */
+export function pushOutline(points, N, offset) {
+  const basis = axisBasis(N), P = points.map(basis.project), n = P.length;
+  const sgn = area2(P) >= 0 ? 1 : -1; // tegen de klok in: rechts van de raaklijn = buiten
+  return points.map((q, i) => {
+    const a = P[(i - 1 + n) % n], b = P[(i + 1) % n], tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty) || 1;
+    const ou = sgn * ty / l * offset, ov = -sgn * tx / l * offset;
+    return [0, 1, 2].map(k => q[k] + basis.U[k] * ou + basis.V[k] * ov);
+  });
 }
