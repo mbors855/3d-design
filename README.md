@@ -18,6 +18,19 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 66
+
+- **Bijsnijden met een strakke rand.** De bijsnijlijn van *Scan voorbereiden* loopt vloeiend, zonder inkepingen bij de lipbandjes. Daarna wordt de rand opgeschoond: bijna-dubbele snijpunten samengevoegd, losse "oortjes" en vlinders weg, spleetjes en gaatjes dicht, en de buitenrand gladgetrokken op het oppervlak. Gemeten op de demokaak: 1 rand in plaats van 3, geen nul-lange randen, scherpe knikken van 53 naar 11. Lasso en gum ruimen ook de oortjes langs hun nieuwe rand op.
+- **Bovenbalk:** ◀ vorige en ▶ volgende stap, en ↶/↷ ongedaan maken of opnieuw in de stap waarin je bent (ook Ctrl+Z / Ctrl+Y). Bij de scan worden lepel, beetplaat en basis na het terugzetten opnieuw gemaakt.
+- **Opstellen zonder voorwerk.** *Stel tanden op* zet zelf de referentiepunten en analyseert de kaak; je krijgt geen foutmelding meer over ontbrekende punten.
+- **Prothesebasis:**
+  - Anatomisch tandvleesprofiel: licht bol, vloeiend afgerond naar de halslijn.
+  - Wortelreliëf (juga): de hoektand het sterkst, instelbaar in %.
+  - De labiale flens loopt nu zonder trede door tot de rand, en achter het laatste element loopt de gingiva uit.
+  - Zachte schaduw in de weergave, zodat de facetstrepen weg zijn, en de basis is ondoorzichtig.
+  - De automatische rand is licht gladgestreken, frenulum-uitsparingen blijven.
+  - Controle na het samenvoegen: sluit de anatomische vorm bij een grillige opstelling niet, dan kiest het programma zelf het eenvoudige profiel, zodat de prothese altijd gesloten blijft. Het programma meldt dat.
+
 ### Nieuw in 65.3: opruimen, betrouwbaar laden en betere scanbewerking
 
 **Betrouwbaar laden.**

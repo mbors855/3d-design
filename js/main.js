@@ -693,7 +693,7 @@ function conformTo(sink) {
 function showPlate(kind, soup, color) {
   const old = viewer.groups.plates.getObjectByName(kind);
   if (old) { viewer.groups.plates.remove(old); old.geometry.dispose(); old.material.dispose(); }
-  if (soup) { const m = makeMesh(soup, color, { opacity: kind === 'basisTeeth' ? 1 : 0.9, roughness: kind === 'basisTeeth' ? 0.32 : 0.45 }); m.name = kind; viewer.groups.plates.add(m); }
+  if (soup) { const m = makeMesh(soup, color, { opacity: kind === 'basis' || kind === 'basisTeeth' ? 1 : 0.9, roughness: kind === 'basisTeeth' ? 0.32 : 0.45 }); m.name = kind; viewer.groups.plates.add(m); }
   syncPlateVisibility(); applyLayers();
 }
 // Toon per stap alleen het bijbehorende werkstuk; in de latere stappen de prothese.
@@ -799,7 +799,9 @@ async function buildTeeth() {
   const explicit = S.selectedTeeth.size > 0;
   let ids = explicit ? [...S.selectedTeeth] : (jaw() === 'upper' ? FDI_UPPER : FDI_LOWER).filter(id => id % 10 !== 8);
   let frame = computeFrame();
-  if (!frame) { if (S.scan) throw Error('Zet eerst de drie referentiepunten op de kam (stap Analyse → Automatisch).'); frame = S.frame = defaultFrame(jaw()); }
+  // geen referentiepunten: zelf zetten en de kaak analyseren (zoals ⚡ Alles automatisch), niet om punten vragen
+  if (!frame && S.scan) { frame = ensureFrame(); if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy(); }
+  if (!frame) frame = S.frame = defaultFrame(jaw());
   const rs = ruleSetup(), useRule = $('planeMode').value === 'rule' && rs?.rule;
   if (rs && S.anatomy) S.anatomy.arch = rs.arch;
   const lib = await tools.librarySetting(), mode = $('setupMode').value;
@@ -914,6 +916,7 @@ async function buildBasis() {
   const base = shell(surface, { gap, wall, reverse }, rep);
   await loadManifold();
   const parts = [base], notes = [];
+  let gingivaFallback = null;
   const teeth = teethWorldSoups();
   if ($('gingivaOn').checked && teeth.length && S.frame) {
     const N = S.frame.N, O = S.frame.O;
@@ -925,12 +928,29 @@ async function buildBasis() {
     const T2 = S.teeth.map((t, i) => { const d = vec.sub(t.position.toArray(), O); return { x: vec.dot(d, S.frame.X), y: vec.dot(d, S.frame.Y), c: cervical[i], r: t.userData.dims.md / 2 }; });
     const over = num('gingivaOver');
     const topAt = t => { const [x, y] = archFn(t); let best = Infinity; for (const q of T2) { const d = Math.hypot(x - q.x, y - q.y); best = Math.min(best, q.c + over + 1.8 * (1 - Math.exp(-((d / (q.r * 1.05)) ** 2)))); } return Number.isFinite(best) ? best : top; };
-    parts.push(gingivaBand(S.frame, { width: num('gingivaWidth'), top: topAt, embed: 3, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: gArch, conform: conformTo(gap + wall * 0.5) }));
-    notes.push(`gingiva met festoenen en papillen (rand ${fmt(over)} mm boven de halslijn)`);
+    // wortelreliëf (juga): hoektand het sterkst, dan snijtanden en premolaren; molaren nauwelijks
+    const JUGA = { 1: 0.7, 2: 0.55, 3: 1.1, 4: 0.5, 5: 0.45, 6: 0.25, 7: 0.15 }, jf = num('gingivaJuga') / 100;
+    const T3 = T2.map((q, i) => ({ ...q, a: (JUGA[S.teeth[i].userData.fdi % 10] ?? 0) * jf }));
+    const bulge = jf > 0 ? (t => { const [x, y] = archFn(t); let b = 0; for (const q of T3) { const d = Math.hypot(x - q.x, y - q.y); b = Math.max(b, q.a * Math.exp(-((d / (q.r * 0.62)) ** 2))); } return b; }) : null;
+    // booglengte-positie van de distale rand van het laatste element per kant (daarachter loopt de gingiva uit)
+    const NS = 400, AP = Array.from({ length: NS + 1 }, (_, i) => archFn(-1 + 2 * i / NS)); let AL = 0; for (let i = 1; i <= NS; i++) AL += Math.hypot(AP[i][0] - AP[i - 1][0], AP[i][1] - AP[i - 1][1]);
+    const fadeFrom = [0, 0];
+    for (const q of T2) { let bi = 0, bd = Infinity; AP.forEach((p, i) => { const d = Math.hypot(p[0] - q.x, p[1] - q.y); if (d < bd) { bd = d; bi = i; } }); const t = -1 + 2 * bi / NS, dt = 2 * q.r / AL; if (t < 0) fadeFrom[0] = Math.max(fadeFrom[0], -t + dt); else fadeFrom[1] = Math.max(fadeFrom[1], t + dt); }
+    const band = opts => gingivaBand(S.frame, { fadeFrom, width: num('gingivaWidth'), top: topAt, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: gArch, conform: conformTo(gap + wall * 0.5), samples: 320, ...opts });
+    parts.push(band({ embed: 9, flare: 3.5, bulge }));
+    // terugval als de anatomische vorm bij een grillige opstelling niet sluit: eenvoudiger profiel, altijd gesloten
+    gingivaFallback = { index: parts.length - 1, steps: [() => band({ embed: 3, simple: true })] };
+    notes.push(`gingiva met festoenen, papillen${jf > 0 ? ' en wortelreliëf' : ''} (rand ${fmt(over)} mm boven de halslijn)`);
   } else if (!teeth.length) notes.push('zonder tanden (alleen basis)');
   const teethTrimmed = teeth;
   if ($('coupling').value === 'monoblock' || !teeth.length) {
-    const mono = await clipToTissue('basis', (await unionSoups([...parts, ...teeth.map(t => t.soup)])).soup, reverse);
+    // Samenvoegen en controleren; sluit het resultaat niet (delen raken elkaar), dan stapsgewijs een eenvoudiger
+    // gingivaprofiel (minder flens, zonder wortelreliëf) tot het wel sluit.
+    const build = async () => { const r = {}; const u = await unionSoups([...parts, ...teeth.map(t => t.soup)], r); const m = await clipToTissue('basis', u.soup, reverse); return { m, ok: !r.loose && quality(weld(m, 1e-6)).nonManifold === 0 }; };
+    let res = await build(), simpler = 0;
+    while (!res.ok && gingivaFallback && simpler < gingivaFallback.steps.length) { parts[gingivaFallback.index] = gingivaFallback.steps[simpler++](); res = await build(); }
+    if (simpler) { const gi = notes.findIndex(n => n.startsWith('gingiva')); if (gi >= 0) notes[gi] = `gingiva met festoenen en papillen (eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling)`; if (!res.ok) notes.push('let op: delen raken elkaar; controleer in de slicer'); }
+    const mono = res.m;
     S.plates.monoblock = { soup: mono, name: 'Monoblock prothese', file: `MONOBLOCK_${safe($('caseName').value)}.stl` };
     delete S.plates.basis;
     // Weergave: basis in gingivakleur, tanden in tandkleur (export blijft één monoblock).
@@ -1245,7 +1265,8 @@ function autoContour(kind) {
   if (!CONTOUR_KINDS.includes(kind)) return;
   if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
   const ol = proposeOutline(S.anatomy.cast, S.anatomy.an, kind);
-  S.contours.setPoints(kind, ol.points, contourAxis());
+  // licht gladstrijken (2,5 mm): geen zaagtand in de rand, frenulum-uitsparingen blijven (afgerond) bestaan
+  S.contours.setPoints(kind, smoothOutline(ol.points, 2.5), contourAxis());
   if (S.mode === 'contour') setMode('orbit');
   delete S.plates[kind];
   updateContourUI(); refreshScanColors(); refreshOverlay();
@@ -1551,7 +1572,7 @@ function prepareScan() {
   if ($('prepTrim').checked) {
     const ol = proposeOutline(a.cast, a.an, 'basis');
     // vloeiende bijsnijlijn (geen inkepingen bij de lipbandjes): de scan wordt ruim bijgesneden, het werkstuk krijgt later zijn eigen rand
-    const t = trimByOutline(S.scan, smoothOutline(ol.points, 7), S.frame.N, { margin: num('prepMargin'), splitAt: S.designedFrom });
+    const t = trimByOutline(S.scan, smoothOutline(ol.points, 4), S.frame.N, { margin: num('prepMargin') + 1, splitAt: S.designedFrom }); // +1 mm: gladstrijken trekt bolle delen iets naar binnen
     const df = S.designedFrom != null && t.splitIndex < t.soup.length / 9 ? t.splitIndex : null;
     // binnen de marge kan nog een los stuk sokkel of tafel liggen: alleen de kaak (grootste deel) houden
     const only = keepComponentNear(t.soup, S.landmarks.M ?? S.frame.O);

@@ -84,10 +84,34 @@ export function biteRim(frame, { width = 7, height = 10, embed = 1.5, form = 'ov
   }, { form, tStart: -0.97, tEnd: 0.97, conform, arch });
 }
 
-// Gingivaband: verbindt de basis met de halslijn van de tanden.
-export function gingivaBand(frame, { width = 9, top = 4, embed = 1.5, form = 'oval', conform = null, arch = null, samples = 240 } = {}) {
+// Anatomisch gingivaprofiel: labiaal licht bol, vloeiend afgerond naar de halslijn, met wortelreliëf (juga):
+// bulge = extra buccale welving (mm) op de plek van een wortel, het sterkst bij de hals en uitlopend naar de flens.
+function gingivaProfile(width, bottom, top, topWidth, bulge = 0, flare = 0) {
+  // flare: labiaal loopt de gingiva verder naar buiten en omlaag tot op het weefsel, zodat hij vloeiend overgaat
+  // in de flens (geen trede tussen gingivaband en basis); de rand wordt later langs de omtrek afgesneden.
+  const hw = width / 2, ht = topWidth / 2, H = top - bottom, pts = [{ b: -hw, n: bottom, bottom: true }, { b: hw + flare, n: bottom, bottom: true }];
+  const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const K = 12;
+  for (let k = 1; k <= K; k++) {
+    const u = k / K, n = bottom + u * H;
+    const juga = bulge * smooth(0.18, 0.75, u) * (1 - 0.35 * smooth(0.9, 1, u));
+    const body = hw * (1 + 0.07 * Math.sin(Math.PI * u)) + juga + flare * (1 - smooth(0, 0.55, u));
+    const round = smooth(0.78, 1, u); // afronden naar de tand
+    pts.push({ b: body * (1 - round) + (ht + juga * 0.3) * round - 0.35 * round * round, n: n - 0.25 * round * round });
+  }
+  pts.push({ b: ht * 0.35, n: top }, { b: -ht * 0.35, n: top });
+  for (let k = K; k >= 1; k--) { const u = k / K, round = smooth(0.78, 1, u); pts.push({ b: -(hw * (1 - round) + ht * round), n: bottom + u * H - 0.25 * round * round }); }
+  return pts;
+}
+// Gingivaband: verbindt de basis met de halslijn van de tanden. bulge(t) = wortelreliëf langs de boog (mm).
+export function gingivaBand(frame, { width = 9, top = 4, embed = 1.5, form = 'oval', conform = null, arch = null, samples = 240, bulge = null, flare = 0, simple = false, fadeFrom = [0.8, 0.8] } = {}) {
   const topAt = typeof top === 'function' ? top : () => top;
-  return sweep(frame, t => roundedRect(width * (0.85 + 0.25 * Math.min(1, Math.abs(t) * 1.5)), -embed, topAt(t), width * 0.7, 1.5), { form, tStart: -0.97, tEnd: 0.97, conform, arch, samples });
+  // eenvoudige band (afgeronde rechthoek): altijd robuust, terugval als het anatomische profiel niet sluit
+  if (simple) return sweep(frame, t => roundedRect(width * (0.85 + 0.25 * Math.min(1, Math.abs(t) * 1.5)), -embed, topAt(t), width * 0.7, 1.5), { form, tStart: -0.97, tEnd: 0.97, conform, arch, samples: 240 });
+  // aan de uiteinden (achter de laatste molaar) loopt de band vloeiend uit in de basis: geen trede
+  // pas achter het laatste element (fadeFrom = |t| van de distale rand, per kant) loopt de band uit in de basis
+  const fade = t => { const st = Math.min(0.95, t < 0 ? fadeFrom[0] : fadeFrom[1]), x = Math.max(0, Math.min(1, (Math.abs(t) - st) / Math.max(0.02, 0.975 - st))); return x * x * (3 - 2 * x); };
+  return sweep(frame, t => { const f = fade(t), tp = topAt(t); return gingivaProfile(width * (0.85 + 0.25 * Math.min(1, Math.abs(t) * 1.5)), -embed, tp - f * Math.max(0, tp + 0.5) * 0.85, width * 0.7, (bulge ? bulge(t) : 0) * (1 - f), flare * (1 - 0.8 * f)); }, { form, tStart: -0.97, tEnd: 0.97, conform, arch, samples });
 }
 
 export function box(center, axes, size, conform = null) {

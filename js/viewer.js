@@ -74,6 +74,27 @@ export class Viewer extends EventTarget {
 
   renderNow() { this.renderer.render(this.scene, this.camera); }
 
+  // Zachte schaduw: normalen per hoekpunt gemiddeld over aangrenzende vlakken binnen een knikhoek (scherpe randen
+  // blijven scherp). Alleen weergave; de geometrie zelf verandert niet.
+  static smoothNormals(g, creaseDeg = 55) {
+    const pos = g.getAttribute('position').array, n = pos.length / 3, cos = Math.cos(creaseDeg * Math.PI / 180);
+    const faceN = new Float32Array(n * 3); // per hoekpunt de normaal van zijn vlak
+    for (let f = 0; f < n; f += 3) {
+      const a = f * 3, ux = pos[a + 3] - pos[a], uy = pos[a + 4] - pos[a + 1], uz = pos[a + 5] - pos[a + 2], vx = pos[a + 6] - pos[a], vy = pos[a + 7] - pos[a + 1], vz = pos[a + 8] - pos[a + 2];
+      let x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx; const l = Math.hypot(x, y, z) || 1; x /= l; y /= l; z /= l;
+      for (let k = 0; k < 3; k++) { faceN[(f + k) * 3] = x; faceN[(f + k) * 3 + 1] = y; faceN[(f + k) * 3 + 2] = z; }
+    }
+    const groups = new Map(), q = v => Math.round(v * 2000);
+    for (let i = 0; i < n; i++) { const k = q(pos[i * 3]) * 73856093 ^ q(pos[i * 3 + 1]) * 19349663 ^ q(pos[i * 3 + 2]) * 83492791; let l = groups.get(k); if (!l) groups.set(k, l = []); l.push(i); }
+    const out = new Float32Array(n * 3);
+    for (const l of groups.values()) for (const i of l) {
+      let x = 0, y = 0, z = 0;
+      for (const j of l) { const d = faceN[i * 3] * faceN[j * 3] + faceN[i * 3 + 1] * faceN[j * 3 + 1] + faceN[i * 3 + 2] * faceN[j * 3 + 2]; if (d >= cos) { x += faceN[j * 3]; y += faceN[j * 3 + 1]; z += faceN[j * 3 + 2]; } }
+      const L = Math.hypot(x, y, z) || 1; out[i * 3] = x / L; out[i * 3 + 1] = y / L; out[i * 3 + 2] = z / L;
+    }
+    g.setAttribute('normal', new THREE.BufferAttribute(out, 3));
+    return g;
+  }
   static geometryFromSoup(soup, withColor = false, color = COLORS.scan) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(soup instanceof Float32Array ? soup : Float32Array.from(soup), 3));
@@ -93,6 +114,7 @@ export class Viewer extends EventTarget {
     this.scanMesh = null;
     if (!soup) { this.bounds = null; this.render(); return; }
     const g = Viewer.geometryFromSoup(soup, true);
+    if (soup.length / 9 < 1_500_000) Viewer.smoothNormals(g, 60); // scan zacht weergeven (geen facetstrepen)
     g.computeBoundsTree();
     const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
     m.name = 'scan';
@@ -307,6 +329,7 @@ export function makeDots(points, color, size = 9, firstColor = null) {
 
 export function makeMesh(soup, color, opts = {}) {
   const g = Viewer.geometryFromSoup(soup);
+  if (opts.smooth !== false && soup.length / 9 < 1_500_000) Viewer.smoothNormals(g, opts.crease ?? 50);
   return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, roughness: opts.roughness ?? 0.45, metalness: 0, transparent: !!opts.opacity, opacity: opts.opacity ?? 1, side: opts.side ?? THREE.FrontSide }));
 }
 
