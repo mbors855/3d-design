@@ -66,7 +66,7 @@
       </details>
 
       <div id="modeChip" class="hide"><span id="modeText"></span><button id="modeExit" title="Terug naar draaien (Esc)">✕</button></div>
-      <div id="emptyHint">Open een STL-scan of kies <b>Demo-kaak</b>, kies het werkstuk in de opdrachtbon en tik op <b>⚡ Alles automatisch</b>.</div>
+      <div id="emptyHint"><span>Open een STL-scan of kies <b>Demo-kaak</b>, kies het werkstuk (Lepel, Beetplaat of Opstelling voor de prothese) en tik op <b>⚡ Alles automatisch</b>.</span></div>
       <div id="busy" class="hide"><div class="spinner"></div><span id="busyText">Bezig…</span></div>
     </div>
     <div id="status" role="status" aria-live="polite">Open een STL-scan of gebruik de demo-kaak.</div>
@@ -86,6 +86,7 @@
         <div class="field"><label for="work">Werkstuk</label><select id="work" data-persist><option value="lepel">Individuele lepel</option><option value="beetplaat">Beetplaat</option><option value="prothese" selected>Volledige prothese</option><option value="partieel">Partiële prothese</option></select></div>
         <div class="field"><label for="jaw">Kaak</label><select id="jaw" data-persist><option value="boven">Bovenkaak</option><option value="onder">Onderkaak</option></select></div>
       </div>
+      <label class="check"><input type="checkbox" id="autoOnStep" checked data-persist> Rand en werkstuk automatisch maken bij het openen van Lepel, Beetplaat of Basis</label>
       <div class="grid2">
         <div class="field"><label for="ant">Antagonist</label><select id="ant" data-persist><option value="geen">Zonder</option><option value="aanwezig">Met antagonist</option></select></div>
         <div class="field"><label for="orderType">Type opdracht</label><select id="orderType" data-persist><option>Nieuwe vervaardiging</option><option>Vervanging elementen</option><option>Reparatie / uitbreiding</option><option>Duplicaatprothese</option></select></div>
