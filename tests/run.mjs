@@ -428,4 +428,51 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     assert.deepEqual(Array.from(b.geometry.getAttribute('position').array), Array.from(bPos), 'antagonist onveranderd');
   });
 }
+
+// ---------- v65.3: scanbewerking ----------
+{
+  const E = await import(J + 'scan-edit.js');
+  const { demoJaw } = await import(J + 'demo.js');
+  const { weld, boundaryLoops, edgeMap } = await import(J + 'mesh.js');
+  const jaw = demoJaw({ step: 1.0 }), n0 = jaw.length / 9;
+  const bounds = s => { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (let i = 0; i < s.length; i += 3) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], s[i + k]); hi[k] = Math.max(hi[k], s[i + k]); } return { lo, hi }; };
+  const B = bounds(jaw);
+  await test('v65.3 scan: vlak afsnijden snijdt exact op het vlak en houdt de juiste kant', () => {
+    const z = (B.lo[2] + B.hi[2]) / 2, cut = E.planeCut(jaw, [0, 0, z], [0, 0, 1]), b = bounds(cut);
+    assert.ok(cut.length < jaw.length && cut.length > 0);
+    assert.ok(Math.abs(b.lo[2] - z) < 1e-4, `onderkant op het vlak (${b.lo[2].toFixed(4)} vs ${z.toFixed(4)})`);
+    assert.ok(Math.abs(b.hi[2] - B.hi[2]) < 1e-6, 'bovenkant onveranderd');
+    // gesneden rand is één nette lijn: geen niet-manifold randen erbij
+    const m = weld(cut, 1e-5); let bad = 0; for (const v of edgeMap(m).values()) if (v.count > 2) bad++; assert.equal(bad, 0);
+  });
+  await test('v65.3 scan: lasso (door en door / alleen zichtbaar) en gum selecteren de juiste driehoeken', () => {
+    const cx = (B.lo[0] + B.hi[0]) / 2, cy = (B.lo[1] + B.hi[1]) / 2;
+    const project = (x, y, z) => [x, y, z]; // bovenaanzicht, 1 mm = 1 px
+    const poly = [[cx - 5, cy - 5], [cx + 5, cy - 5], [cx + 5, cy + 5], [cx - 5, cy + 5]];
+    const all = E.lassoMask(jaw, poly, project), front = E.lassoMask(jaw, poly, project, { viewDir: [0, 0, -1], frontOnly: true });
+    assert.ok(E.countMask(all) > 0 && E.countMask(front) <= E.countMask(all));
+    for (let f = 0; f < n0; f++) if (all[f]) { const x = (jaw[f * 9] + jaw[f * 9 + 3] + jaw[f * 9 + 6]) / 3; assert.ok(Math.abs(x - cx) <= 5.01); }
+    const del = E.deleteMask(jaw, all); assert.equal(del.length / 9, n0 - E.countMask(all));
+    // strakke rand: zelfde aantal driehoeken, de oorspronkelijke buitenrand onveranderd
+    const clean = E.deleteMaskClean(jaw, all); assert.equal(clean.length, del.length);
+    const rimKey = s2 => { const m = weld(s2, 1e-5); const L = boundaryLoops(m).loops; const big = L.reduce((a, b) => b.length > a.length ? b : a); return big.map(v => [0, 1, 2].map(c => m.positions[v * 3 + c].toFixed(3)).join()).sort().join('|'); };
+    assert.equal(rimKey(clean), rimKey(jaw), 'buitenrand exact behouden');
+    const sm = E.sphereMask(jaw, [jaw[0], jaw[1], jaw[2]], 2); assert.ok(sm[0] === 1 && E.countMask(sm) < n0 / 4);
+  });
+  await test('v65.3 scan: losse delen weg, gladmaken laat de rand en de rest ongemoeid, gaten dicht', () => {
+    // los eilandje toevoegen
+    const island = new Float32Array([100, 100, 0, 101, 100, 0, 100, 101, 0]), withIsland = new Float32Array(jaw.length + 9); withIsland.set(jaw); withIsland.set(island, jaw.length);
+    const k = E.keepLargest(withIsland); assert.equal(k.removed, 1); assert.equal(k.soup.length, jaw.length);
+    const mask = new Uint8Array(n0); for (let f = 0; f < n0; f += 3) mask[f] = 1;
+    const sm = E.smoothMask(jaw, mask, { iterations: 2 }), b2 = bounds(sm);
+    assert.equal(sm.length, jaw.length); for (let k2 = 0; k2 < 3; k2++) assert.ok(Math.abs(b2.lo[k2] - B.lo[k2]) < 1.5);
+    // gat maken en dichten
+    // punt ver van de scanrand: het hoekpunt dat het verst van alle randpunten ligt
+    const wm = weld(jaw, 1e-5), rim = boundaryLoops(wm).loops.flat(); let far = 0, fd = -1;
+    for (let v = 0; v < wm.positions.length / 3; v++) { let d = Infinity; for (const r of rim) d = Math.min(d, Math.hypot(wm.positions[v * 3] - wm.positions[r * 3], wm.positions[v * 3 + 1] - wm.positions[r * 3 + 1], wm.positions[v * 3 + 2] - wm.positions[r * 3 + 2])); if (d > fd) { fd = d; far = v; } }
+    const hole = E.sphereMask(jaw, [wm.positions[far * 3], wm.positions[far * 3 + 1], wm.positions[far * 3 + 2]], 2.5);
+    const holed = E.deleteMask(jaw, hole), loops = s => boundaryLoops(weld(s, 1e-5)).loops.length;
+    assert.ok(loops(holed) > loops(jaw)); const c = E.closeHoles(holed); assert.ok(c.filled >= 1); assert.equal(loops(c.soup), loops(jaw));
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

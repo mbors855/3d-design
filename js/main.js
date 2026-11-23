@@ -19,10 +19,11 @@ import { analyzeScan, repairScan, extendBorder, keepComponentNear } from './prep
 import { trimByOutline } from './trim.js';
 import { WaxLayer } from './wax.js';
 import { initSetupTools, geometrySoup } from './setup-tools.js';
+import { VERSION } from './version.js';
+import { initScanTools } from './steps/scan-tools.js';
 import { bowIdeal } from './library.js';
 import { analyseArch, proposeOutline, tissueZones, idealizeScan, ZONE_LABEL, RULES, crestArch, setupArch, occlusalPlaneRule, staticsReport } from './anatomy.js';
 
-const VERSION = '65.0';
 const $ = id => document.getElementById(id);
 const num = id => { const v = $(id).valueAsNumber; return Number.isFinite(v) ? v : Number($(id).value); };
 const fmt = (v, d = 1) => Number(v).toLocaleString('nl-NL', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -41,7 +42,7 @@ const workSteps = () => WORK_STEPS[$('work').value === 'partieel' ? 'prothese' :
 const isDenture = () => ['prothese', 'partieel'].includes($('work').value);
 const LM_COLORS = { R: 0xff6b6b, M: 0xffd166, L: 0x4dabf7 };
 const MARK_COLORS = { boundary: 0x55d8f5, bar: 0xff6877, reference: 0xffce72 };
-const MODE_TEXT = { grind: 'Inslijpen: sleep over een element (kleur = contact met de tegenkaak) · buiten de elementen draaien', wax: 'Was bewerken: sleep over scan of was · buiten de scan draaien · Shift keert toevoegen/wegnemen om', contourHint: ' · slepen = draaien, knijpen/scrollen = zoomen', sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Omtrek tekenen: tik punten op de scan, tik op het eerste punt om te sluiten', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
+const MODE_TEXT = { scanedit: 'Scan bewerken: zie de aanwijzing onderaan · Esc = stoppen', grind: 'Inslijpen: sleep over een element (kleur = contact met de tegenkaak) · buiten de elementen draaien', wax: 'Was bewerken: sleep over scan of was · buiten de scan draaien · Shift keert toevoegen/wegnemen om', contourHint: ' · slepen = draaien, knijpen/scrollen = zoomen', sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Omtrek tekenen: tik punten op de scan, tik op het eerste punt om te sluiten', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
 
 const S = {
   scan: null, scanName: 'scan.stl', history: [], future: [],
@@ -55,6 +56,7 @@ const S = {
 
 const viewer = new Viewer($('viewport'));
 let tools = null; // opstelgereedschap (v65), wordt onderaan gestart
+let scanTools = null; // scanbewerking (v65.3)
 window.ddcad = { S, viewer, get buildBasis() { return buildBasis; }, get tools() { return tools; } }; // voor ontwikkeling en tests
 
 // ---------- algemene hulpmiddelen ----------
@@ -129,6 +131,7 @@ function showStep(id) {
   if (S.mode !== 'orbit' && !(S.mode === 'contour' && CONTOUR_KINDS.includes(id)) && !(S.mode === 'sculpt' && id === 'bewerken') && !(S.mode === 'wax' && id === 'analyse')) setMode('orbit');
   if (id !== 'opstelling') selectTooth(null);
   tools?.onStep(id);
+  if (id !== 'scan') scanTools?.off();
   applyLayers();
   if (id === 'productie') renderOutputs();
   if (id === 'controle') runChecks();
@@ -695,7 +698,8 @@ function showPlate(kind, soup, color) {
 function syncPlateVisibility() {
   const show = { bewerken: S.sculpt ? ['sculpt'] : null, lepel: ['lepel'], beetplaat: ['beetplaat'], basis: ['basis', 'basisTeeth'], opstelling: [], controle: ['basis', 'lepel', 'beetplaat'], productie: ['basis', 'lepel', 'beetplaat'] }[S.step];
   for (const child of viewer.groups.plates.children) child.visible = show ? show.includes(child.name) : true;
-  if (['controle', 'productie', 'opdracht', 'scan', 'analyse'].includes(S.step)) { // alleen het werkstuk dat nu gekozen is
+  if (S.step === 'scan' || S.step === 'analyse') { for (const child of viewer.groups.plates.children) child.visible = false; } // scan zelf goed zien bij bewerken
+  else if (['controle', 'productie', 'opdracht'].includes(S.step)) { // alleen het werkstuk dat nu gekozen is
     const work = $('work').value, pick = work === 'lepel' ? 'lepel' : work === 'beetplaat' ? 'beetplaat' : 'basis';
     for (const child of viewer.groups.plates.children) child.visible = child.name === pick || (pick === 'basis' && child.name === 'basisTeeth');
   }
@@ -1061,6 +1065,31 @@ $('exportZip').onclick = () => busy('Productiepakket samenstellen…', async () 
   result('exportResult', `${files.length} bestanden in ZIP gezet.`);
 });
 
+// 📤 Mailen of in Bestanden bewaren: losse STL's via het deelmenu van het toestel (iPhone: Mail, "Bewaar in
+// Bestanden", AirDrop). Bestanden worden direct in de klik gemaakt, want het deelmenu mag alleen vanuit een tik openen.
+$('shareFiles').onclick = async () => {
+  let files;
+  try {
+    const chosen = new Set([...$('outputs').querySelectorAll('input:checked')].map(i => i.value));
+    const outs = outputList().filter(o => o.available && chosen.has(o.key));
+    if (!outs.length) throw Error('Kies minstens één beschikbaar bestand.');
+    files = [];
+    for (const o of outs) for (const [name, soup] of o.files()) files.push(new File([writeSTL(soup, name)], name.replace(/^.*\//, ''), { type: 'model/stl' }));
+  } catch (err) { return status(err.message, true); }
+  const project = $('caseName').value || 'project', title = `${project} · ${files.length} STL-bestand${files.length > 1 ? 'en' : ''}`;
+  const text = `Digital Denture CAD ${VERSION} · ${project} · ${jaw() === 'upper' ? 'bovenkaak' : 'onderkaak'}\n${files.map(f => `• ${f.name} (${fmt(f.size / 1048576, 1)} MB)`).join('\n')}`;
+  const tryShare = async list => { if (!navigator.share || !navigator.canShare?.({ files: list })) return false; await navigator.share({ files: list, title, text }); return true; };
+  try {
+    let ok = await tryShare(files);
+    if (!ok) ok = await tryShare(files.map(f => new File([f], f.name, { type: 'application/octet-stream' })));
+    if (ok) { S.exported = true; updateDone(); result('exportResult', `${files.length} bestanden gedeeld. Kies in het menu <b>Mail</b> om ze te mailen of <b>Bewaar in Bestanden</b> om een map te kiezen.`); return; }
+  } catch (err) { if (err?.name === 'AbortError') return; status(`Delen lukte niet (${err?.message ?? err}); de bestanden worden gedownload.`, true); }
+  // geen deelmenu (bijv. computer of in een ingesloten weergave): losse downloads
+  for (const f of files) download(f, f.name);
+  S.exported = true; updateDone();
+  result('exportResult', `${files.length} STL-bestanden gedownload naar ${WHERE}.`);
+};
+
 // ---------- project opslaan / openen ----------
 function projectData(includeScan = true) {
   return {
@@ -1400,6 +1429,21 @@ const syncRimFields = () => $('rimFields').classList.toggle('hide', !$('rimOn').
 $('rimOn').addEventListener('change', syncRimFields);
 
 // ---------- start ----------
+// Eén ingang voor elke scanbewerking: geschiedenis, scan vervangen, ontwerp behouden/opnieuw maken.
+function applyScanEdit(soup, label) {
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); if (S.history.length > 8) S.history.shift(); S.future = [];
+  const keep = keepDesign();
+  setScan(soup, S.scanName, { reset: false });
+  status(label + ' ↶ Terug zet het terug.');
+  restoreDesign(keep);
+}
+function cutFrame() {
+  if (S.frame) return { O: S.frame.O, N: S.frame.N };
+  const axis = S.axis || occlusalAxisCached().axis; let best = -Infinity, O = [0, 0, 0];
+  for (let i = 0; i < S.scan.length; i += 3) { const d = S.scan[i] * axis[0] + S.scan[i + 1] * axis[1] + S.scan[i + 2] * axis[2]; if (d > best) { best = d; O = [S.scan[i], S.scan[i + 1], S.scan[i + 2]]; } }
+  return { O, N: axis };
+}
+scanTools = initScanTools({ S, viewer, $, num, status, busy, setMode, apply: applyScanEdit, cutFrame, refreshColors: () => refreshScanColors() });
 tools = initSetupTools({
   S, viewer, $, num, fmt, status, toast, busy, jaw, currentArchFn, setPrimary, toothMaterial, setMode,
   pushHistory: pushTeethHistory, dropHistory: () => { S.teethHistory.pop(); }, invalidate: invalidateTeethDependents,

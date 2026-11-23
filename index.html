@@ -3,14 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Digital Denture CAD 65</title>
+<title>Digital Denture CAD 65.3</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🦷%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/app.css">
-<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+<script>
+// Opstartcontrole: toont een duidelijke melding in plaats van een stil, niet-werkend scherm.
+(function () {
+  function bar(html) { var d = document.getElementById('bootError') || document.createElement('div'); d.id = 'bootError'; d.innerHTML = html; if (!d.parentNode) document.body.prepend(d); }
+  if (location.protocol === 'file:') { addEventListener('DOMContentLoaded', function () { bar('<b>Het programma kan zo niet starten.</b> Je hebt <code>index.html</code> direct geopend. Browsers laden de modules dan niet. Open de online versie (GitHub Pages) of start een lokale webserver (zie README).'); }); return; }
+  var shown = 0;
+  function show(msg) { if (shown++ > 2) return; bar('<b>Er ging iets mis:</b> ' + String(msg).replace(/[<>&]/g, '') + '<br>Ververs de pagina met <b>Ctrl + F5</b> (Mac: Cmd + Shift + R). Blijft het, stuur dan deze melding.'); }
+  addEventListener('error', function (e) { if (e.message) show(e.message + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : '')); else if (e.target && e.target.src) show('bestand niet geladen: ' + e.target.src.split('/').pop()); }, true);
+  addEventListener('unhandledrejection', function (e) { var r = e.reason; if (r && r.code !== 'PASSWORD') show(r && r.message || r); });
+  setTimeout(function () { if (!window.ddcad) show('het programma is na 15 seconden nog niet gestart (oude bestanden in de cache of geen verbinding).'); }, 15000);
+})();
+</script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js?v=65.3", "./js/aes.js": "./js/aes.js?v=65.3", "./js/analysis.js": "./js/analysis.js?v=65.3", "./js/anatomy.js": "./js/anatomy.js?v=65.3", "./js/arrange.js": "./js/arrange.js?v=65.3", "./js/articulator.js": "./js/articulator.js?v=65.3", "./js/construct.js": "./js/construct.js?v=65.3", "./js/contacts.js": "./js/contacts.js?v=65.3", "./js/contour.js": "./js/contour.js?v=65.3", "./js/crowns.js": "./js/crowns.js?v=65.3", "./js/csg.js": "./js/csg.js?v=65.3", "./js/demo.js": "./js/demo.js?v=65.3", "./js/grind.js": "./js/grind.js?v=65.3", "./js/handoff.js": "./js/handoff.js?v=65.3", "./js/intaglio.js": "./js/intaglio.js?v=65.3", "./js/library.js": "./js/library.js?v=65.3", "./js/main.js": "./js/main.js?v=65.3", "./js/mesh.js": "./js/mesh.js?v=65.3", "./js/off.js": "./js/off.js?v=65.3", "./js/orders-ui.js": "./js/orders-ui.js?v=65.3", "./js/orders.js": "./js/orders.js?v=65.3", "./js/prep.js": "./js/prep.js?v=65.3", "./js/scan-edit.js": "./js/scan-edit.js?v=65.3", "./js/sculpt.js": "./js/sculpt.js?v=65.3", "./js/setup-tools.js": "./js/setup-tools.js?v=65.3", "./js/setup.js": "./js/setup.js?v=65.3", "./js/shell.js": "./js/shell.js?v=65.3", "./js/steps/scan-tools.js": "./js/steps/scan-tools.js?v=65.3", "./js/stl.js": "./js/stl.js?v=65.3", "./js/teeth.js": "./js/teeth.js?v=65.3", "./js/trim.js": "./js/trim.js?v=65.3", "./js/unzip.js": "./js/unzip.js?v=65.3", "./js/version.js": "./js/version.js?v=65.3", "./js/viewer.js": "./js/viewer.js?v=65.3", "./js/wax.js": "./js/wax.js?v=65.3", "./js/zip.js": "./js/zip.js?v=65.3", "./vendor/OrbitControls.js": "./vendor/OrbitControls.js?v=65.3", "./vendor/TransformControls.js": "./vendor/TransformControls.js?v=65.3", "./vendor/manifold.js": "./vendor/manifold.js?v=65.3", "./vendor/three-mesh-bvh.module.js": "./vendor/three-mesh-bvh.module.js?v=65.3", "./vendor/three.core.js": "./vendor/three.core.js?v=65.3", "./vendor/three.module.js": "./vendor/three.module.js?v=65.3" } }</script>
 </head>
 <body>
 <header>
-  <div class="brand">🦷 Digital Denture CAD <span>65</span></div>
+  <div class="brand">🦷 Digital Denture CAD <span>65.3</span></div>
   <div class="header-actions">
     <span class="badge">Prototype · niet voor klinisch gebruik</span>
     <a class="btn" href="orders.html" title="3Shape-export inlezen en controleren">📋 Orders</a>
@@ -106,7 +118,18 @@
     <section class="panel" data-panel="scan">
       <h3>📐 Scan &amp; mesh</h3>
       <div id="scanInfo" class="note">Nog geen scan geladen.</div>
-      <h4>🧹 Scan voorbereiden</h4>
+<h4>✂️ Scan bewerken</h4>
+      <div class="seg" role="group" aria-label="Scangereedschap"><button data-scantool="lasso" aria-pressed="false">✂️ Lasso</button><button data-scantool="erase" aria-pressed="false">🧽 Gum</button><button data-scantool="smooth" aria-pressed="false">🪄 Gladmaken</button></div>
+      <div class="grid2">
+        <div class="field"><label for="scanLassoMode">Lasso</label><select id="scanLassoMode" data-persist><option value="cut">Weg: binnen de lijn</option><option value="keep">Houd alleen binnen de lijn</option></select></div>
+        <div class="field"><label for="scanBrush">Penseel (mm)</label><input id="scanBrush" type="range" min="0.5" max="8" step="0.5" value="2.5" data-persist></div>
+        <div class="field"><label for="scanSmooth">Gladmaken (sterkte)</label><input id="scanSmooth" type="range" min="1" max="12" step="1" value="4" data-persist></div>
+      </div>
+      <label class="check"><input type="checkbox" id="scanFront" checked data-persist> Lasso alleen op de zichtbare kant (uit = door en door)</label>
+      <div class="field"><label for="scanCut">Sokkel afsnijden op <span id="scanCutVal" class="mono">12,0 mm</span> onder de kam</label><input id="scanCut" type="range" min="2" max="30" step="0.5" value="12" data-persist></div>
+      <div class="actions"><button id="scanCutShow">Vlak tonen</button><button id="scanCutBtn" class="primary">Afsnijden</button><button id="scanIslands">Losse delen weg</button><button id="scanHoles">Gaten dichten</button></div>
+      <p class="sub">Alles is terug te draaien met ↶ Terug (onderaan dit paneel). Lepel, beetplaat en basis worden na een bewerking automatisch opnieuw gemaakt; de opstelling blijft staan.</p>
+            <h4>🧹 Scan voorbereiden</h4>
       <p class="sub">Analyseert en repareert de scan (losse delen, spikes, dubbele/kapotte facetten, kleine gaten), snijdt hem bij tot het prothesegebied plus marge (sokkel, wang, tong en artefacten eruit) en vult een niet-gescande plooi aan. Scanpunten worden nooit verschoven.</p>
       <div class="grid2">
         <div class="field"><label for="prepMargin">Marge buiten de plooi (mm)</label><input id="prepMargin" type="number" min="1" max="15" step="0.5" value="4" data-persist></div>
@@ -392,10 +415,12 @@
       <p class="sub">Kies de bestanden. Alleen werkstukken die je al hebt gegenereerd zijn beschikbaar.</p>
       <div id="outputs" class="outputs"></div>
       <label class="check"><input type="checkbox" id="includeProject" checked data-persist> Projectbestand en rapport toevoegen</label>
-      <button id="exportZip" class="primary wide">↓ Download productiepakket (ZIP)</button>
+      <button id="shareFiles" class="primary wide">📤 Mailen of in Bestanden bewaren (losse STL's)</button>
+      <button id="exportZip" class="wide">↓ Download productiepakket (ZIP)</button>
       <div id="previewInfo" class="note-inline"></div>
       <div id="exportResult" class="result"></div>
-      <p class="sub"><b>Waar komen de bestanden?</b> Alles blijft op dit apparaat; er wordt niets naar een server gestuurd. Downloads gaan naar de map <b>Downloads</b> (iPhone: app Bestanden → Downloads, Android: Mijn bestanden → Downloads, computer: map Downloads). Bewaar het hele project (met scan) via 💾 Opslaan.</p>
+      <p class="sub"><b>Mailen of bewaren:</b> 📤 opent het deelmenu van je telefoon met de losse STL's als bijlage. Kies <b>Mail</b> (vul je eigen adres in; iPhone onthoudt het) of <b>Bewaar in Bestanden</b> en kies één vaste map, bijv. <i>Prothesen</i>. Op een computer worden de STL's los gedownload.</p>
+      <p class="sub"><b>Waar komen downloads?</b> Alles blijft op dit apparaat; er wordt niets naar een server gestuurd. Downloads gaan naar <b>Downloads</b> (iPhone: app Bestanden → Downloads, Android: Mijn bestanden → Downloads, computer: map Downloads). Bewaar het hele project (met scan) via 💾 Opslaan.</p>
       <p class="note">Alle STL's zijn echte, gesloten meshes in millimeters. Controleer ze altijd in je slicer of CAM-software. Geen klinische validatie.</p>
     </section>
   </aside>
@@ -422,6 +447,6 @@
 
 <div id="toast" role="alert" class="hide"></div>
 <noscript><p style="padding:20px">Deze toepassing vereist JavaScript.</p></noscript>
-<script type="module" src="js/main.js"></script>
+<script type="module" src="js/main.js?v=65.3"></script>
 </body>
 </html>
