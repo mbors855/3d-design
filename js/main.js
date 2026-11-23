@@ -1061,6 +1061,31 @@ $('exportZip').onclick = () => busy('Productiepakket samenstellen…', async () 
   result('exportResult', `${files.length} bestanden in ZIP gezet.`);
 });
 
+// 📤 Mailen of in Bestanden bewaren: losse STL's via het deelmenu van het toestel (iPhone: Mail, "Bewaar in
+// Bestanden", AirDrop). Bestanden worden direct in de klik gemaakt, want het deelmenu mag alleen vanuit een tik openen.
+$('shareFiles').onclick = async () => {
+  let files;
+  try {
+    const chosen = new Set([...$('outputs').querySelectorAll('input:checked')].map(i => i.value));
+    const outs = outputList().filter(o => o.available && chosen.has(o.key));
+    if (!outs.length) throw Error('Kies minstens één beschikbaar bestand.');
+    files = [];
+    for (const o of outs) for (const [name, soup] of o.files()) files.push(new File([writeSTL(soup, name)], name.replace(/^.*\//, ''), { type: 'model/stl' }));
+  } catch (err) { return status(err.message, true); }
+  const project = $('caseName').value || 'project', title = `${project} · ${files.length} STL-bestand${files.length > 1 ? 'en' : ''}`;
+  const text = `Digital Denture CAD ${VERSION} · ${project} · ${jaw() === 'upper' ? 'bovenkaak' : 'onderkaak'}\n${files.map(f => `• ${f.name} (${fmt(f.size / 1048576, 1)} MB)`).join('\n')}`;
+  const tryShare = async list => { if (!navigator.share || !navigator.canShare?.({ files: list })) return false; await navigator.share({ files: list, title, text }); return true; };
+  try {
+    let ok = await tryShare(files);
+    if (!ok) ok = await tryShare(files.map(f => new File([f], f.name, { type: 'application/octet-stream' })));
+    if (ok) { S.exported = true; updateDone(); result('exportResult', `${files.length} bestanden gedeeld. Kies in het menu <b>Mail</b> om ze te mailen of <b>Bewaar in Bestanden</b> om een map te kiezen.`); return; }
+  } catch (err) { if (err?.name === 'AbortError') return; status(`Delen lukte niet (${err?.message ?? err}); de bestanden worden gedownload.`, true); }
+  // geen deelmenu (bijv. computer of in een ingesloten weergave): losse downloads
+  for (const f of files) download(f, f.name);
+  S.exported = true; updateDone();
+  result('exportResult', `${files.length} STL-bestanden gedownload naar ${WHERE}.`);
+};
+
 // ---------- project opslaan / openen ----------
 function projectData(includeScan = true) {
   return {
