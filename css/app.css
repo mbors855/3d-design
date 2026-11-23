@@ -192,3 +192,7 @@ label.button.primary { background: var(--accent-strong); border-color: #3dc3d0; 
 .placelist .tooth[aria-pressed="true"] { background: #d28a36; color: #111d26; font-weight: 800; }
 .mono { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
 #viewport canvas { touch-action: none; }
+
+/* v65.1: stappen van een ander werkstuk gedimd (aantikken kiest dat werkstuk) */
+.step.otherwork { opacity: .55; }
+.step.otherwork:hover, .step.otherwork:focus-visible { opacity: 1; }
