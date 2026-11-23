@@ -3,14 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Digital Denture CAD 65</title>
+<title>Digital Denture CAD 65.3</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🦷%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/app.css">
-<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+<script>
+// Opstartcontrole: toont een duidelijke melding in plaats van een stil, niet-werkend scherm.
+(function () {
+  function bar(html) { var d = document.getElementById('bootError') || document.createElement('div'); d.id = 'bootError'; d.innerHTML = html; if (!d.parentNode) document.body.prepend(d); }
+  if (location.protocol === 'file:') { addEventListener('DOMContentLoaded', function () { bar('<b>Het programma kan zo niet starten.</b> Je hebt <code>index.html</code> direct geopend. Browsers laden de modules dan niet. Open de online versie (GitHub Pages) of start een lokale webserver (zie README).'); }); return; }
+  var shown = 0;
+  function show(msg) { if (shown++ > 2) return; bar('<b>Er ging iets mis:</b> ' + String(msg).replace(/[<>&]/g, '') + '<br>Ververs de pagina met <b>Ctrl + F5</b> (Mac: Cmd + Shift + R). Blijft het, stuur dan deze melding.'); }
+  addEventListener('error', function (e) { if (e.message) show(e.message + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : '')); else if (e.target && e.target.src) show('bestand niet geladen: ' + e.target.src.split('/').pop()); }, true);
+  addEventListener('unhandledrejection', function (e) { var r = e.reason; if (r && r.code !== 'PASSWORD') show(r && r.message || r); });
+  setTimeout(function () { if (!window.ddcad) show('het programma is na 15 seconden nog niet gestart (oude bestanden in de cache of geen verbinding).'); }, 15000);
+})();
+</script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js?v=65.3", "./js/aes.js": "./js/aes.js?v=65.3", "./js/analysis.js": "./js/analysis.js?v=65.3", "./js/anatomy.js": "./js/anatomy.js?v=65.3", "./js/arrange.js": "./js/arrange.js?v=65.3", "./js/articulator.js": "./js/articulator.js?v=65.3", "./js/construct.js": "./js/construct.js?v=65.3", "./js/contacts.js": "./js/contacts.js?v=65.3", "./js/contour.js": "./js/contour.js?v=65.3", "./js/crowns.js": "./js/crowns.js?v=65.3", "./js/csg.js": "./js/csg.js?v=65.3", "./js/demo.js": "./js/demo.js?v=65.3", "./js/grind.js": "./js/grind.js?v=65.3", "./js/handoff.js": "./js/handoff.js?v=65.3", "./js/intaglio.js": "./js/intaglio.js?v=65.3", "./js/library.js": "./js/library.js?v=65.3", "./js/main.js": "./js/main.js?v=65.3", "./js/mesh.js": "./js/mesh.js?v=65.3", "./js/off.js": "./js/off.js?v=65.3", "./js/orders-ui.js": "./js/orders-ui.js?v=65.3", "./js/orders.js": "./js/orders.js?v=65.3", "./js/prep.js": "./js/prep.js?v=65.3", "./js/sculpt.js": "./js/sculpt.js?v=65.3", "./js/setup-tools.js": "./js/setup-tools.js?v=65.3", "./js/setup.js": "./js/setup.js?v=65.3", "./js/shell.js": "./js/shell.js?v=65.3", "./js/stl.js": "./js/stl.js?v=65.3", "./js/teeth.js": "./js/teeth.js?v=65.3", "./js/trim.js": "./js/trim.js?v=65.3", "./js/unzip.js": "./js/unzip.js?v=65.3", "./js/version.js": "./js/version.js?v=65.3", "./js/viewer.js": "./js/viewer.js?v=65.3", "./js/wax.js": "./js/wax.js?v=65.3", "./js/zip.js": "./js/zip.js?v=65.3", "./vendor/OrbitControls.js": "./vendor/OrbitControls.js?v=65.3", "./vendor/TransformControls.js": "./vendor/TransformControls.js?v=65.3", "./vendor/manifold.js": "./vendor/manifold.js?v=65.3", "./vendor/three-mesh-bvh.module.js": "./vendor/three-mesh-bvh.module.js?v=65.3", "./vendor/three.core.js": "./vendor/three.core.js?v=65.3", "./vendor/three.module.js": "./vendor/three.module.js?v=65.3" } }</script>
 </head>
 <body>
 <header>
-  <div class="brand">🦷 Digital Denture CAD <span>65</span></div>
+  <div class="brand">🦷 Digital Denture CAD <span>65.3</span></div>
   <div class="header-actions">
     <span class="badge">Prototype · niet voor klinisch gebruik</span>
     <a class="btn" href="orders.html" title="3Shape-export inlezen en controleren">📋 Orders</a>
@@ -424,6 +436,6 @@
 
 <div id="toast" role="alert" class="hide"></div>
 <noscript><p style="padding:20px">Deze toepassing vereist JavaScript.</p></noscript>
-<script type="module" src="js/main.js"></script>
+<script type="module" src="js/main.js?v=65.3"></script>
 </body>
 </html>

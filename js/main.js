@@ -19,10 +19,10 @@ import { analyzeScan, repairScan, extendBorder, keepComponentNear } from './prep
 import { trimByOutline } from './trim.js';
 import { WaxLayer } from './wax.js';
 import { initSetupTools, geometrySoup } from './setup-tools.js';
+import { VERSION } from './version.js';
 import { bowIdeal } from './library.js';
 import { analyseArch, proposeOutline, tissueZones, idealizeScan, ZONE_LABEL, RULES, crestArch, setupArch, occlusalPlaneRule, staticsReport } from './anatomy.js';
 
-const VERSION = '65.0';
 const $ = id => document.getElementById(id);
 const num = id => { const v = $(id).valueAsNumber; return Number.isFinite(v) ? v : Number($(id).value); };
 const fmt = (v, d = 1) => Number(v).toLocaleString('nl-NL', { minimumFractionDigits: d, maximumFractionDigits: d });
