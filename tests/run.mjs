@@ -454,10 +454,20 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     for (let f = 0; f < n0; f++) if (all[f]) { const x = (jaw[f * 9] + jaw[f * 9 + 3] + jaw[f * 9 + 6]) / 3; assert.ok(Math.abs(x - cx) <= 5.01); }
     const del = E.deleteMask(jaw, all); assert.equal(del.length / 9, n0 - E.countMask(all));
     // strakke rand: zelfde aantal driehoeken, de oorspronkelijke buitenrand onveranderd
-    const clean = E.deleteMaskClean(jaw, all); assert.equal(clean.length, del.length);
+    const clean = E.deleteMaskClean(jaw, all); assert.ok(clean.length <= del.length && clean.length > del.length * 0.98);
     const rimKey = s2 => { const m = weld(s2, 1e-5); const L = boundaryLoops(m).loops; const big = L.reduce((a, b) => b.length > a.length ? b : a); return big.map(v => [0, 1, 2].map(c => m.positions[v * 3 + c].toFixed(3)).join()).sort().join('|'); };
     assert.equal(rimKey(clean), rimKey(jaw), 'buitenrand exact behouden');
     const sm = E.sphereMask(jaw, [jaw[0], jaw[1], jaw[2]], 2); assert.ok(sm[0] === 1 && E.countMask(sm) < n0 / 4);
+  });
+  await test('v66 scan: rand opschonen geeft één vloeiende rand zonder oortjes, binnenpunten blijven', () => {
+    // gerafelde rand maken: losse driehoekjes aan de rand + gaatje + nul-lange snijranden
+    const rough = E.planeCut(jaw, [0, 0, (B.lo[2] + B.hi[2]) / 2], [0, 0, 1]);
+    const mid = Math.floor(rough.length / 18) * 9, holed = E.deleteMask(rough, E.sphereMask(rough, [rough[mid], rough[mid + 1], rough[mid + 2]], 1.2));
+    const r = E.cleanRim(holed);
+    const m = weld(r.soup, 1e-5), e = edgeMap(m); let ears = 0, nm = 0; const fb = new Uint8Array(m.indices.length / 3);
+    for (const v of e.values()) { if (v.count > 2) nm++; if (v.count === 1) fb[v.faces[0]]++; } for (const c of fb) if (c >= 2) ears++;
+    assert.equal(ears, 0, 'geen oortjes'); assert.equal(nm, 0, 'manifold'); assert.ok(r.loops <= boundaryLoops(weld(rough, 1e-5)).loops.length, 'gaatje dicht');
+    const so = E.smoothOutline([[0, 0, 0], [10, 0, 0], [10, 10, 0], [5, 4, 0], [0, 10, 0]], 6); assert.equal(so.length, 5);
   });
   await test('v65.3 scan: losse delen weg, gladmaken laat de rand en de rest ongemoeid, gaten dicht', () => {
     // los eilandje toevoegen

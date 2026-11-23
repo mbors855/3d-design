@@ -21,6 +21,7 @@ import { WaxLayer } from './wax.js';
 import { initSetupTools, geometrySoup } from './setup-tools.js';
 import { VERSION } from './version.js';
 import { initScanTools } from './steps/scan-tools.js';
+import { smoothOutline, cleanRim } from './scan-edit.js';
 import { bowIdeal } from './library.js';
 import { analyseArch, proposeOutline, tissueZones, idealizeScan, ZONE_LABEL, RULES, crestArch, setupArch, occlusalPlaneRule, staticsReport } from './anatomy.js';
 
@@ -1527,12 +1528,14 @@ function prepareScan() {
   S.frame = null; S.landmarks = {}; ensureFrame(); let a = runAnatomy();
   if ($('prepTrim').checked) {
     const ol = proposeOutline(a.cast, a.an, 'basis');
-    const t = trimByOutline(S.scan, ol.points, S.frame.N, { margin: num('prepMargin'), splitAt: S.designedFrom });
+    // vloeiende bijsnijlijn (geen inkepingen bij de lipbandjes): de scan wordt ruim bijgesneden, het werkstuk krijgt later zijn eigen rand
+    const t = trimByOutline(S.scan, smoothOutline(ol.points, 7), S.frame.N, { margin: num('prepMargin'), splitAt: S.designedFrom });
     const df = S.designedFrom != null && t.splitIndex < t.soup.length / 9 ? t.splitIndex : null;
     // binnen de marge kan nog een los stuk sokkel of tafel liggen: alleen de kaak (grootste deel) houden
     const only = keepComponentNear(t.soup, S.landmarks.M ?? S.frame.O);
-    let df2 = df; if (only.removed && df != null) { df2 = null; } // volgorde blijft, maar index verschuift: veilig weglaten
-    setScan(only.soup, name, { reset: false, designedFrom: df2 });
+    // strakke rand: oortjes, vlinders, nul-lange randen en spleetjes weg, buitenrand vloeiend op het oppervlak
+    const rim = cleanRim(only.soup);
+    setScan(rim.soup, name, { reset: false, designedFrom: null });
     lines.push(`<b>Bijsnijden</b>: prothesegebied + ${fmt(num('prepMargin'))} mm · ${int(t.report.removed)} facetten verwijderd (sokkel, wang/tong, artefacten) · ${int(t.report.clipped)} randfacetten exact gesneden`);
     a = runAnatomy();
   }
