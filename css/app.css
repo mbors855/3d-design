@@ -200,3 +200,7 @@ label.button.primary { background: var(--accent-strong); border-color: #3dc3d0; 
 /* opstartcontrole */
 #bootError { position: fixed; z-index: 9999; left: 0; right: 0; top: 0; padding: 12px 16px; background: #7a1d1d; color: #fff; font-size: 14px; line-height: 1.4; box-shadow: 0 4px 20px #0008; }
 #bootError code { background: #0003; padding: 1px 4px; border-radius: 4px; }
+
+/* scanbewerking: overlay voor lasso en penseel */
+.scanedit-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: none; z-index: 4; }
+.scanedit-overlay.on { display: block; }

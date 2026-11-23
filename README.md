@@ -18,6 +18,29 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 65.3: opruimen, betrouwbaar laden en betere scanbewerking
+
+**Betrouwbaar laden.**
+- Elke module laadt met een versienummer (`js/version.js` → `node scripts/stamp.mjs` zet het in de import-maps). Na een update gebruikt de browser dus nooit oude en nieuwe bestanden door elkaar. Dat gebeurde eerder door de cache van GitHub Pages (10 minuten) en dan werkte er niets.
+- Opstartcontrole: open je `index.html` direct vanaf schijf, of gaat er bij het laden iets mis, dan staat er een duidelijke rode melding in beeld in plaats van een stil scherm.
+
+**✂️ Scan bewerken** (stap Scan & mesh):
+- **Lasso**: trek een lijn rond wat weg moet. Kies weg binnen de lijn of houd alleen binnen de lijn, en alleen de zichtbare kant of door en door.
+- **Gum** en **Gladmaken**: penseel met instelbare straal; tijdens het vegen zie je de selectie in kleur.
+- De geknipte rand wordt automatisch strak getrokken; de oorspronkelijke scanrand blijft exact.
+- **Sokkel afsnijden**: op een instelbare hoogte onder de kam, met live voorbeeld van het vlak; de rand wordt exact gesneden.
+- **Losse delen weg** en **Gaten dichten** (de buitenrand blijft open).
+- Alles is terug te draaien met ↶. Lepel, beetplaat en basis worden daarna automatisch opnieuw gemaakt; de opstelling blijft staan.
+- Tijdens het bewerken van de scan zijn de werkstukken verborgen, zodat je de scan zelf goed ziet.
+
+**Opbouw.** Nieuwe code staat in losse modules met één taak:
+- `js/scan-edit.js`: rekenkern van de scanbewerking, zonder interface en los getest.
+- `js/steps/scan-tools.js`: interface van de scanbewerking.
+- `js/setup-tools.js`: opstelling.
+- `js/version.js`: het versienummer.
+
+`main.js` wordt stap voor stap verder opgesplitst per programmastap.
+
 ### Nieuw in 65 — opstelling zoals in 3Shape/exocad, met verbeteringen
 
 **📚 Eigen tandenbibliotheek (exocad-indeling).** Kies de ZIP (ook een ZIP in een ZIP of met wachtwoord: WinZip-AES) of de uitgepakte map. Herkend worden `teeth/<set>/{upperjaw,lowerjaw}/1…8.eoff` en `metadata/<set>/{upperjaw,lowerjaw}.xml`. Thimble-/cutback-varianten worden genegeerd. Kronen worden gesloten met een korte, taps toelopende wortelstomp (manifold, klaar voor de basis), gespiegeld voor de andere kaakhelft. De bibliotheek blijft **alleen op het apparaat** (IndexedDB): niets gaat naar een server of in deze repository.
@@ -162,6 +185,9 @@ js/setup-tools.js           opstelgereedschap: selectie, slepen, BK+OK, contact,
 js/contacts.js              getekende afstanden en contactkleuren
 js/articulator.js           virtuele articulator (protrusie, laterotrusie, openen)
 js/grind.js                 inslijpen (automatisch en slijpkop)
+js/scan-edit.js             scanbewerking: lasso, gum, gladmaken, vlak afsnijden, losse delen, gaten (rekenkern)
+js/steps/scan-tools.js      scanbewerking (interface)
+js/version.js               versienummer (scripts/stamp.mjs zet het in de import-maps)
 js/unzip.js, zip.js, handoff.js, stl.js, viewer.js
 vendor/                     three.js, three-mesh-bvh, manifold-3d (WebAssembly)
 tests/run.mjs               headless tests
