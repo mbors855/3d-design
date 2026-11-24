@@ -744,4 +744,53 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     assert.ok(worst < 0.4, `scanrand tot plaat ${worst.toFixed(3)} mm (kartels gladgestreken)`);
   });
 }
+
+// ---- v70: lepel langs de scanrand, nauwkeuriger afdrukruimte, dun weefselblok, binnen een omtrek knippen ----
+{
+  const M = await import(J + 'mesh.js'), SH = await import(J + 'shell.js'), X = await import(J + 'meshcheck.js');
+  const TR = await import(J + 'trim.js'), CS = await import(J + 'csg.js');
+  const { dentateJaw } = await import(J + 'demo-dentate.js');
+  const dent = (await dentateJaw({ missing: [36, 37], noise: 0.02, columns: 40, rows: 24 })).soup;
+  const own = X.selfIntersections(M.weld(dent, 1e-6)).pairs;
+  await test('v70 lepel op een betande scan langs de scanrand: gesloten, schoon, afdrukruimte op 0,03 mm', () => {
+    const surf = TR.trimByEdge(dent, { inset: 0 }).soup, t0 = performance.now();
+    const rep = {}, plate = SH.shell(surf, { gap: 2, wall: 2.5, checkThin: true, trimSpikes: true }, rep), ms = performance.now() - t0;
+    const m = M.weld(plate, 1e-6), q = M.quality(m);
+    assert.ok(q.watertight && q.nonManifold === 0 && q.components === 1, JSON.stringify(q));
+    const si = X.selfIntersections(m).pairs; assert.ok(si <= 150, `zelfdoorsnijding ${si} (scan zelf ${own})`);
+    const f = M.fitReport(surf, plate, 2); assert.ok(f.closeP99 < 0.03, `te dicht (99%) ${f.closeP99.toFixed(3)} mm`);
+    assert.ok(ms < 20000, `${ms.toFixed(0)} ms`);
+  });
+  await test('v70 afdrukruimte op een fijner raster: veel minder te dicht dan met het grove raster (tandeloze kaak)', () => {
+    const jaw = anatomicJaw({ jaw: 'lower' }).soup;
+    const plate = SH.shell(jaw, { gap: 2, wall: 2.5 }, {}), f = M.fitReport(jaw, plate, 2);
+    const old = M.fitReport(jaw, SH.shell(jaw, { gap: 2, wall: 2.5, hInner: 0.9 }, {}), 2);
+    assert.ok(f.closeP99 < 0.07 && f.closeP99 < 0.7 * old.closeP99, `te dicht (99%): oud ${old.closeP99.toFixed(3)} / nieuw ${f.closeP99.toFixed(3)} mm`);
+  });
+  await test('v70 dun weefselblok (iso, 2,5 mm) aan de weefselkant: gesloten, veel schoner dan het oude; 8 mm loopt niet meer weg', () => {
+    for (const jaw of ['lower', 'upper']) {
+      const surf = anatomicJaw({ jaw }).soup;
+      const b = SH.shell(surf, { gap: 0.005, wall: 2.5, reverse: true, method: 'iso', quick: true }, {}), m = M.weld(b, 1e-6), q = M.quality(m);
+      assert.ok(q.watertight && q.nonManifold === 0 && q.components === 1, `${jaw}: ${JSON.stringify(q)}`);
+      const si = X.selfIntersections(m).pairs, old = X.selfIntersections(M.weld(SH.shell(surf, { gap: 0.005, wall: 8, reverse: true, method: 'normal' }), 1e-6)).pairs;
+      assert.ok(si <= Math.max(10, old / 20), `${jaw}: zelfdoorsnijding oud blok ${old} / nieuw ${si}`);
+    }
+    const t0 = performance.now(); SH.shell(anatomicJaw({ jaw: 'upper' }).soup, { gap: 0.005, wall: 8, reverse: true, method: 'iso' }, {});
+    assert.ok(performance.now() - t0 < 8000, `8 mm iso ${(performance.now() - t0).toFixed(0)} ms (liep rond de rand weg)`);
+  });
+  await test('v70 clipToOutline: alleen binnen de omtrek (0,4 mm erbinnen), een inham blijft vrij', async () => {
+    const box = []; const P = [-1, 1].flatMap(x => [-1, 1].flatMap(y => [-1, 1].map(z => [x * 20, y * 20, z * 5])));
+    for (const [a, b, c, d] of [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]]) box.push(...P[a], ...P[b], ...P[c], ...P[a], ...P[c], ...P[d]);
+    // U-vormige omtrek (10 × 10 mm met een inham van 4 mm breed, 6 mm diep) in het vlak z = 0, dicht bemonsterd zoals een echte omtrek
+    const C0 = [[-5, -5], [5, -5], [5, 5], [2, 5], [2, -1], [-2, -1], [-2, 5], [-5, 5]], U = [];
+    for (let i = 0; i < C0.length; i++) { const a = C0[i], b = C0[(i + 1) % C0.length], k = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.25); for (let j = 0; j < k; j++) U.push([a[0] + (b[0] - a[0]) * j / k, a[1] + (b[1] - a[1]) * j / k, 0]); }
+    const out = await CS.clipToOutline(Float32Array.from(box), U, [0, 0, 1], { inset: 0.4, step: 0.2 }), q = M.quality(M.weld(out, 1e-6));
+    assert.ok(q.watertight && q.components === 1, JSON.stringify(q));
+    const inPoly = (x, y) => { let c = false; for (let i = 0, j = C0.length - 1; i < C0.length; j = i++) { const [xi, yi] = C0[i], [xj, yj] = C0[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+    const edgeDist = (x, y) => { let d = Infinity; for (let i = 0; i < C0.length; i++) { const [ax, ay] = C0[i], [bx, by] = C0[(i + 1) % C0.length], ex = bx - ax, ey = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * ex + (y - ay) * ey) / (ex * ex + ey * ey))); d = Math.min(d, Math.hypot(x - ax - ex * t, y - ay - ey * t)); } return d; };
+    let worst = Infinity; for (let i = 0; i < out.length; i += 3) worst = Math.min(worst, inPoly(out[i], out[i + 1]) ? edgeDist(out[i], out[i + 1]) : -edgeDist(out[i], out[i + 1]));
+    assert.ok(worst > 0.3, `dichtst bij of buiten de omtrek: ${worst.toFixed(3)} mm (moet ± 0,4 mm erbinnen)`);
+    const vol = Math.abs(q.volume), expect = (9.2 * 9.2 - 4.8 * 6.4) * 10; assert.ok(Math.abs(vol - expect) / expect < 0.05, `volume ${vol.toFixed(1)} (verwacht ± ${expect.toFixed(1)})`);
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

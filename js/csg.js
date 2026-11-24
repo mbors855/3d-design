@@ -1,5 +1,6 @@
 // Booleaanse bewerkingen (vereniging/aftrekking) met de Manifold-bibliotheek (WebAssembly).
 import { weld, clean, quality, repair, toSoup, edgeMap, compact, fillHoles } from './mesh.js';
+import { axisBasis, outlinePolygon } from './trim.js';
 
 let wasmPromise = null;
 export function loadManifold() {
@@ -91,6 +92,27 @@ export async function unionSoups(soups, report = {}) {
   for (const p of parts) p.delete();
   if (u !== parts[0]) u.delete();
   return { soup: loose.length ? concat([soup, ...loose]) : soup, merged: true };
+}
+
+// v70: alleen het deel binnen een omtrek houden (prisma langs de insteekas N, 'inset' mm binnen de lijn). Zo loopt de
+// gingivaband nooit voorbij de basisrand of in een frenulum-uitsparing; daar raakte hij eerst de rand van het
+// weefselblok (niet-manifold randen), waardoor het anatomische tandvlees altijd werd vervangen door het eenvoudige.
+export async function clipToOutline(soup, outline, N, { inset = 0.4, step = 0.5 } = {}) {
+  const w = await loadManifold();
+  const basis = axisBasis(N), U = basis.U, V = basis.V, n = basis.N;
+  const poly = outlinePolygon(outline, basis, { step });
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < soup.length; i += 3) { const d = soup[i] * n[0] + soup[i + 1] * n[1] + soup[i + 2] * n[2]; if (d < lo) lo = d; if (d > hi) hi = d; }
+  for (const p of outline) { const d = p[0] * n[0] + p[1] * n[1] + p[2] * n[2]; if (d < lo) lo = d; if (d > hi) hi = d; }
+  lo -= 5; hi += 5;
+  let cs = new w.CrossSection([poly], 'Positive');
+  if (inset > 0) { const c2 = cs.offset(-inset, 'Round', 2, 24); cs.delete(); cs = c2; }
+  const local = cs.extrude(hi - lo); cs.delete();
+  const prism = local.warp(v => { const x = v[0], y = v[1], z = v[2] + lo; v[0] = x * U[0] + y * V[0] + z * n[0]; v[1] = x * U[1] + y * V[1] + z * n[1]; v[2] = x * U[2] + y * V[2] + z * n[2]; });
+  local.delete();
+  const m = await toManifold(soup), r = m.intersect(prism), out = fromManifold(r);
+  m.delete(); prism.delete(); r.delete();
+  return out;
 }
 
 export async function subtractSoups(base, cutters, report = {}) {
