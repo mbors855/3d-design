@@ -20,7 +20,7 @@ export async function shellAsync(soup, opts = {}, report = {}, pause = () => new
   return r.value;
 }
 
-function* shellSteps(soup, { gap = 0, wall = 2, reverse = false, draftAngle = null, smoothing = 2, allowNegativeGap = false, maxScale = 1.3, rimSeal = 0, checkThin = false, method = 'iso', round = 0.9, quick = false, trimSpikes = false, hInner = null } = {}, report = {}) {
+function* shellSteps(soup, { gap = 0, wall = 2, reverse = false, draftAngle = null, smoothing = 2, allowNegativeGap = false, maxScale = 1.3, rimSeal = 0, checkThin = false, method = 'iso', round = 0.9, quick = false, trimSpikes = false, hInner = null, skin = null } = {}, report = {}) {
   let lastPause = performance.now();
   const due = () => { const t = performance.now(); if (t - lastPause < 100) return false; lastPause = t; return true; };
   if (!Number.isFinite(gap) || (gap < 0 && !allowNegativeGap) || !Number.isFinite(wall) || wall <= 0) throw Error('Vul een geldige ruimte en positieve dikte in.');
@@ -77,7 +77,7 @@ function* shellSteps(soup, { gap = 0, wall = 2, reverse = false, draftAngle = nu
     for (let v = 0; v < vCount; v++) if (dr[v] < rimSeal) { const t = dr[v] / rimSeal; gapAt[v] = gap * t * t * (3 - 2 * t); }
     report.rimSeal = rimSeal;
   }
-  if (method === 'iso') return yield* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkThin, due, hInner }, report);
+  if (method === 'iso') return yield* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkThin, due, hInner, skin }, report);
   // Oude methode (t/m v68, alleen nog ter vergelijking): elk punt langs zijn gladgemaakte normaal verschuiven.
   report.method = 'normal';
   const inner = new Float32Array(positions.length), outer = new Float32Array(positions.length);
@@ -163,7 +163,7 @@ function* shellSteps(soup, { gap = 0, wall = 2, reverse = false, draftAngle = nu
 // met een afgeronde bovenkant (straal 'round'), met een smalle strook aangesloten op het iso-oppervlak.
 // Afdrukruimte > 0,05 mm (lepel): het pasvlak is ook een iso-oppervlak (op 'ruimte' mm), met een afsluitstrook naar de rand.
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
-function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkThin, due, hInner = null }, report) {
+function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkThin, due, hInner = null, skin = null }, report) {
   report.method = 'iso';
   const t0 = performance.now(), tm = report.timing = {}; let tl = t0; const mark = (k) => { const t = performance.now(); tm[k] = Math.round(t - tl); tl = t; };
   const P = work.positions, f = work.indices, vCount = P.length / 3, nr = rim.length;
@@ -171,6 +171,21 @@ function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkTh
   const adjF = adjacency(f, vCount);
   const ref = reference(work, normals);
   const nRim = smoothVectors(adjF, normals, 10);
+  // v71: buitenkant als 'huid' van basis + tandvlees (prothese). skin.field(x, y, z): ± afstand tot het tandvlees rond de
+  // elementen (construct.js gingivaField). Het veld van de huid is de gladde vereniging (smooth-min, straal skin.blend)
+  // van de basis (afstand tot de scan − dikte) en dat tandvlees: één gladde huid met een holle overgang naar flens en
+  // gehemelte, zonder band of afknippen. Binnen skin.rimFade mm van de plaatrand verdwijnt het tandvlees geleidelijk,
+  // zodat de afgeronde rand op de gewone dikte blijft aansluiten.
+  let extraMax = 0;
+  if (skin) {
+    const bvh = ref.bvh;
+    skin.prepare?.((x, y, z) => bvh.closest(x, y, z, 50));
+    const pts = skin.points(); let m = 0;
+    for (let i = 0; i < pts.length; i += 3) { const d = bvh.closest(pts[i], pts[i + 1], pts[i + 2], 60); if (d !== Infinity && d > m) m = d; }
+    extraMax = Math.max(0, m - level) + 2;
+    report.skinMax = extraMax;
+  }
+  const levelMax = level + extraMax;
   mark('voorbereiden');
   // 1. randframe: normaal en richting naar buiten (loodrecht op de rand), langs de booglengte gladgemaakt (Gauss),
   // zodat de kartelige scanrand geen ribbels in de wand en de afronding geeft
@@ -211,7 +226,7 @@ function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkTh
   // v70: het iso-oppervlak buigt bij de rand als een halve cilinder met straal 'level' om de randlijn. Lag dat verder dan
   // 'reach' (dik weefselblok, 8 mm), dan telde het als 'binnen' en liep de vulling rond de rand weg (26 s, dan 'te
   // groot'). Daarom tot 'guard' ook kijken, maar daar alleen punten voorbij de rand (u ≥ 0) afwijzen; binnen blijft binnen.
-  const guard = Math.max(reach, level + 2 * h + 1);
+  const guard = Math.max(reach, levelMax + 2 * h + 1);
   // u: hoe ver een punt naar buiten ligt t.o.v. het dichtstbijzijnde randpunt (langs de richting naar buiten daar);
   // > 0 = voorbij de plaatrand. Verder dan 'reach' van de rand en niet voorbij de rand: -Infinity (ruim binnen).
   const uAt = (x, y, z) => {
@@ -221,17 +236,29 @@ function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkTh
     const o = k * 3, u = (x - cp[0]) * rt[o] + (y - cp[1]) * rt[o + 1] + (z - cp[2]) * rt[o + 2];
     return d > reach && u < 0 ? -Infinity : u;
   };
+  const skinField = skin ? (() => {
+    const k = skin.blend ?? 2.5, D = skin.rimFade ?? 5, K = 15, G = skin.field;
+    return (x, y, z, sd) => {
+      const a = sd - level; let g = G(x, y, z);
+      if (!(g < a + k)) return a; // tandvlees ver weg of ruim binnen de basis: gewone basis
+      const dr = rimBvh.closest(x, y, z, D);
+      if (dr !== Infinity) { const t = dr / D; g += K * (1 - t * t * (3 - 2 * t)); if (!(g < a + k)) return a; }
+      const hh = Math.max(k - Math.abs(a - g), 0) / k;
+      return Math.min(a, g) - hh * hh * k / 4;
+    };
+  })() : null;
   // startpunten: langs de normaal omhoog tot de gevraagde afstand, op een deel van de scanpunten
-  const seedsFor = (lvFn) => {
+  const seedsFor = (lvFn, fieldFn = null) => {
     const out = [], step = Math.max(1, Math.floor(vCount / 2500)), bvh = ref.bvh;
     for (let v = 0; v < vCount; v += step) {
       if (rimBvh.closest(P[v * 3], P[v * 3 + 1], P[v * 3 + 2], r + seal + 2 * h) !== Infinity) continue;
       const px = P[v * 3], py = P[v * 3 + 1], pz = P[v * 3 + 2], nx = normals[v * 3], ny = normals[v * 3 + 1], nz = normals[v * 3 + 2];
       // stappen van minstens het tekort (de afstand groeit hooguit even hard als de stap)
-      for (let t = h * 0.5, s = 0; t < level + 4 && s < 12; s++) {
-        const x = px + nx * t, y = py + ny * t, z = pz + nz * t, d = bvh.closest(x, y, z, level + 5);
+      for (let t = h * 0.5, s = 0; t < levelMax + 4 && s < 16; s++) {
+        const x = px + nx * t, y = py + ny * t, z = pz + nz * t, d = bvh.closest(x, y, z, levelMax + 5);
         if (d === Infinity) break;
         const lv = lvFn(bvh.face);
+        if (fieldFn) { const F = fieldFn(x, y, z, d); if (F >= 0) { out.push(x, y, z); break; } t += Math.max(Math.min(-F, 2), h * 0.25); continue; }
         if (d >= lv) { out.push(x, y, z); break; }
         t += Math.max(lv - d, h * 0.25);
       }
@@ -249,7 +276,7 @@ function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkTh
   const hOut = new Float64Array(nr), hIn = new Float64Array(nr);
   for (let i = 0; i < nr; i++) {
     const o = i * 3;
-    const ho = heightToLevel(ref, As[o] - r * rt[o], As[o + 1] - r * rt[o + 1], As[o + 2] - r * rt[o + 2], rn[o], rn[o + 1], rn[o + 2], lvOutFn, level + 6);
+    const ho = heightToLevel(ref, As[o] - r * rt[o], As[o + 1] - r * rt[o + 1], As[o + 2] - r * rt[o + 2], rn[o], rn[o + 1], rn[o + 2], lvOutFn, levelMax + 6);
     hOut[i] = ho ?? level;
     if (sheetGap && !seal) { const hi = heightToLevel(ref, As[o], As[o + 1], As[o + 2], rn[o], rn[o + 1], rn[o + 2], () => gap, gap + 6); hIn[i] = hi ?? gap; }
   }
@@ -300,9 +327,9 @@ function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkTh
   } else rings.push(ring((q, o, R) => { for (let j = 0; j < 3; j++) R[o + j] = qP[o + j] + qH[q] * qN[o + j]; }));
   const T = rings[rings.length - 1];
   mark('randhoogtes');
-  const outerRaw = yield* isoSurface({ ref, level: lvOut, h, seeds: seedsFor(lvOutFn), inside: (x, y, z) => uAt(x, y, z) <= -r - 2 * h, due, label: 'buitenkant' });
+  const outerRaw = yield* isoSurface({ ref, level: lvOut, field: skinField, h, seeds: seedsFor(lvOutFn, skinField), inside: (x, y, z) => uAt(x, y, z) <= -r - 2 * h, due, label: 'buitenkant' });
   mark('iso-oppervlak buiten');
-  const outer = finishPatch(outerRaw, ref, lvOutFn, { smooth: quick ? 2 : 8, h, exact: false, lvMax: level, limitU: (x, y, z) => uAt(x, y, z) + r + h });
+  const outer = finishPatch(outerRaw, ref, lvOutFn, { smooth: quick ? 2 : 8, h, exact: false, lvMax: levelMax, limitU: (x, y, z) => uAt(x, y, z) + r + h });
   report.outerCells = outerRaw.stats.cells; report.outerQueries = outerRaw.stats.queries; report.outerLoops = outer.loops; report.outerFilled = outer.filled;
   if (report.debug) report.outerRaw = outerRaw;
   mark('buitenkant');

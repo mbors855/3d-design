@@ -10,7 +10,7 @@ import { simplifySoup, simplifyText, SCAN_LIMIT } from './decimate.js';
 import { occlusalAxis, autoLandmarks, undercutMarks, vec } from './analysis.js';
 import { archFrame, defaultFrame, placeTeeth, autoOcclude, contactMap, clearContactMap, framePoint, archPoint } from './setup.js';
 import { FDI_UPPER, FDI_LOWER, formArch } from './teeth.js';
-import { biteRim, gingivaBand, trayHandle, perforations, tissueStops } from './construct.js';
+import { biteRim, gingivaBand, gingivaField, trayHandle, perforations, tissueStops } from './construct.js';
 import { unionSoups, subtractSoups, subtractFirst, loadManifold } from './csg.js';
 import { demoJaw, demoAntagonist, anatomicJaw } from './demo.js';
 import { makeZip } from './zip.js';
@@ -1008,14 +1008,41 @@ function teethWorldSoups(list = S.teeth) { tools?.centric(); return list.map(t =
 // ---------- prothesebasis ----------
 async function buildBasis() {
   ensureWorkableScan();
-  const surface = surfaceFor('basis'), gap = num('basisGap'), wall = num('basisWall'), reverse = $('basisReverse').checked, rep = {};
-  await tick('Basis opbouwen…');
-  const base = await shellAsync(surface, { gap, wall, reverse, checkThin: true }, rep, () => tick());
+  const surface = surfaceFor('basis'), gap = num('basisGap'), wall = num('basisWall'), reverse = $('basisReverse').checked;
+  let rep = {};
   await loadManifold();
-  const parts = [base], notes = [];
+  const notes = [];
   let gingivaFallback = null;
   const teeth = teethWorldSoups();
+  // v71: tandvlees als één gladde huid (iso-oppervlak met variabele dikte: tot de halslijnen, papillen, wortelreliëf,
+  // glad aflopend naar flens, gehemelte en achter de laatste molaar). Eerste keuze; lukt dat niet, dan de oude band.
+  let skin = null, skinRep = {}, skinNote = '';
   if ($('gingivaOn').checked && teeth.length && S.frame) {
+    await tick('Tandvlees opbouwen…');
+    const jf = num('gingivaJuga') / 100, over = num('gingivaOver');
+    const nv = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+    const info = S.teeth.map((t, i) => {
+      t.updateMatrixWorld(true); const e = t.matrixWorld.elements, A = nv([e[4], e[5], e[6]]);
+      let B = nv([e[8], e[9], e[10]]); const ab = vec.dot(A, B); B = nv([B[0] - ab * A[0], B[1] - ab * A[1], B[2] - ab * A[2]]);
+      const M = nv(vec.cross(A, B));
+      return { fdi: t.userData.fdi, c: t.localToWorld(new THREE.Vector3(0, 0, 0)).toArray(), A, M, B, soup: teeth[i].soup };
+    });
+    try {
+      const gf = gingivaField(info, { over, juga: jf });
+      skin = await shellAsync(surface, { gap, wall, reverse, checkThin: true, skin: { ...gf, blend: 2.5, rimFade: 5 } }, skinRep, () => tick());
+      skinNote = `tandvlees rond de elementen tot ${fmt(over)} mm boven de halslijn, met papillen${jf > 0 ? ' en wortelreliëf' : ''}, glad in de basis`;
+      S.debugSkin = skin; S.debugInfo = { teeth: info.map(({ soup, ...r }) => r), frame: { O: S.frame.O, X: S.frame.X, Y: S.frame.Y, N: S.frame.N }, level: gap + wall, over, jf, skinMax: skinRep.skinMax, timing: skinRep.timing };
+    } catch (e) { console.warn('tandvlees als huid', e); skin = null; }
+  }
+  // oude route (band + diep weefselblok): alleen als de huid niet lukt
+  let base = null, parts = null;
+  const bandRoute = async () => {
+    await tick('Basis opbouwen…');
+    rep = {}; base = await shellAsync(surface, { gap, wall, reverse, checkThin: true }, rep, () => tick());
+    parts = [base];
+    if ($('gingivaOn').checked && teeth.length && S.frame) bandParts();
+  };
+  const bandParts = () => {
     const N = S.frame.N, O = S.frame.O;
     const cervical = S.teeth.map(t => vec.dot(vec.sub(t.localToWorld(new THREE.Vector3(0, 0, 0)).toArray(), O), N));
     const top = cervical.reduce((s, v) => s + v, 0) / cervical.length + num('gingivaOver');
@@ -1038,7 +1065,8 @@ async function buildBasis() {
     // terugval als de anatomische vorm bij een grillige opstelling niet sluit: eenvoudiger profiel, altijd gesloten
     gingivaFallback = { index: parts.length - 1, steps: [() => band({ embed: 3, simple: true })] };
     notes.push(`gingiva met festoenen, papillen${jf > 0 ? ' en wortelreliëf' : ''} (rand ${fmt(over)} mm boven de halslijn)`);
-  } else if (!teeth.length) notes.push('zonder tanden (alleen basis)');
+  };
+  if (!teeth.length) notes.push('zonder tanden (alleen basis)');
   const teethTrimmed = teeth;
   if ($('coupling').value === 'monoblock' || !teeth.length) {
     // Samenvoegen en controleren; sluit het resultaat niet (delen raken elkaar), dan stapsgewijs een eenvoudiger
@@ -1046,15 +1074,25 @@ async function buildBasis() {
     // v70: ook losse delen tellen als 'niet goed' (eerst alleen niet-manifold randen). De gingivaband steekt hier nog diep
     // onder de scan (embed); daarom bij de prothese het diepe weefselblok van v69.
     const build = async () => { const r = {}; const u = await unionSoups([...parts, ...teeth.map(t => t.soup)], r); const m = await clipToTissue('basis', u.soup, reverse, { deep: true }); const q = quality(weld(m, 1e-6)); return { m, ok: !r.loose && q.nonManifold === 0 && q.components === 1 }; };
-    let res = await build(), simpler = 0;
-    while (!res.ok && gingivaFallback && simpler < gingivaFallback.steps.length) { parts[gingivaFallback.index] = gingivaFallback.steps[simpler++](); res = await build(); }
-    if (simpler) { const gi = notes.findIndex(n => n.startsWith('gingiva')); if (gi >= 0) notes[gi] = `gingiva met festoenen en papillen (eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling)`; if (!res.ok) notes.push('let op: delen raken elkaar; controleer in de slicer'); }
+    let res = null, viaSkin = false;
+    if (skin) { // huid + elementen; de elementen steken hooguit een paar tiende mm door het pasvlak: dun weefselblok
+      await tick('Elementen en tandvlees samenvoegen…');
+      const r = {}, u = await unionSoups([skin, ...teeth.map(t => t.soup)], r), m = await clipToTissue('basis', u.soup, reverse), q = quality(weld(m, 1e-6));
+      if (!r.loose && q.nonManifold === 0 && q.components === 1) { res = { m, ok: true }; viaSkin = true; rep = skinRep; notes.push(skinNote); }
+      else console.warn('tandvlees als huid: samenvoegen niet schoon', JSON.stringify({ loose: r.loose, nm: q.nonManifold, delen: q.components }));
+    }
+    if (!res) {
+      await bandRoute();
+      res = await build(); let simpler = 0;
+      while (!res.ok && gingivaFallback && simpler < gingivaFallback.steps.length) { parts[gingivaFallback.index] = gingivaFallback.steps[simpler++](); res = await build(); }
+      if (simpler) { const gi = notes.findIndex(n => n.startsWith('gingiva')); if (gi >= 0) notes[gi] = `gingiva met festoenen en papillen (eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling)`; if (!res.ok) notes.push('let op: delen raken elkaar; controleer in de slicer'); }
+    }
     const mono = res.m;
     S.plates.monoblock = { soup: mono, name: 'Monoblock prothese', file: `MONOBLOCK_${safe($('caseName').value)}.stl` };
     delete S.plates.basis;
     // Weergave: basis in gingivakleur, tanden in tandkleur (export blijft één monoblock).
     // weergave: basis (zonder tanden) in gingivakleur, tanden apart in tandkleur — geen samenvallende vlakken
-    let display = mono; if (teeth.length) try { display = await clipToTissue('basis', (await unionSoups(parts)).soup, reverse, { deep: true }); } catch { /* alleen weergave */ }
+    let display = mono; if (viaSkin) display = skin; else if (teeth.length) try { display = await clipToTissue('basis', (await unionSoups(parts)).soup, reverse, { deep: true }); } catch { /* alleen weergave */ }
     showPlate('basis', display, COLORS.plate.basis);
     showPlate('basisTeeth', teeth.length ? concatSoups(teeth.map(t => t.soup)) : null, COLORS.tooth);
     const { text } = plateSummary(mono), fitTxt = fitCheck('basis', surface, mono, gap, 0, rimBandOf(rep));
@@ -1066,8 +1104,9 @@ async function buildBasis() {
       const m = t.matrixWorld.clone().multiply(new THREE.Matrix4().makeScale(s, 1 + g / d.height, s));
       return applyMatrixToSoup(t.userData.soup, m.elements);
     });
-    const u = await unionSoups(parts);
-    const basis = await clipToTissue('basis', await subtractSoups(u.soup, expanded), reverse, { deep: true });
+    let basis;
+    if (skin) { rep = skinRep; notes.push(skinNote); basis = await clipToTissue('basis', await subtractSoups(skin, expanded), reverse); }
+    else { await bandRoute(); const u = await unionSoups(parts); basis = await clipToTissue('basis', await subtractSoups(u.soup, expanded), reverse, { deep: true }); }
     S.plates.basis = { soup: basis, name: 'Prothesebasis met sockets', file: `BASIS_${safe($('caseName').value)}.stl` };
     delete S.plates.monoblock;
     showPlate('basis', basis, COLORS.plate.basis);

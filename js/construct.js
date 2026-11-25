@@ -118,6 +118,132 @@ export function gingivaBand(frame, { width = 9, top = 4, embed = 1.5, form = 'ov
   return sweep(frame, t => { const f = fade(t), tp = topAt(t); return gingivaProfile(width * (0.85 + 0.25 * Math.min(1, Math.abs(t) * 1.5)), -embed, tp - f * Math.max(0, tp + 0.5) * 0.85, width * 0.7, (bulge ? bulge(t) : 0) * (1 - f), flare * (1 - 0.8 * f)); }, { form, tStart: -0.97, tEnd: 0.97, conform, arch, samples });
 }
 
+// v71: tandvlees als hoogteveld boven de kaak (voor de iso-'huid' van de prothese, shell.js: skin). Geeft per punt de
+// gewenste hoogte van het tandvlees (langs frame.N, vanaf frame.O), of −∞ ver van de elementen. Rond elk element tot de
+// halslijn + 'over', tussen buren een papil, en daarbuiten met een helling 'slope' (mm hoogte per mm afstand) omlaag:
+// de huid loopt dan vanzelf glad over in flens, gehemelte en de kam achter de laatste molaar (geen trede, geen richel).
+// Wortelreliëf (juga): buccaal per element een ribbel langs de wortel. Gladde maximum-functie (geen knikken).
+// teeth: [{ c: halspunt (wereld), mesial, buccal: richtingen (wereld), md, bl: maten (mm), a: jugum (mm) }]
+// v71: tandvlees rond de elementen als impliciet veld G(x, y, z) (± afstand in mm, < 0 = binnen). Per element een
+// 'wortelzuil' langs de eigen as: doorsnede = de gemeten halsomtrek van het element + 'bulge', bovenkant = de gingivarand
+// ('over' mm boven de halslijn, naar approximaal oplopend tot de papil), afgeronde rand, naar apicaal iets taps, met
+// wortelreliëf (juga) aan de buccale kant. Tussen buren een smallere 'papilbrug': vult de interdentale ruimte tot de
+// papiltop en laat tussen de wortels een holte. Achter het laatste element een aflopende helling. Alles glad verenigd
+// (log-som-exp, straal k). Het veld blijft lokaal: geen plateaus boven de mondbodem of het gehemelte.
+// teeth: [{ fdi, c (halsmidden), A (as, occlusaal), M (mesiodistaal), B (buccaal), soup (wereld) }]
+// Geeft { field(x, y, z), points() (ankerpunten, o.a. voor de rasteromvang), prepare(dist) (diepte per zuil: tot in de
+// scan, dist(x, y, z) = afstand tot de scan) }.
+const PAPILLA = { 1: 2.4, 2: 2.2, 3: 2.0, 4: 1.8, 5: 1.7, 6: 1.5, 7: 1.4, 8: 1.3 };
+const JUGUM = { 1: 0.7, 2: 0.55, 3: 1.1, 4: 0.5, 5: 0.45, 6: 0.25, 7: 0.15, 8: 0.1 };
+export function gingivaField(teeth, { over = 1, juga = 1, bulge = 0.45, round = 0.7, taper = 0.025, k = 0.5, ramp = 1.0, NA = 48 } = {}) {
+  const TAU = Math.PI * 2;
+  const T = [];
+  for (const t of teeth) {
+    const { c, A, M, B, soup } = t;
+    // halsband: alle punten tussen 0,5 mm onder en 'over + 1' mm boven de halslijn (lokaal: x = M, z = B)
+    const xs = [], zs = []; let sx = 0, sz = 0;
+    for (let i = 0; i < soup.length; i += 3) {
+      const dx = soup[i] - c[0], dy = soup[i + 1] - c[1], dz = soup[i + 2] - c[2], y = dx * A[0] + dy * A[1] + dz * A[2];
+      if (y < -0.5 || y > over + 1) continue;
+      const x = dx * M[0] + dy * M[1] + dz * M[2], z = dx * B[0] + dy * B[1] + dz * B[2];
+      xs.push(x); zs.push(z); sx += x; sz += z;
+    }
+    if (xs.length < 12) continue;
+    const mx = sx / xs.length, mz = sz / xs.length, R = new Float64Array(NA).fill(-1);
+    for (let i = 0; i < xs.length; i++) {
+      const x = xs[i] - mx, z = zs[i] - mz, r = Math.hypot(x, z), s = Math.round((Math.atan2(z, x) / TAU + 1) * NA) % NA;
+      if (r > R[s]) R[s] = r;
+    }
+    const have = []; for (let s = 0; s < NA; s++) if (R[s] >= 0) have.push(s);
+    if (have.length < NA / 4) continue;
+    for (let s = 0; s < NA; s++) if (R[s] < 0) { // gaten: circulair lineair tussen de buren
+      let p = s, q = s, dp = 0, dq = 0; do { p = (p - 1 + NA) % NA; dp++; } while (R[p] < 0); do { q = (q + 1) % NA; dq++; } while (R[q] < 0);
+      R[s] = (R[p] * dq + R[q] * dp) / (dp + dq);
+    }
+    const Rf = new Float64Array(NA);
+    for (let s = 0; s < NA; s++) { let w = 0, v = 0; for (let d = -3; d <= 3; d++) { const g = Math.exp(-d * d / 2); w += g; v += g * R[(s + d + NA) % NA]; } Rf[s] = Math.max(v / w, R[s] - 0.15) + bulge; }
+    const type = t.fdi % 10, P = PAPILLA[type] ?? 1.5, a = (JUGUM[type] ?? 0) * juga;
+    const cx = [c[0] + M[0] * mx + B[0] * mz, c[1] + M[1] * mx + B[1] * mz, c[2] + M[2] * mx + B[2] * mz];
+    T.push({ fdi: t.fdi, c: cx, A, M, B, R: Rf, Rmax: Math.max(...Rf), P, a, depth: 12, dist: null });
+  }
+  const Rat = (t, th) => { const f = (th / TAU + 1) * NA, i = Math.floor(f), w = f - i, i0 = ((i % NA) + NA) % NA; return t.R[i0] * (1 - w) + t.R[(i0 + 1) % NA] * w; };
+  const local = (t, p) => { const dx = p[0] - t.c[0], dy = p[1] - t.c[1], dz = p[2] - t.c[2]; return [dx * t.M[0] + dy * t.M[1] + dz * t.M[2], dx * t.A[0] + dy * t.A[1] + dz * t.A[2], dx * t.B[0] + dy * t.B[1] + dz * t.B[2]]; };
+  // buren en papilbruggen
+  const Br = [];
+  for (let i = 0; i < T.length; i++) for (let j = i + 1; j < T.length; j++) {
+    const I = T[i], J = T[j], li = local(I, J.c), lj = local(J, I.c);
+    const d = Math.hypot(J.c[0] - I.c[0], J.c[1] - I.c[1], J.c[2] - I.c[2]);
+    const ri = Rat(I, Math.atan2(li[2], li[0])), rj = Rat(J, Math.atan2(lj[2], lj[0]));
+    if (d > 1.35 * (ri + rj)) continue;
+    const ax = [I.A[0] + J.A[0], I.A[1] + J.A[1], I.A[2] + J.A[2]], al = Math.hypot(...ax); ax[0] /= al; ax[1] /= al; ax[2] /= al;
+    const dv = [J.c[0] - I.c[0], J.c[1] - I.c[1], J.c[2] - I.c[2]], dh = dv[0] * ax[0] + dv[1] * ax[1] + dv[2] * ax[2];
+    const u = [dv[0] - dh * ax[0], dv[1] - dh * ax[1], dv[2] - dh * ax[2]], L = Math.hypot(...u); if (!(L > 0.5)) continue;
+    u[0] /= L; u[1] /= L; u[2] /= L;
+    const w = [ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]];
+    const bl = t => (Rat(t, Math.PI / 2) + Rat(t, -Math.PI / 2)) / 2;
+    Br.push({ i, j, o: I.c, ax, u, w, L, dh, T: 0.55 * Math.min(bl(I), bl(J)), P: Math.min(I.P, J.P) });
+  }
+  // distale helling: per kwadrant het element met het hoogste nummer, richting weg van zijn mesiale buur
+  const quads = new Map(); T.forEach((t, i) => { const q = Math.floor(t.fdi / 10); (quads.get(q) ?? quads.set(q, []).get(q)).push(i); });
+  for (const list of quads.values()) {
+    if (list.length < 2) continue;
+    list.sort((p, q) => T[p].fdi - T[q].fdi);
+    const D = T[list[list.length - 1]], Mn = T[list[list.length - 2]], l = local(D, [2 * D.c[0] - Mn.c[0], 2 * D.c[1] - Mn.c[1], 2 * D.c[2] - Mn.c[2]]), ll = Math.hypot(l[0], l[2]);
+    if (ll > 1e-6) D.dist = [l[0] / ll, l[2] / ll];
+  }
+  // afgeronde 'doos' in (e = radiaal, t = hoogte t.o.v. de bovenkant): ± afstand
+  const rbox = (e, t) => { const qe = e + round, qt = t + round; return Math.hypot(Math.max(qe, 0), Math.max(qt, 0)) + Math.min(Math.max(qe, qt), 0) - round; };
+  const jug = h => h > over ? 0 : Math.min(1, (over - h) / 3) * Math.exp(-((Math.max(0, -h - 2) / 7) ** 2));
+  const vals = new Float64Array(T.length + Br.length);
+  const field = (x, y, z) => {
+    let n = 0, g0 = Infinity;
+    for (const t of T) {
+      const dx = x - t.c[0], dy = y - t.c[1], dz = z - t.c[2];
+      const h = dx * t.A[0] + dy * t.A[1] + dz * t.A[2], lx = dx * t.M[0] + dy * t.M[1] + dz * t.M[2], lz = dx * t.B[0] + dy * t.B[1] + dz * t.B[2];
+      const r = Math.hypot(lx, lz), below = Math.max(0, -h);
+      // ondergrens zonder hoek: ver weg → overslaan
+      if (r - t.Rmax - (ramp + 0.2) * below - 1.2 > g0 + 8 * k) continue;
+      const cs = r > 1e-9 ? lx / r : 1, sn = r > 1e-9 ? lz / r : 0;
+      let Re = Rat(t, Math.atan2(lz, lx)) * (1 - taper * below);
+      if (t.a > 0 && sn > 0) Re += t.a * jug(h) * sn ** 4;
+      if (t.dist) { const cd = cs * t.dist[0] + sn * t.dist[1]; if (cd > 0) Re += ramp * below * cd * cd; }
+      const c2 = cs * cs, top = over + t.P * c2 * c2;
+      const G = Math.max(rbox(r - Re, h - top), -(h + t.depth));
+      vals[n++] = G; if (G < g0) g0 = G;
+    }
+    for (const b of Br) {
+      const dx = x - b.o[0], dy = y - b.o[1], dz = z - b.o[2];
+      const s = dx * b.u[0] + dy * b.u[1] + dz * b.u[2], wv = dx * b.w[0] + dy * b.w[1] + dz * b.w[2];
+      const h = dx * b.ax[0] + dy * b.ax[1] + dz * b.ax[2] - b.dh * Math.min(1, Math.max(0, s / b.L));
+      let G = rbox(Math.abs(wv) - b.T, h - (over + b.P));
+      G = Math.max(G, -s, s - b.L, -(h + Math.min(T[b.i].depth, T[b.j].depth)));
+      vals[n++] = G; if (G < g0) g0 = G;
+    }
+    if (!n) return Infinity;
+    let sm = 0; for (let i = 0; i < n; i++) { const e = vals[i] - g0; if (e < 10 * k) sm += Math.exp(-e / k); }
+    return g0 - k * Math.log(sm);
+  };
+  const world = (t, lx, h, lz) => [0, 1, 2].map(i => t.c[i] + t.M[i] * lx + t.A[i] * h + t.B[i] * lz);
+  const points = () => {
+    const out = [];
+    for (const t of T) for (let s = 0; s < 24; s++) {
+      const th = s / 24 * TAU, cs = Math.cos(th), sn = Math.sin(th), R = Rat(t, th), c2 = cs * cs;
+      out.push(...world(t, cs * R, over + t.P * c2 * c2, sn * R), ...world(t, cs * (R + t.a), -2, sn * (R + t.a)));
+    }
+    for (const b of Br) for (const sg of [-1, 1]) out.push(...[0, 1, 2].map(i => b.o[i] + b.u[i] * b.L / 2 + b.ax[i] * (over + b.P + b.dh / 2) + b.w[i] * sg * b.T));
+    return Float32Array.from(out);
+  };
+  // diepte per zuil: langs de as omlaag tot (bijna) op de scan, dan nog een stuk erin (wordt later weggesneden)
+  const prepare = (dist) => {
+    for (const t of T) {
+      let d0 = null;
+      for (let s = 0; s <= 40; s += 0.5) { const p = world(t, 0, -s, 0); if (dist(p[0], p[1], p[2]) < 0.6) { d0 = s; break; } }
+      t.depth = d0 === null ? 12 : d0 + 2 + 0.5 * t.Rmax;
+    }
+  };
+  return { field, points, prepare, teeth: T.length, bridges: Br.length };
+}
+
 export function box(center, axes, size, conform = null) {
   const [ax, ay, az] = axes, [sx, sy, sz] = size.map(v => v / 2), c = [];
   for (const i of [-1, 1]) for (const j of [-1, 1]) for (const k of [-1, 1]) c.push([0, 1, 2].map(d => center[d] + ax[d] * i * sx + ay[d] * j * sy + az[d] * k * sz));

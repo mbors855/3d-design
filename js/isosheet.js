@@ -15,7 +15,7 @@ import { pointTriangle2, TriBVH } from './bvh.js';
  * inside(x, y, z, face): false = cel valt buiten de plaat (bij de rand); null = alles.
  * Geeft { positions, indices } (buitenwaarts georiënteerd) en statistiek.
  */
-export function* isoSurface({ ref, level, h, seeds, inside = null, due = () => false, label = 'buitenkant', maxCells = 2_000_000 }) {
+export function* isoSurface({ ref, level, h, seeds, inside = null, due = () => false, label = 'buitenkant', maxCells = 2_000_000, field = null }) {
   const bvh = ref.bvh, q = bvh.point, soup = ref.soup, F = ref.F, N = ref.N;
   const lvOf = typeof level === 'number' ? () => level : level;
   // raster: integer coördinaten rond een oorsprong; sleutel = i + j·K + k·K² (exact in een double)
@@ -52,7 +52,7 @@ export function* isoSurface({ ref, level, h, seeds, inside = null, due = () => f
     if (v !== undefined) { lastAbs = absSd.get(kk); return v; }
     const x = ox + i * h, y = oy + j * h, z = oz + k * h;
     const [sd, face] = sdAt(x, y, z, lastAbs === Infinity ? Infinity : lastAbs + 1.75 * h + 1e-3);
-    v = sd === Infinity ? 1e9 : sd - lvOf(face, q[0], q[1], q[2]);
+    v = sd === Infinity ? 1e9 : field ? field(x, y, z, sd, face) : sd - lvOf(face, q[0], q[1], q[2]); // v71: eigen veld (huid)
     lastAbs = Math.abs(sd);
     val.set(kk, v); footFace.set(kk, face); absSd.set(kk, lastAbs);
     return v;
