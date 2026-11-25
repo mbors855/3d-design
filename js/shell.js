@@ -20,7 +20,7 @@ export async function shellAsync(soup, opts = {}, report = {}, pause = () => new
   return r.value;
 }
 
-function* shellSteps(soup, { gap = 0, wall = 2, reverse = false, draftAngle = null, smoothing = 2, allowNegativeGap = false, maxScale = 1.3, rimSeal = 0, checkThin = false, method = 'iso', round = 0.9, quick = false, trimSpikes = false } = {}, report = {}) {
+function* shellSteps(soup, { gap = 0, wall = 2, reverse = false, draftAngle = null, smoothing = 2, allowNegativeGap = false, maxScale = 1.3, rimSeal = 0, checkThin = false, method = 'iso', round = 0.9, quick = false, trimSpikes = false, hInner = null } = {}, report = {}) {
   let lastPause = performance.now();
   const due = () => { const t = performance.now(); if (t - lastPause < 100) return false; lastPause = t; return true; };
   if (!Number.isFinite(gap) || (gap < 0 && !allowNegativeGap) || !Number.isFinite(wall) || wall <= 0) throw Error('Vul een geldige ruimte en positieve dikte in.');
@@ -77,7 +77,7 @@ function* shellSteps(soup, { gap = 0, wall = 2, reverse = false, draftAngle = nu
     for (let v = 0; v < vCount; v++) if (dr[v] < rimSeal) { const t = dr[v] / rimSeal; gapAt[v] = gap * t * t * (3 - 2 * t); }
     report.rimSeal = rimSeal;
   }
-  if (method === 'iso') return yield* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkThin, due }, report);
+  if (method === 'iso') return yield* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkThin, due, hInner }, report);
   // Oude methode (t/m v68, alleen nog ter vergelijking): elk punt langs zijn gladgemaakte normaal verschuiven.
   report.method = 'normal';
   const inner = new Float32Array(positions.length), outer = new Float32Array(positions.length);
@@ -163,7 +163,7 @@ function* shellSteps(soup, { gap = 0, wall = 2, reverse = false, draftAngle = nu
 // met een afgeronde bovenkant (straal 'round'), met een smalle strook aangesloten op het iso-oppervlak.
 // Afdrukruimte > 0,05 mm (lepel): het pasvlak is ook een iso-oppervlak (op 'ruimte' mm), met een afsluitstrook naar de rand.
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
-function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkThin, due }, report) {
+function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkThin, due, hInner = null }, report) {
   report.method = 'iso';
   const t0 = performance.now(), tm = report.timing = {}; let tl = t0; const mark = (k) => { const t = performance.now(); tm[k] = Math.round(t - tl); tl = t; };
   const P = work.positions, f = work.indices, vCount = P.length / 3, nr = rim.length;
@@ -208,13 +208,18 @@ function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkTh
   const rimSoup = new Float32Array(nr * 9);
   for (let i = 0; i < nr; i++) { const a = i * 3, b = ((i + 1) % nr) * 3; rimSoup.set([As[a], As[a + 1], As[a + 2], As[b], As[b + 1], As[b + 2], As[b], As[b + 1], As[b + 2]], i * 9); }
   const rimBvh = new TriBVH(rimSoup), reach = Math.max(r, seal) + 3 * h + 1.5;
+  // v70: het iso-oppervlak buigt bij de rand als een halve cilinder met straal 'level' om de randlijn. Lag dat verder dan
+  // 'reach' (dik weefselblok, 8 mm), dan telde het als 'binnen' en liep de vulling rond de rand weg (26 s, dan 'te
+  // groot'). Daarom tot 'guard' ook kijken, maar daar alleen punten voorbij de rand (u ≥ 0) afwijzen; binnen blijft binnen.
+  const guard = Math.max(reach, level + 2 * h + 1);
   // u: hoe ver een punt naar buiten ligt t.o.v. het dichtstbijzijnde randpunt (langs de richting naar buiten daar);
-  // > 0 = voorbij de plaatrand. Verder dan 'reach' van de rand: -Infinity (ruim binnen).
+  // > 0 = voorbij de plaatrand. Verder dan 'reach' van de rand en niet voorbij de rand: -Infinity (ruim binnen).
   const uAt = (x, y, z) => {
-    if (rimBvh.closest(x, y, z, reach) === Infinity) return -Infinity;
+    const d = rimBvh.closest(x, y, z, guard); if (d === Infinity) return -Infinity;
     const i = rimBvh.face, j = (i + 1) % nr, cp = rimBvh.point;
     const k = (cp[0] - As[i * 3]) ** 2 + (cp[1] - As[i * 3 + 1]) ** 2 + (cp[2] - As[i * 3 + 2]) ** 2 <= (cp[0] - As[j * 3]) ** 2 + (cp[1] - As[j * 3 + 1]) ** 2 + (cp[2] - As[j * 3 + 2]) ** 2 ? i : j;
-    const o = k * 3; return (x - cp[0]) * rt[o] + (y - cp[1]) * rt[o + 1] + (z - cp[2]) * rt[o + 2];
+    const o = k * 3, u = (x - cp[0]) * rt[o] + (y - cp[1]) * rt[o + 1] + (z - cp[2]) * rt[o + 2];
+    return d > reach && u < 0 ? -Infinity : u;
   };
   // startpunten: langs de normaal omhoog tot de gevraagde afstand, op een deel van de scanpunten
   const seedsFor = (lvFn) => {
@@ -307,10 +312,13 @@ function* isoShell({ work, normals, rim, gapAt, gap, wall, round, quick, checkTh
     if (due()) yield 'afdrukruimte';
     // afsluitzone: het iso-oppervlak stopt 'seal' mm voor de rand; een schuine strook loopt van daar naar de scanrand
     const lvIn = gap, lvInFn = () => lvIn;
-    const sealU = Math.max(0.75 * seal, 2 * h); // gemeten in het raakvlak; langs een schuine wand is de weg naar de rand langer
+    // v70: fijner raster dan de buitenkant. Koorden van 0,9 mm (lepel) zakten op bolle delen tot 0,1 mm te dicht naar
+    // de scan; met ± 0,45 mm is dat ± 0,02 mm (99%).
+    const hi = hInner ?? (quick ? h : clamp(gap / 4.5, 0.3, h));
+    const sealU = Math.max(0.75 * seal, 2 * hi); // gemeten in het raakvlak; langs een schuine wand is de weg naar de rand langer
     const insideIn = (x, y, z) => uAt(x, y, z) <= -sealU;
-    const innerRaw = yield* isoSurface({ ref, level: lvIn, h, seeds: seedsFor(lvInFn), inside: insideIn, due, label: 'afdrukruimte' });
-    inner = finishPatch(innerRaw, ref, lvInFn, { smooth: 6, h, exact: true, lvMax: gap, limitU: (x, y, z) => uAt(x, y, z) + sealU - h });
+    const innerRaw = yield* isoSurface({ ref, level: lvIn, h: hi, seeds: seedsFor(lvInFn), inside: insideIn, due, label: 'afdrukruimte' });
+    inner = finishPatch(innerRaw, ref, lvInFn, { smooth: 6, h: hi, exact: true, lvMax: gap, limitU: (x, y, z) => uAt(x, y, z) + sealU - hi });
     report.innerCells = innerRaw.stats.cells; report.innerLoops = inner.loops; report.innerFilled = inner.filled;
   }
   mark('afdrukruimte');

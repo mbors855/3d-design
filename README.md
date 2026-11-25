@@ -18,6 +18,45 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 70: lepel op een betande scan, nauwkeuriger afdrukruimte, schoon weefselblok
+
+**Lepel op een betande scan liep vast.** Na ±25 s kwam de melding *"Het oppervlak voor de buitenkant werd te groot"*. De automatische omtrek volgens de anatomie (plooi, kam) is op een scan met tanden onbruikbaar: hij liep als een smalle strook langs de tanden.
+- **Lepel → Rand** werkt nu zoals bij de beetplaat. Bij *Automatisch* houdt de scan op vóór de plooi (intraorale scan, strak bijgesneden model), en dan volgt de lepel de scanrand, eventueel met *Afstand tot scanrand* erbinnen. Anders blijft het de anatomische omtrek, 2 mm korter dan de plooi. Er is ook een vaste keuze *Langs de scanrand* of *Volgens de anatomie*.
+- Dunne punten aan de scanrand worden weggelaten, net als bij de beetplaat. De melding vermeldt hoeveel.
+- Op de nagebootste betande scan (onder- en bovenkaak) is de lepel in ± 7 s klaar, gesloten, met handvat en weefselstops.
+
+**Afdrukruimte nauwkeuriger.** Het pasvlak van de lepel (iso-oppervlak op 2 mm) wordt op een fijner raster gemaakt dan de buitenkant: ± 0,45 mm in plaats van 0,9 mm. De rechte stukjes tussen de punten zakten op bolle delen tot 0,1 mm te dicht naar de scan.
+
+**Weefselblok (wegsnijden wat door het pasvlak steekt) bij beetplaat met wal of handvat.** Dit blok werd nog met de oude normaal-offset gemaakt, 8 mm dik. Aan de weefselkant van een smalle kam of tussen tanden sneed het zichzelf duizenden keren. Op een betande scan met handvat en 2 mm afstand gaf dat een kapotte plaat: **8.602 niet-manifold randen en 50.727 overlappingen**.
+- Nu een dun blok (2,5 mm) als iso-oppervlak: gesloten en (bijna) zonder overlappingen. Dezelfde plaat is nu gesloten, met 63 overlappingen; die zitten al in de ruisende scan zelf.
+- De prothese houdt voorlopig het diepe blok van v69. De gingivaband steekt daar nog tot 9 mm onder de scan (zie *Bekend*).
+- Een dik iso-blok (8 mm) liep rond de plaatrand weg: 26 s rekenen en dan 'te groot'. Dat is opgelost: punten voorbij de rand tellen nu altijd als buiten.
+
+| Gemeten (⚡ Alles automatisch in Chrome) | v69 | v70 |
+|---|---|---|
+| Lepel op betande scan (onder / boven) | faalt na ± 25 s | 7 s, gesloten, 1 deel |
+| Lepel 2 mm, te dicht bij de scan (99 %): demo-boven / demo-onder / betand | 0,072 / 0,098 / 0,055 mm | 0,018 / 0,025 / 0,019 mm |
+| Beetplaat betand + handvat + 2 mm: niet-manifold randen / overlappingen | 8.602 / 50.727 | 0 / 63 (ruis van de scan) |
+| Beetplaat demo-boven met wal + handvat: overlappingen | 65 | 4 |
+| Beetplaat demo-onder met wal: overlappingen | 14 | 11 |
+
+**Ook:** `clipToOutline` in `js/csg.js` houdt een onderdeel binnen een omtrek (prisma langs de insteekas, met Manifold). Hij is getest maar nog niet in gebruik; hij is bedoeld voor de nieuwe gingiva.
+
+**Bekend / volgende stap (prothese):** het anatomische tandvlees valt op de demokaken nog steeds terug op het eenvoudige profiel. De oorzaken zijn gevonden:
+1. De gemeten kamboog heeft knikjes met een kromtestraal tot 2 mm. Daarop snijdt de 15 mm brede band zichzelf.
+2. Alleen de onderste twee punten van het profiel worden op de scan gelegd. Daardoor hangt de band tot 9 mm in het weefsel en is het diepe weefselblok nodig, met ± 100–250 overlappingen in de prothese.
+3. De band stopt in de laatste molaar, want de boog eindigt daar. Daardoor ontstaat de trede erachter.
+
+Een eerste oplossing (gladde boog, band binnen de omtrek, flank op de scan, dun weefselblok) gaf wel een schone prothese: gesloten, 0 overlappingen, anatomisch tandvlees. Maar linguaal kwam er een richel te staan. Daarom zit die nog niet in deze versie.
+
+Bij een lepel op de demo-onderkaak blijven achteraan, in een smalle trog bij de achterrand, enkele tientallen overlapjes. Dat was in v69 ook al zo.
+
+**Getest:** 71 automatische tests, waarvan 4 nieuw: lepel op betande scan langs de scanrand, afdrukruimte fijner raster, dun weefselblok (+ 8 mm loopt niet weg), `clipToOutline` met een inham. In Chrome is ⚡ Alles automatisch voor 12 gevallen doorlopen, zonder JS-fouten:
+- beetplaat op de demo-boven- en demo-onderkaak, met en zonder wal/handvat;
+- beetplaat op een betande scan, ook met handvat en 2 mm afstand;
+- lepel op de demo-boven- en demo-onderkaak en op de betande onder- en bovenkaak;
+- prothese op de demo-boven- en demo-onderkaak.
+
 ### Nieuw in 69: gladde buitenkant zonder 'scherven', ook op een betande scan
 
 **Het probleem (foto van de eerste beetplaat in 3Shape 3D Viewer).** De buitenkant werd gemaakt door elk scanpunt 2 mm langs zijn eigen normaal te verschuiven. Op een betande intraorale scan (ruis van een paar honderdste mm, piepkleine driehoekjes, smalle ruimtes tussen de tanden) wijzen die normalen alle kanten op: de buitenkant klapte om en stak door zichzelf heen. Gemeten op een nagebootste betande scan van 317.000 facetten: **482.816 paren driehoeken die elkaar snijden** (168.603 facetten), 9 % van de buitenkant minder dan ⅓ van de dikte van de scan.
@@ -30,7 +69,7 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 - **Kartelige scanrand gladgestreken:** randpunten schuiven in het raakvlak naar een gladde lijn (hooguit 0,3 mm, zonder dat een driehoekje omklapt). Zo krijgt de wand geen ribbels. Die laatste 0,5 mm telt niet mee in de pasvlakcontrole; dat staat erbij in de melding.
 - **Dunne uitsteeksels** aan de rand (smaller dan 2 mm, bv. een punt die het bijsnijden liet staan) worden weggelaten: die gaven breekbare splinters en overlappingen.
 - Met *Rand ligt op de scan* (afsluitzone) loopt het pasvlak in een schuine strook van de scanrand naar de afdrukruimte.
-- Het weefselblok (wegsnijden wat door het pasvlak steekt bij wal/handvat/tanden) gebruikt nog de oude offset: `method: 'normal'`.
+- Het weefselblok (wegsnijden wat door het pasvlak steekt bij wal/handvat/tanden) gebruikte hier nog de oude offset (`method: 'normal'`); in v70 vervangen.
 
 **Controle (stap Controle).** Nieuwe regel per plaat: zelfdoorsnijding (`js/meshcheck.js`). Snijdt de scan zichzelf al (ruis, dubbel gescande stukken), dan erft het pasvlak dat; de melding zegt hoeveel daarvan al in de scan zat. 'Gesloten' met alleen platte driehoekjes van het samenvoegen gaf eerst de verwarrende melding '0 niet-manifold randen'; dat is nu gewoon *gesloten ✓*.
 

@@ -693,17 +693,20 @@ function surfaceFor(kind) {
 function scanForPlates() { return S.wax && S.wax.soup === S.scan && S.waxSoup ? S.waxSoup : S.scan; }
 // Alles wat door het pasvlak heen steekt (wortels van tanden, onderkant van wal/gingivaband/handvat) wegsnijden met
 // een 'weefselblok' waarvan één zijde exact het scanoppervlak is (iets ruimer dan de omtrek). Zo blijft het pasvlak gelijk aan de scan.
-async function clipToTissue(kind, soup, reverse) {
+async function clipToTissue(kind, soup, reverse, { deep = false } = {}) {
   const s = S.contours.get(kind); if (!s?.closed) return soup;
   await loadManifold();
   const src = scanForPlates();
   // v68: de plaat wordt één keer omgezet; een weefselblok wordt pas gemaakt als de vorige poging mislukte
-  const makers = [[1.5, 8], [1, 4], [0.6, 2.5]].map(([margin, wall], i) => async () => {
+  // v70: dun weefselblok (2,5 mm) via het iso-oppervlak. Het oude blok (normaal-offset, 8 mm) sneed zichzelf aan de
+  // weefselkant van een smalle kam of tussen tanden duizenden keren; aftrekken gaf dan een kapotte plaat (betande scan
+  // met handvat: 8.602 niet-manifold randen). Beetwal en handvat liggen op de scan (conform): 2,5 mm is ruim genoeg.
+  // deep: het oude, diepe blok, voor de prothese (de gingivaband steekt daar nog tot 9 mm onder de scan)
+  const makers = (deep ? [[1.5, 8, 'normal'], [1, 4, 'normal'], [0.6, 2.5, 'normal']] : [[1.5, 2.5, 'iso'], [1, 1.5, 'iso'], [0.6, 2.5, 'normal']]).map(([margin, wall, method], i) => async () => {
     if (i) await tick('Weefselblok opnieuw proberen…');
     const wide = s.edge ? trimByEdge(src, { inset: 0, splitAt: S.designedFrom ?? null }).soup : trimByOutline(src, s.points, s.axis, { margin }).soup;
-    // 0,005 mm in het weefsel: geen samenvallende vlakken. Weefselblok nog met de normaal-offset (v68): de onderkant
-    // hoeft niet glad te zijn, en een iso-oppervlak op 8 mm aan de weefselkant bestaat bij een smalle kam niet binnen de rand.
-    return shellAsync(wide, { gap: 0.005, wall, reverse: !reverse, method: 'normal' }, {}, () => tick());
+    // 0,005 mm in het weefsel: geen samenvallende vlakken
+    return shellAsync(wide, { gap: 0.005, wall, reverse: !reverse, method, quick: method === 'iso' }, {}, () => tick());
   });
   const r = await subtractFirst(soup, makers);
   if (r.used >= 0) return r.soup;
@@ -786,7 +789,8 @@ async function buildLepel() {
   const surface = surfaceFor('lepel'), gap = num('lepelGap'), wall = num('lepelWall'), reverse = $('lepelReverse').checked;
   const rep = {};
   await tick(gap > 0 ? `Lepel opbouwen (${fmt(gap, 2)} mm afdrukruimte)…` : 'Lepel opbouwen…');
-  let soup = await shellAsync(surface, { gap, wall, reverse, checkThin: true }, rep, () => tick());
+  const edge = S.contours.get('lepel')?.edge;
+  let soup = await shellAsync(surface, { gap, wall, reverse, checkThin: true, trimSpikes: !!edge }, rep, () => tick());
   const shellSoup = soup; // pasvlak meten zonder weefselstops (die raken de scan bewust)
   const extras = [], notes = [];
   if ($('lepelHandle').checked && needFrame('Handvat')) { extras.push(trayHandle(S.frame, { base: gap, height: num('handleHeight'), width: num('handleWidth'), conform: conformTo(gap + wall * 0.5) })); notes.push('handvat'); }
@@ -801,7 +805,8 @@ async function buildLepel() {
   const { text } = plateSummary(soup), fitTxt = fitCheck('lepel', surface, shellSoup, gap, 0, rimBandOf(rep)) + waxNote();
   S.plates.lepel = { soup, name: 'Individuele lepel', file: `LEPEL_${safe($('caseName').value)}.stl` };
   showPlate('lepel', soup, COLORS.plate.lepel);
-  result('lepelResult', `Lepel klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)}${rep.holesFilled ? ` · ${rep.holesFilled} gaten in de scan gedicht` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('lepel', 'Lepel-STL')}`);
+  const edgeTxt = edge ? ` · rand langs de scanrand${edge.inset ? ` (${fmt(edge.inset)} mm erbinnen)` : ''}${rep.openedFaces ? ` · ${int(rep.openedFaces)} facetten van dunne punten aan de scanrand weggelaten` : ''}` : '';
+  result('lepelResult', `Lepel klaar: ${text}${edgeTxt}${fitTxt}${thinNote(rep)}${reducedNote(rep)}${rep.holesFilled ? ` · ${rep.holesFilled} gaten in de scan gedicht` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('lepel', 'Lepel-STL')}`);
   status('Lepel gegenereerd.'); updateDone();
 }
 $('lepelBuild').onclick = () => busy('Lepel berekenen…', buildLepel);
@@ -855,10 +860,10 @@ async function buildBeet() {
 }
 $('beetBuild').onclick = () => busy('Beetplaat berekenen…', buildBeet);
 // Rand-keuze gewijzigd: rand opnieuw bepalen en een bestaande beetplaat direct opnieuw maken
-for (const id of ['beetEdge', 'beetEdgeInset']) $(id).addEventListener('change', () => {
-  if (!S.scan || !S.contours.get('beetplaat')?.closed) return;
-  const had = !!S.plates.beetplaat;
-  busy('Rand beetplaat bepalen…', async () => { ensureFrame(); autoContour('beetplaat'); if (had) { await tick('Beetplaat opnieuw opbouwen…'); await buildBeet(); } });
+for (const [kind, ids] of Object.entries({ beetplaat: ['beetEdge', 'beetEdgeInset'], lepel: ['lepelEdge', 'lepelEdgeInset'] })) for (const id of ids) $(id).addEventListener('change', () => {
+  if (!S.scan || !S.contours.get(kind)?.closed) return;
+  const had = !!S.plates[kind], label = kind === 'lepel' ? 'Lepel' : 'Beetplaat';
+  busy(`Rand ${kind} bepalen…`, async () => { ensureFrame(); autoContour(kind); if (had) { await tick(`${label} opnieuw opbouwen…`); await (kind === 'lepel' ? buildLepel : buildBeet)(); } });
 });
 
 // ---------- tandopstelling ----------
@@ -1038,7 +1043,9 @@ async function buildBasis() {
   if ($('coupling').value === 'monoblock' || !teeth.length) {
     // Samenvoegen en controleren; sluit het resultaat niet (delen raken elkaar), dan stapsgewijs een eenvoudiger
     // gingivaprofiel (minder flens, zonder wortelreliëf) tot het wel sluit.
-    const build = async () => { const r = {}; const u = await unionSoups([...parts, ...teeth.map(t => t.soup)], r); const m = await clipToTissue('basis', u.soup, reverse); return { m, ok: !r.loose && quality(weld(m, 1e-6)).nonManifold === 0 }; };
+    // v70: ook losse delen tellen als 'niet goed' (eerst alleen niet-manifold randen). De gingivaband steekt hier nog diep
+    // onder de scan (embed); daarom bij de prothese het diepe weefselblok van v69.
+    const build = async () => { const r = {}; const u = await unionSoups([...parts, ...teeth.map(t => t.soup)], r); const m = await clipToTissue('basis', u.soup, reverse, { deep: true }); const q = quality(weld(m, 1e-6)); return { m, ok: !r.loose && q.nonManifold === 0 && q.components === 1 }; };
     let res = await build(), simpler = 0;
     while (!res.ok && gingivaFallback && simpler < gingivaFallback.steps.length) { parts[gingivaFallback.index] = gingivaFallback.steps[simpler++](); res = await build(); }
     if (simpler) { const gi = notes.findIndex(n => n.startsWith('gingiva')); if (gi >= 0) notes[gi] = `gingiva met festoenen en papillen (eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling)`; if (!res.ok) notes.push('let op: delen raken elkaar; controleer in de slicer'); }
@@ -1047,7 +1054,7 @@ async function buildBasis() {
     delete S.plates.basis;
     // Weergave: basis in gingivakleur, tanden in tandkleur (export blijft één monoblock).
     // weergave: basis (zonder tanden) in gingivakleur, tanden apart in tandkleur — geen samenvallende vlakken
-    let display = mono; if (teeth.length) try { display = await clipToTissue('basis', (await unionSoups(parts)).soup, reverse); } catch { /* alleen weergave */ }
+    let display = mono; if (teeth.length) try { display = await clipToTissue('basis', (await unionSoups(parts)).soup, reverse, { deep: true }); } catch { /* alleen weergave */ }
     showPlate('basis', display, COLORS.plate.basis);
     showPlate('basisTeeth', teeth.length ? concatSoups(teeth.map(t => t.soup)) : null, COLORS.tooth);
     const { text } = plateSummary(mono), fitTxt = fitCheck('basis', surface, mono, gap, 0, rimBandOf(rep));
@@ -1060,7 +1067,7 @@ async function buildBasis() {
       return applyMatrixToSoup(t.userData.soup, m.elements);
     });
     const u = await unionSoups(parts);
-    const basis = await clipToTissue('basis', await subtractSoups(u.soup, expanded), reverse);
+    const basis = await clipToTissue('basis', await subtractSoups(u.soup, expanded), reverse, { deep: true });
     S.plates.basis = { soup: basis, name: 'Prothesebasis met sockets', file: `BASIS_${safe($('caseName').value)}.stl` };
     delete S.plates.monoblock;
     showPlate('basis', basis, COLORS.plate.basis);
@@ -1373,23 +1380,27 @@ function scanEndsAtEdge(an) {
   const share = side => ok.filter(p => p[side]?.edge).length / ok.length;
   return share('buccal') > 0.5 && (an.frame.jaw === 'upper' || share('lingual') > 0.5);
 }
+// v70: ook de lepel kan langs de scanrand (betande intraorale scan: de anatomische omtrek is daar onbruikbaar)
+const EDGE_IDS = { beetplaat: ['beetEdge', 'beetEdgeInset'], lepel: ['lepelEdge', 'lepelEdgeInset'] };
+const KIND_NAME = { lepel: 'lepel', beetplaat: 'beetplaat', basis: 'basis' };
+function edgeMode(kind) { const ids = EDGE_IDS[kind]; return ids ? $(ids[0]).value : 'anatomy'; }
 function edgeWanted(kind) {
-  if (kind !== 'beetplaat') return false;
-  const m = $('beetEdge').value; if (m === 'edge') return true; if (m !== 'auto') return false;
+  if (!EDGE_IDS[kind]) return false;
+  const m = edgeMode(kind); if (m === 'edge') return true; if (m !== 'auto') return false;
   if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
   return scanEndsAtEdge(S.anatomy.an);
 }
 // Rand langs de scanrand (v68): de plaat loopt precies tot de rand van de scan (of 'Afstand tot scanrand' erbinnen).
 function edgeContour(kind) {
-  const inset = Math.max(0, num('beetEdgeInset') || 0), axis = contourAxis();
+  const inset = Math.max(0, num(EDGE_IDS[kind][1]) || 0), axis = contourAxis();
   const r = trimByEdge(scanForPlates(), { inset, splitAt: S.designedFrom ?? null });
   // de getoonde lijn ligt 0,25 mm buiten de scanrand: sleep je later een stuk, dan blijft de rest exact de scanrand
   S.contours.setEdge(kind, editableOutline(r.outline, axis, { push: inset > 0 ? 0 : 0.25 }), axis, inset);
   if (S.mode === 'contour') setMode('orbit');
   delete S.plates[kind];
   updateContourUI(); refreshScanColors(); refreshOverlay();
-  const why = $('beetEdge').value === 'auto' ? 'de plooi is niet gescand, dus ' : '';
-  status(`Rand langs de scanrand: ${why}de beetplaat loopt ${inset > 0 ? `tot ${fmt(inset)} mm binnen` : 'precies tot'} de rand van de scan (plaatrand = scanrand). Sleep de lijn om een stuk aan te passen.`);
+  const why = edgeMode(kind) === 'auto' ? 'de plooi is niet gescand, dus ' : '';
+  status(`Rand langs de scanrand: ${why}de ${KIND_NAME[kind]} loopt ${inset > 0 ? `tot ${fmt(inset)} mm binnen` : 'precies tot'} de rand van de scan (${kind === 'lepel' ? 'lepelrand' : 'plaatrand'} = scanrand). Sleep de lijn om een stuk aan te passen.`);
 }
 function autoContour(kind) {
   if (!CONTOUR_KINDS.includes(kind)) return;
@@ -1724,8 +1735,8 @@ async function prepareScan({ forKind = null } = {}) {
     await tick('Anatomie bijwerken…');
     a = runAnatomy();
   }
-  const edgeRule = forKind === 'beetplaat' && $('beetEdge').value !== 'anatomy';
-  if ($('prepComplete').checked && num('prepExtend') > 0 && edgeRule) lines.push('<b>Aanvullen</b>: niet gedaan, de beetplaat loopt tot de echte scanrand (Beetplaat → Rand)');
+  const edgeRule = !!EDGE_IDS[forKind] && edgeMode(forKind) !== 'anatomy';
+  if ($('prepComplete').checked && num('prepExtend') > 0 && edgeRule) lines.push(`<b>Aanvullen</b>: niet gedaan, de ${KIND_NAME[forKind]} loopt tot de echte scanrand (${forKind === 'lepel' ? 'Lepel' : 'Beetplaat'} → Rand)`);
   else if ($('prepComplete').checked && num('prepExtend') > 0) {
     const st = a.an.stats;
     if (st.edge > st.profiles * 0.3) {
