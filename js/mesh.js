@@ -493,13 +493,14 @@ export function pointToSurfaceDistances(points, soup, { maxDist = 6, closest = n
 
 // Pasvlak-nauwkeurigheid: afstand van de scanpunten (binnen de omtrek) tot de plaat, vergeleken met de ingestelde ruimte.
 // rimSeal (mm): punten in de afsluitzone langs de rand (afstand loopt daar bewust naar 0) tellen niet mee voor de afdrukruimte.
-export function fitReport(surfaceSoup, plateSoup, gap = 0, { skipFrom = null, sample = 4000, rimSeal = 0 } = {}) {
+export function fitReport(surfaceSoup, plateSoup, gap = 0, { skipFrom = null, sample = 4000, rimSeal = 0, rimBand = 0 } = {}) {
   const n = (skipFrom ?? surfaceSoup.length / 9) * 3, stride = Math.max(1, Math.floor(n / sample));
   let zone = null;
-  if (rimSeal > 0 && gap > 0) {
+  // rimBand (v69): smalle strook langs de rand die bewust is gladgestreken (kartelige scanrand) telt niet mee
+  if ((rimSeal > 0 && gap > 0) || rimBand > 0) {
     const m = weld(surfaceSoup, 1e-5), { loops } = boundaryLoops(m);
     // de afsluitzone beïnvloedt de afstand tot ongeveer 'gap' verder naar binnen (schuine binnenkant)
-    const reach = rimSeal + gap;
+    const reach = Math.max(rimSeal > 0 && gap > 0 ? rimSeal + gap : 0, rimBand);
     if (loops.length) { const lens = loops.map(l => loopLength(m, l)), dr = rimDistances(m, [loops[lens.indexOf(Math.max(...lens))]], reach); zone = v => dr[m.indices[v]] < reach; }
   }
   const pts = []; for (let v = 0; v < n; v += stride) if (!zone || !zone(v)) pts.push(surfaceSoup[v * 3], surfaceSoup[v * 3 + 1], surfaceSoup[v * 3 + 2]);

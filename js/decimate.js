@@ -262,7 +262,7 @@ export function simplifyMesh(mesh, { tolerance = 0.01, maxFaces = Infinity, maxT
     if (d > maxDev) maxDev = d; sumDev += d; cntDev++;
   }
   return {
-    mesh: { positions, indices }, faceMap,
+    mesh: { positions, indices }, faceMap, remap,
     report: { before, after: nfo, vertices: nv, removedPoints: cntDev, maxDeviation: maxDev, meanDeviation: cntDev ? sumDev / cntDev : 0, tolerance: eps, collapses, rejectedError, rejectedShape, rejectedLink },
   };
 }

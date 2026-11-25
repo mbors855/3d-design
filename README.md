@@ -18,6 +18,37 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 69: gladde buitenkant zonder 'scherven', ook op een betande scan
+
+**Het probleem (foto van de eerste beetplaat in 3Shape 3D Viewer).** De buitenkant werd gemaakt door elk scanpunt 2 mm langs zijn eigen normaal te verschuiven. Op een betande intraorale scan (ruis van een paar honderdste mm, piepkleine driehoekjes, smalle ruimtes tussen de tanden) wijzen die normalen alle kanten op: de buitenkant klapte om en stak door zichzelf heen. Gemeten op een nagebootste betande scan van 317.000 facetten: **482.816 paren driehoeken die elkaar snijden** (168.603 facetten), 9 % van de buitenkant minder dan ⅓ van de dikte van de scan.
+
+**Nieuwe opbouw van de schaal (`js/shell.js`, `js/isosheet.js`, `js/offset.js`).**
+- **Buitenkant = iso-oppervlak.** Alle punten liggen op precies *ruimte + dikte* mm van de scan (Minkowski-offset). Het oppervlak wordt rechtstreeks uit het afstandsveld gehaald ('surface nets' op een dun raster van 0,4 mm, alleen de cellen waar het oppervlak doorheen loopt): het kan niet omklappen, overbrugt smalle spleten tussen tanden vanzelf en is op bolle delen rond. Daarna Taubin-glad en terug op de afstand gezet.
+- **Wanddikte overal gelijk:** gemeten 1,99–2,18 mm bij 2 mm ingesteld (mediaan 2,000). De oude 'hoekcompensatie' is niet meer nodig.
+- **Pasvlak blijft exact de scan** (ruimte 0: beetplaat, basis). Met afdrukruimte (lepel, of beetplaat met afstand) is het pasvlak óók een iso-oppervlak op precies die afstand: op de betande scan nergens meer dan 0,03 mm te dicht (99 %), waar de oude methode de scan op plekken raakte (2,0 mm te dicht).
+- **Afgeronde plaatrand:** rechte wand vanaf de scanrand, bovenkant met een straal van 0,9 mm (kleiner bij een scherpe punt van de omtrek). De rand ligt op het iso-oppervlak zelf, dus ook op een schuine vestibulumwand sluit de afronding netjes aan.
+- **Kartelige scanrand gladgestreken:** randpunten schuiven in het raakvlak naar een gladde lijn (hooguit 0,3 mm, zonder dat een driehoekje omklapt). Zo krijgt de wand geen ribbels. Die laatste 0,5 mm telt niet mee in de pasvlakcontrole; dat staat erbij in de melding.
+- **Dunne uitsteeksels** aan de rand (smaller dan 2 mm, bv. een punt die het bijsnijden liet staan) worden weggelaten: die gaven breekbare splinters en overlappingen.
+- Met *Rand ligt op de scan* (afsluitzone) loopt het pasvlak in een schuine strook van de scanrand naar de afdrukruimte.
+- Het weefselblok (wegsnijden wat door het pasvlak steekt bij wal/handvat/tanden) gebruikt nog de oude offset: `method: 'normal'`.
+
+**Controle (stap Controle).** Nieuwe regel per plaat: zelfdoorsnijding (`js/meshcheck.js`). Snijdt de scan zichzelf al (ruis, dubbel gescande stukken), dan erft het pasvlak dat; de melding zegt hoeveel daarvan al in de scan zat. 'Gesloten' met alleen platte driehoekjes van het samenvoegen gaf eerst de verwarrende melding '0 niet-manifold randen'; dat is nu gewoon *gesloten ✓*.
+
+| Nagebootste betande scan, 317.000 facetten | v68 | v69 |
+|---|---|---|
+| Beetplaat 0 mm: elkaar snijdende driehoekparen | 482.816 | 8.900 (= de ruis van de scan zelf: 8.885) |
+| Wanddikte (ingesteld 2 mm) | 0,09 … ±4 mm, 9 % te dun | 1,99 … 2,18 mm |
+| Lepel 2 mm: te dicht bij de scan (99 %) | 2,0 mm (raakt) | 0,03 mm |
+| Lepel 2 mm: zelfdoorsnijding | duizenden | 0 |
+| Tandeloze demokaak, beetplaat: zelfdoorsnijding | 2.271 / 1.290 (onder / boven) | 0 / 12 |
+| Rekentijd schaal (Node) | 1,7 s | ±4 s |
+
+**Testscan:** `js/demo-dentate.js` maakt een betande onderkaak (tandvlees + anatomische kronen, met Manifold verenigd, met scannerruis); de tests gebruiken hem.
+
+**Bekend:** bij een heel scherpe hoek in de omtrek (bv. de rechte achterrand van de demo-bovenkaak) kunnen nog enkele tientallen piepkleine overlapjes ontstaan; de controle meldt het. De onderste 0,5 mm van de wand volgt de echte (kartelige) scanrand.
+
+**Getest:** 67 automatische tests (4 nieuw: zelfdoorsnijding-check, betande beetplaat 0 mm, betande lepel 2 mm met en zonder afsluitzone, plaatrand). In Chrome: ⚡ Alles automatisch voor beetplaat (betande scan en demo-onderkaak), lepel (demo-bovenkaak) en prothese (demo-onderkaak), zonder JS-fouten.
+
 ### Nieuw in 68: niet meer vastlopen, en plaatrand = scanrand
 
 **Vastlopen opgelost.** Met *Afstand tot scan* > 0 mat het programma de ruimte punt voor punt met een trage rasterzoeker. Op een betande scan van 300.000 facetten met was stond de pagina zo bijna 3 minuten stil ("Deze pagina reageert niet").
@@ -42,7 +73,7 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 - Waarschuwing als de buitenkant van de plaat in smalle ruimtes (tussen tanden) te dicht bij de scan komt.
 - Afstand langs het oppervlak (afsluitzone, afstand tot scanrand) met de driehoeksupdate van fast marching. Daarbij is ook een afrondingsfout opgelost waardoor punten werden overgeslagen.
 
-**Bekend:** op een scan mét tanden schiet de buitenkant van de plaat in smalle ruimtes tussen de elementen nog over de scan heen. Het programma toont dan de waarschuwing hierboven. Een afstand > 0 mm geeft op tanden geen nette afdrukruimte. Een echte offset voor tanden (volumetrisch) staat op de lijst.
+**Bekend (opgelost in 69):** op een scan mét tanden schoot de buitenkant van de plaat in smalle ruimtes tussen de elementen over de scan heen.
 
 **Getest:** 63 automatische tests (waarvan 9 nieuw, o.a. BVH tegen alle driehoeken, randentabel tegen de v67-versie, rand langs de scanrand, afsluitzone, was overnemen, splinters). Daarnaast in Chrome een betande intraorale scan (520.000 → 300.000 facetten) met afstand 0 en 2 mm, een betand model, en de demo-onder- en bovenkaak.
 
