@@ -1,0 +1,129 @@
+# Orderoverzicht (orders.html, orders-ui.js, orders.js)
+Orderoverzicht · Digital Denture CAD ⟫ Order overview · Digital Denture CAD ⟫ Auftragsübersicht · Digital Denture CAD
+Orderoverzicht ⟫ Order overview ⟫ Auftragsübersicht
+Terug naar het ontwerpprogramma ⟫ Back to the design program ⟫ Zurück zum Konstruktionsprogramm
+Naar CAD ⟫ To CAD ⟫ Zum CAD
+3Shape-export inlezen ⟫ Read a 3Shape export ⟫ 3Shape-Export einlesen
+Kies de ⟫ Choose the ⟫ Wählen Sie die
+(bijv. van TransferNow) of losse bestanden (.3ox, .inf, .stl, .pts). Alles blijft op dit apparaat: er wordt niets geüpload. ⟫ (e.g. from TransferNow) or separate files (.3ox, .inf, .stl, .pts). Everything stays on this device: nothing is uploaded. ⟫ (z. B. von TransferNow) oder einzelne Dateien (.3ox, .inf, .stl, .pts). Alles bleibt auf diesem Gerät: Es wird nichts hochgeladen.
+ZIP kiezen ⟫ Choose ZIP ⟫ ZIP wählen
+Bestanden kiezen ⟫ Choose files ⟫ Dateien wählen
+Of sleep een ZIP of bestanden hierheen. ⟫ Or drag a ZIP or files here. ⟫ Oder ziehen Sie eine ZIP oder Dateien hierher.
+Alles ⟫ All ⟫ Alle
+Fouten ⟫ Errors ⟫ Fehler
+Let op ⟫ Attention ⟫ Achtung
+let op ⟫ attention ⟫ Achtung
+Levering verstreken ⟫ Delivery overdue ⟫ Liefertermin überschritten
+levering verstreken ⟫ delivery overdue ⟫ Liefertermin überschritten
+Zoek patiënt of ordernummer… ⟫ Search patient or order number… ⟫ Patient oder Auftragsnummer suchen…
+Kopieer als lijst ⟫ Copy as list ⟫ Als Liste kopieren
+Ander pakket ⟫ Other package ⟫ Anderes Paket
+Printsimulatie ⟫ Print simulation ⟫ Drucksimulation
+Printer ⟫ Printer ⟫ Drucker
+standaard printer ⟫ default printer ⟫ Standarddrucker
+Oriëntatie lepels/beetplaten ⟫ Orientation of trays/baseplates ⟫ Ausrichtung Löffel/Basisplatten
+Automatisch (kleinste footprint) ⟫ Automatic (smallest footprint) ⟫ Automatisch (kleinste Grundfläche)
+Plat ⟫ Flat ⟫ Flach
+Rechtop op de hielen ⟫ Upright on the heels ⟫ Aufrecht auf den Fersen
+Staand op de rand ⟫ Standing on the border ⟫ Stehend auf dem Rand
+Schuin (~45°) ⟫ Angled (~45°) ⟫ Schräg (~45°)
+Laagdikte (mm) ⟫ Layer thickness (mm) ⟫ Schichtdicke (mm)
+Seconden per laag ⟫ Seconds per layer ⟫ Sekunden pro Schicht
+Hars €/liter ⟫ Resin €/litre ⟫ Harz €/Liter
+Alleen levering t/m ⟫ Only delivery up to ⟫ Nur Lieferung bis
+Schatting: footprint op basis van de omhullende doos, supports als +35% hars, tijd = lagen × gemiddelde laagtijd van de printer. Gebruik je slicer voor de definitieve indeling. ⟫ Estimate: footprint based on the bounding box, supports as +35% resin, time = layers × the printer's average layer time. Use your slicer for the final layout. ⟫ Schätzung: Grundfläche anhand des umschließenden Quaders, Stützen als +35 % Harz, Zeit = Schichten × durchschnittliche Schichtzeit des Druckers. Verwenden Sie Ihren Slicer für die endgültige Anordnung.
+Naamgeving ⟫ Naming ⟫ Benennung
+Huidige naam ⟫ Current name ⟫ Aktueller Name
+Voorstel ⟫ Suggestion ⟫ Vorschlag
+Map kiezen ⟫ Choose folder ⟫ Ordner wählen
+Alle namen volgen dezelfde opbouw. ⟫ All names follow the same structure. ⟫ Alle Namen folgen demselben Aufbau.
+Analyseren… ⟫ Analysing… ⟫ Wird analysiert…
+Bestand niet meer beschikbaar. ⟫ File no longer available. ⟫ Datei nicht mehr verfügbar.
+Doorgeven aan CAD mislukt: ⟫ Handing over to CAD failed: ⟫ Übergabe an CAD fehlgeschlagen:
+Doorgeven aan CAD mislukt: {0} ⟫ Handing over to CAD failed: {0} ⟫ Übergabe an CAD fehlgeschlagen: {0}
+Er worden {0} verschillende naamopbouwen gebruikt ({1}). Eén vaste opbouw maakt automatisch koppelen en zoeken betrouwbaarder: ordernummer · patiënt · werkstuk · kaak. ⟫ {0} different naming structures are used ({1}). One fixed structure makes automatic linking and searching more reliable: order number · patient · workpiece · jaw. ⟫ Es werden {0} verschiedene Namensaufbauten verwendet ({1}). Ein fester Aufbau macht automatisches Verknüpfen und Suchen zuverlässiger: Auftragsnummer · Patient · Werkstück · Kiefer.
+Geen 3Shape-bestanden (.stl/.3ox/.inf/.pts) gevonden. ⟫ No 3Shape files (.stl/.3ox/.inf/.pts) found. ⟫ Keine 3Shape-Dateien (.stl/.3ox/.inf/.pts) gefunden.
+Kopiëren niet toegestaan in deze browser. ⟫ Copying is not allowed in this browser. ⟫ Kopieren ist in diesem Browser nicht erlaubt.
+Lijst gekopieerd. ⟫ List copied. ⟫ Liste kopiert.
+Niets gevonden met dit filter. ⟫ Nothing found with this filter. ⟫ Mit diesem Filter nichts gefunden.
+Opgeslagen: {0} → {1} ⟫ Saved: {0} → {1} ⟫ Gespeichert: {0} → {1}
+Oriëntatie: {0} ⟫ Orientation: {0} ⟫ Ausrichtung: {0}
+Plaat {0} ⟫ Plate {0} ⟫ Platte {0}
+STL's ⟫ STLs ⟫ STLs
+ZIP kon niet gelezen worden: ⟫ The ZIP could not be read: ⟫ Die ZIP konnte nicht gelesen werden:
+ZIP kon niet gelezen worden: {0} ⟫ The ZIP could not be read: {0} ⟫ Die ZIP konnte nicht gelesen werden: {0}
+ZIP-inhoud lezen… ⟫ Reading ZIP contents… ⟫ ZIP-Inhalt wird gelesen…
+door {0} ⟫ by {0} ⟫ von {0}
+element {0} ⟫ tooth {0} ⟫ Zahn {0}
+fragment ⟫ fragment ⟫ Fragment
+geen leverdatum ⟫ no delivery date ⟫ kein Liefertermin
+gesloten ⟫ closed ⟫ geschlossen
+open ⟫ open ⟫ offen
+levering {0} ⟫ delivery {0} ⟫ Lieferung {0}
+levering {0} verstreken ⟫ delivery {0} overdue ⟫ Lieferung {0} überschritten
+map Downloads ⟫ Downloads folder ⟫ Ordner Downloads
+ml hars (incl. supports) ⟫ ml resin (incl. supports) ⟫ ml Harz (inkl. Stützen)
+orders met "let op" ⟫ orders with "attention" ⟫ Aufträge mit „Achtung“
+orders met fout ⟫ orders with errors ⟫ Aufträge mit Fehler
+patiënt ⟫ patient ⟫ Patient
+patiënten ⟫ patients ⟫ Patienten
+{0} curvebestand(en) ⟫ {0} curve file(s) ⟫ {0} Kurvendatei(en)
+{0} ml · {1} mm · {2} △ {3} ⟫ {0} ml · {1} mm · {2} △ {3} ⟫ {0} ml · {1} mm · {2} △ {3}
+{0} past niet: {1} ⟫ {0} does not fit: {1} ⟫ {0} passt nicht: {1}
+{0} st · {1} min · {2} mm hoog · {3} ml ⟫ {0} pcs · {1} min · {2} mm high · {3} ml ⟫ {0} Stk. · {1} min · {2} mm hoch · {3} ml
+{0} × {1} × {2} mm · {3} ml · {4} driehoeken · {5} · slepen = draaien, knijpen = zoomen ⟫ {0} × {1} × {2} mm · {3} ml · {4} triangles · {5} · drag = rotate, pinch = zoom ⟫ {0} × {1} × {2} mm · {3} ml · {4} Dreiecke · {5} · ziehen = drehen, Pinch = zoomen
+Nieuwe plaat hierop ⟫ New plate on this ⟫ Neue Platte hierauf
+3ox onleesbaar: ⟫ 3ox unreadable: ⟫ 3ox unlesbar:
+3ox onleesbaar: {0} ⟫ 3ox unreadable: {0} ⟫ 3ox unlesbar: {0}
+Alleen {0} aanwezig ⟫ Only {0} present ⟫ Nur {0} vorhanden
+Beetplaat met wal ⟫ Baseplate with rim ⟫ Basisplatte mit Wall
+Geen ordernummer (4 cijfers) in de naam. ⟫ No order number (4 digits) in the name. ⟫ Keine Auftragsnummer (4 Ziffern) im Namen.
+Kaak (OK/BK) niet te bepalen uit naam of 3Shape-gegevens. ⟫ Jaw (LJ/UJ) cannot be determined from the name or 3Shape data. ⟫ Kiefer (UK/OK) lässt sich aus Name oder 3Shape-Daten nicht bestimmen.
+Kaak vastgeplakt aan de naam ("{0}"): gebruik een spatie. ⟫ Jaw stuck to the name ("{0}"): use a space. ⟫ Kiefer am Namen angehängt („{0}“): Verwenden Sie ein Leerzeichen.
+Kleur {0} staat alleen in de naam, niet in het 3Shape-kleurveld. ⟫ Shade {0} is only in the name, not in the 3Shape shade field. ⟫ Farbe {0} steht nur im Namen, nicht im 3Shape-Farbfeld.
+Los STL-bestand zonder 3Shape-order (3ox/inf). ⟫ Separate STL file without a 3Shape order (3ox/inf). ⟫ Einzelne STL-Datei ohne 3Shape-Auftrag (3ox/inf).
+Naam zegt {0}, maar 3Shape-element {1} hoort bij de {2}. ⟫ The name says {0}, but 3Shape tooth {1} belongs to the {2}. ⟫ Der Name sagt {0}, aber 3Shape-Zahn {1} gehört zum {2}.
+Onbekend ⟫ Unknown ⟫ Unbekannt
+Order zonder STL-bestand. ⟫ Order without an STL file. ⟫ Auftrag ohne STL-Datei.
+Ordernummer {0} gebruikt voor verschillende namen: {1}. ⟫ Order number {0} used for different names: {1}. ⟫ Auftragsnummer {0} für verschiedene Namen verwendet: {1}.
+Patiënt {0} komt voor met meerdere ordernummers: {1}. ⟫ Patient {0} appears with several order numbers: {1}. ⟫ Patient {0} kommt mit mehreren Auftragsnummern vor: {1}.
+STL ontbreekt: {0}. ⟫ STL missing: {0}. ⟫ STL fehlt: {0}.
+Spelling patiëntnaam wisselt bij order {0}: {1}. ⟫ Spelling of the patient name varies in order {0}: {1}. ⟫ Schreibweise des Patientennamens wechselt bei Auftrag {0}: {1}.
+Tijdelijke kronen ⟫ Temporary crowns ⟫ Provisorische Kronen
+Tijdelijke kronen staan op materiaal "Denture base". Klopt het materiaal? ⟫ Temporary crowns are set to the material "Denture base". Is the material correct? ⟫ Provisorische Kronen stehen auf dem Material „Denture base“. Stimmt das Material?
+kaak eerst ⟫ jaw first ⟫ Kiefer zuerst
+los bestand ⟫ separate file ⟫ einzelne Datei
+los bestand (ACTA) ⟫ separate file (ACTA) ⟫ einzelne Datei (ACTA)
+patiënt eerst ⟫ patient first ⟫ Patient zuerst
+product eerst ⟫ product first ⟫ Produkt zuerst
+schuin {0}° ⟫ angled {0}° ⟫ schräg {0}°
+{0} elementen in 3ox, {1} inf-bestanden. ⟫ {0} teeth in 3ox, {1} inf files. ⟫ {0} Zähne in 3ox, {1} inf-Dateien.
+{0}: bestaat uit {1} losse delen. ⟫ {0}: consists of {1} loose parts. ⟫ {0}: besteht aus {1} losen Teilen.
+{0}: hoog werkstuk ({1} mm), let op printhoogte. ⟫ {0}: tall workpiece ({1} mm), mind the print height. ⟫ {0}: hohes Werkstück ({1} mm), Druckhöhe beachten.
+{0}: los mini-fragment ({1} driehoeken, {2} mm³). Waarschijnlijk restant/label: niet meeprinten of controleren. ⟫ {0}: loose mini fragment ({1} triangles, {2} mm³). Probably a leftover/label: do not print it, or check it. ⟫ {0}: loses Mini-Fragment ({1} Dreiecke, {2} mm³). Wahrscheinlich Rest/Etikett: nicht mitdrucken oder prüfen.
+{0}: niet gesloten ({1} open randen, {2} niet-manifold). ⟫ {0}: not closed ({1} open edges, {2} non-manifold). ⟫ {0}: nicht geschlossen ({1} offene Kanten, {2} nicht-manifold).
+ordernr ⟫ order_no ⟫ Auftragsnr
+order ⟫ order ⟫ Auftrag
+werkstuk ⟫ workpiece ⟫ Werkstück
+kaak ⟫ jaw ⟫ Kiefer
+elementen ⟫ teeth ⟫ Zähne
+levering ⟫ delivery ⟫ Lieferung
+bron ⟫ source ⟫ Quelle
+niveau ⟫ level ⟫ Stufe
+melding ⟫ message ⟫ Meldung
+ja ⟫ yes ⟫ ja
+nee ⟫ no ⟫ nein
+fout ⟫ error ⟫ Fehler
+Open in CAD en haal de weefselzijde eruit ⟫ Open in CAD and extract the tissue side ⟫ In CAD öffnen und die Gewebeseite herauslösen
+Bekijk in 3D ⟫ View in 3D ⟫ In 3D ansehen
+Download ⟫ Download ⟫ Herunterladen
+Indeling printplaat {0} ⟫ Layout of build plate {0} ⟫ Anordnung Bauplattform {0}
+orders ⟫ orders ⟫ Aufträge
+printplaat · ca. ⟫ build plate · approx. ⟫ Bauplattform · ca.
+printplaten · ca. ⟫ build plates · approx. ⟫ Bauplattformen · ca.
+{0} u {1} min ⟫ {0} h {1} min ⟫ {0} Std. {1} Min.
+printtijd · ⟫ print time · ⟫ Druckzeit ·
+hars (≈ €{0}) ⟫ resin (≈ €{0}) ⟫ Harz (≈ {0} €)
+# kaakafkortingen: Nederlands BK = bovenkaak, OK = onderkaak; Engels UJ/LJ; Duits OK = Oberkiefer, UK = Unterkiefer
+OK ⟫ LJ ⟫ UK
+BK ⟫ UJ ⟫ OK

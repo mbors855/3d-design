@@ -1,0 +1,191 @@
+# Rekenmodules en hulpmiddelen: foutmeldingen en statusregels
+Onbekende AES-sterkte. ⟫ Unknown AES strength. ⟫ Unbekannte AES-Stärke.
+Onjuist wachtwoord voor de versleutelde ZIP. ⟫ Incorrect password for the encrypted ZIP. ⟫ Falsches Passwort für die verschlüsselte ZIP.
+Versleutelde ZIP vraagt WebCrypto (https of localhost). ⟫ An encrypted ZIP requires WebCrypto (https or localhost). ⟫ Eine verschlüsselte ZIP erfordert WebCrypto (https oder localhost).
+Distale kampunten niet gevonden. Zet de punten handmatig. ⟫ Distal ridge points not found. Set the points manually. ⟫ Distale Kammpunkte nicht gefunden. Setzen Sie die Punkte manuell.
+Kamlijn niet automatisch herkend. Zet de punten handmatig. ⟫ Ridge line not recognised automatically. Set the points manually. ⟫ Kammlinie nicht automatisch erkannt. Setzen Sie die Punkte manuell.
+, Pound-lijn ⟫ , Pound line ⟫ , Pound-Linie
+Afsluiting (post-dam / pad) ⟫ Seal (post dam / pad) ⟫ Abdichtung (Post-Dam / Polster)
+Beetplaat: tot in de plooi (0,5 mm marge), achter tot de A-lijn / ⅔ retromolaire pad ⟫ Baseplate: into the vestibular fold (0.5 mm margin), posteriorly to the vibrating line / ⅔ retromolar pad ⟫ Basisplatte: bis in die Umschlagfalte (0,5 mm Rand), hinten bis zur A-Linie / ⅔ retromolares Polster
+Drukdragend (primair) ⟫ Stress-bearing (primary) ⟫ Druckaufnehmend (primär)
+Drukdragend (secundair) ⟫ Stress-bearing (secondary) ⟫ Druckaufnehmend (sekundär)
+Individuele lepel: 2 mm korter dan de plooi (ruimte voor randvormen), BK 2,5 mm voorbij de A-lijn, OK over de hele retromolaire pad ⟫ Custom tray: 2 mm short of the vestibular fold (space for border moulding), UJ 2.5 mm beyond the vibrating line, LJ over the whole retromolar pad ⟫ Individueller Löffel: 2 mm kürzer als die Umschlagfalte (Platz für die Randgestaltung), OK 2,5 mm über die A-Linie hinaus, UK über das ganze retromolare Polster
+Linguale plooi niet gevonden. Teken de omtrek met de hand. ⟫ Lingual fold not found. Draw the outline by hand. ⟫ Linguale Umschlagfalte nicht gefunden. Zeichnen Sie den Umriss von Hand.
+Ontlasten ⟫ Relief ⟫ Entlasten
+Prothesebasis: tot de functionele plooidiepte, achter tot de A-lijn / ⅔ retromolaire pad ⟫ Denture base: to the functional fold depth, posteriorly to the vibrating line / ⅔ retromolar pad ⟫ Prothesenbasis: bis zur funktionellen Umschlagfaltentiefe, hinten bis zur A-Linie / ⅔ retromolares Polster
+Randgebied (plooi) ⟫ Border area (fold) ⟫ Randgebiet (Umschlagfalte)
+Te weinig vestibulum gevonden. Controleer de referentiepunten (stap Analyse) of teken de omtrek met de hand. ⟫ Too little vestibule found. Check the reference points (Analysis step) or draw the outline by hand. ⟫ Zu wenig Vestibulum gefunden. Prüfen Sie die Referenzpunkte (Schritt Analyse) oder zeichnen Sie den Umriss von Hand.
+plooi niet volledig gescand: scanrand gebruikt ⟫ vestibular fold not fully scanned: scan edge used ⟫ Umschlagfalte nicht vollständig gescannt: Scanrand verwendet
+retromolaire pad ⟫ retromolar pad ⟫ retromolares Polster
+retromolaire pad niet gevonden: achter 4 mm lager dan voor ⟫ retromolar pad not found: posteriorly 4 mm lower than anteriorly ⟫ retromolares Polster nicht gefunden: hinten 4 mm tiefer als vorn
+{0} mm labiaal van de kam ⟫ {0} mm labial of the ridge ⟫ {0} mm labial vom Kamm
+{0} mm voorbij het einde van de kam ({1}): kantelgevaar, weglaten of kleiner kiezen ⟫ {0} mm beyond the end of the ridge ({1}): risk of tipping, omit or choose smaller ⟫ {0} mm jenseits des Kammendes ({1}): Kippgefahr, weglassen oder kleiner wählen
+{0} mm {1} van de kam ⟫ {0} mm {1} of the ridge ⟫ {0} mm {1} vom Kamm
+{0} mm {1} van de kam (max {2}) ⟫ {0} mm {1} of the ridge (max {2}) ⟫ {0} mm {1} vom Kamm (max. {2})
+buccaal ⟫ buccal ⟫ bukkal
+linguaal ⟫ lingual ⟫ lingual
+labiaal ⟫ labial ⟫ labial
+palatinaal ⟫ palatal ⟫ palatinal
+De omtrek kruist zichzelf of is te klein. Versleep of verwijder het punt waar de lijn kruist. ⟫ The outline crosses itself or is too small. Drag or delete the point where the line crosses. ⟫ Der Umriss kreuzt sich selbst oder ist zu klein. Verschieben oder löschen Sie den Punkt, an dem die Linie kreuzt.
+Deze omtrek kan niet worden opgedeeld. Verplaats punten die vrijwel op één lijn liggen. ⟫ This outline cannot be subdivided. Move points that lie almost on one line. ⟫ Dieser Umriss lässt sich nicht aufteilen. Verschieben Sie Punkte, die fast auf einer Linie liegen.
+Een omtrek heeft minimaal drie punten. ⟫ An outline needs at least three points. ⟫ Ein Umriss braucht mindestens drei Punkte.
+Geen scanoppervlak binnen deze omtrek. ⟫ No scan surface inside this outline. ⟫ Keine Scanoberfläche innerhalb dieses Umrisses.
+Maximaal 512 punten. ⟫ Maximum 512 points. ⟫ Höchstens 512 Punkte.
+Omtrek is al gesloten. Versleep punten, of gebruik Terug of Wis. ⟫ The outline is already closed. Drag points, or use Back or Clear. ⟫ Der Umriss ist bereits geschlossen. Verschieben Sie Punkte oder verwenden Sie Zurück oder Löschen.
+Sluit eerst de omtrek. ⟫ First close the outline. ⟫ Schließen Sie zuerst den Umriss.
+Zet minimaal drie punten om de omtrek te sluiten. ⟫ Set at least three points to close the outline. ⟫ Setzen Sie mindestens drei Punkte, um den Umriss zu schließen.
+Geometrie is niet gesloten/manifold ({0}) ⟫ Geometry is not closed/manifold ({0}) ⟫ Geometrie ist nicht geschlossen/manifold ({0})
+plaat niet manifold: {0} ⟫ plate not manifold: {0} ⟫ Platte nicht manifold: {0}
+{0} → {1} facetten · afwijking max. {2} mm, gemiddeld {3} mm · rand onveranderd · alleen originele scanpunten ⟫ {0} → {1} faces · deviation max. {2} mm, average {3} mm · edge unchanged · original scan points only ⟫ {0} → {1} Facetten · Abweichung max. {2} mm, Mittel {3} mm · Rand unverändert · nur originale Scanpunkte
+Het oppervlak voor de buitenkant werd te groot. Kies een kleinere omtrek of dikte. ⟫ The surface for the outside became too large. Choose a smaller outline or thickness. ⟫ Die Fläche für die Außenseite wurde zu groß. Wählen Sie einen kleineren Umriss oder eine geringere Stärke.
+Geen tandenbibliotheek gevonden (verwacht: <set>/upperjaw/1.eoff … en metadata/<set>/upperjaw.xml). ⟫ No tooth library found (expected: <set>/upperjaw/1.eoff … and metadata/<set>/upperjaw.xml). ⟫ Keine Zahnbibliothek gefunden (erwartet: <set>/upperjaw/1.eoff … und metadata/<set>/upperjaw.xml).
+Bibliotheek "{0}" niet gevonden op dit apparaat. ⟫ Library "{0}" not found on this device. ⟫ Bibliothek „{0}“ auf diesem Gerät nicht gefunden.
+Geen IndexedDB beschikbaar. ⟫ No IndexedDB available. ⟫ Keine IndexedDB verfügbar.
+Geen tandenbibliotheek gevonden in de gekozen bestanden. ⟫ No tooth library found in the chosen files. ⟫ Keine Zahnbibliothek in den gewählten Dateien gefunden.
+Kroon heeft geen open hals. ⟫ Crown has no open neck. ⟫ Krone hat keinen offenen Hals.
+Opslaan afgebroken (opslag vol?). ⟫ Saving aborted (storage full?). ⟫ Speichern abgebrochen (Speicher voll?).
+{0} uitpakken… ⟫ Unpacking {0}… ⟫ {0} wird entpackt…
+Geen OFF-bestand. ⟫ Not an OFF file. ⟫ Keine OFF-Datei.
+OFF BINARY: onbekende indeling. ⟫ OFF BINARY: unknown format. ⟫ OFF BINARY: unbekanntes Format.
+Vlakmaken ⟫ Flatten ⟫ Abflachen
+, ideale opstelling ⟫ , ideal setup ⟫ , ideale Aufstellung
+Alle elementen aangesloten (approximale contacten), middellijn behouden. ⟫ All teeth closed up (proximal contacts), midline kept. ⟫ Alle Zähne aufgeschlossen (Approximalkontakte), Mittellinie beibehalten.
+Bewegingscontacten ({0}; {1} standen): {2} ⟫ Movement contacts ({0}; {1} positions): {2} ⟫ Bewegungskontakte ({0}; {1} Stellungen): {2}
+Bewegingscontacten ({0}; {1} standen): ⟫ Movement contacts ({0}; {1} positions): ⟫ Bewegungskontakte ({0}; {1} Stellungen):
+alleen centrisch ⟫ centric only ⟫ nur zentrisch
+Bewegingscontacten berekenen… ⟫ Calculating movement contacts… ⟫ Bewegungskontakte werden berechnet…
+Bibliotheek geïmporteerd ({0} sets). Kies hem bij Tandvormen en tik op Stel tanden op. ⟫ Library imported ({0} sets). Choose it under Tooth shapes and tap Set up teeth. ⟫ Bibliothek importiert ({0} Sets). Wählen Sie sie unter Zahnformen und tippen Sie auf Zähne aufstellen.
+Bibliotheek importeren… ⟫ Importing library… ⟫ Bibliothek wird importiert…
+Contact (kleinste afstand): {0} ⟫ Contact (smallest distance): {0} ⟫ Kontakt (kleinster Abstand): {0}
+Contact (kleinste afstand): ⟫ Contact (smallest distance): ⟫ Kontakt (kleinster Abstand):
+De rij is weer aangesloten. ⟫ The row has been closed up again. ⟫ Die Reihe ist wieder aufgeschlossen.
+Deze ZIP is versleuteld. Vul het wachtwoord in en kies het bestand opnieuw. ⟫ This ZIP is encrypted. Enter the password and choose the file again. ⟫ Diese ZIP ist verschlüsselt. Geben Sie das Passwort ein und wählen Sie die Datei erneut.
+Draaien met de vinger: sleep horizontaal over een element. ⟫ Rotating with the finger: drag horizontally over a tooth. ⟫ Drehen mit dem Finger: waagerecht über einen Zahn ziehen.
+Draaien: sleep horizontaal. ⟫ Rotate: drag horizontally. ⟫ Drehen: waagerecht ziehen.
+Eerst referentiepunten zetten. ⟫ Set the reference points first. ⟫ Zuerst Referenzpunkte setzen.
+Element {0} zit niet in deze bibliotheek. ⟫ Tooth {0} is not in this library. ⟫ Zahn {0} ist nicht in dieser Bibliothek.
+Gedraaid. ⟫ Rotated. ⟫ Gedreht.
+Geen interferenties gevonden: niets ingeslepen. ⟫ No interferences found: nothing ground in. ⟫ Keine Interferenzen gefunden: nichts eingeschliffen.
+Geïmporteerde bibliotheken ⟫ Imported libraries ⟫ Importierte Bibliotheken
+Handmatig inslijpen: sleep over een element. Buiten de elementen draai je het beeld. ⟫ Manual grinding: drag over a tooth. Outside the teeth you rotate the view. ⟫ Manuelles Einschleifen: über einen Zahn ziehen. Außerhalb der Zähne drehen Sie die Ansicht.
+Handmatig plaatsen klaar. ⟫ Manual placement done. ⟫ Manuelles Platzieren fertig.
+Handmatig: tik op de kam waar element {0} moet komen. ⟫ Manual: tap on the ridge where tooth {0} should go. ⟫ Manuell: Tippen Sie auf den Kamm, wo Zahn {0} stehen soll.
+Ingeslepen: {0} punten aangepast, diepste interferentie {1} mm ({2} standen){3}. ⟫ Ground in: {0} points adjusted, deepest interference {1} mm ({2} positions){3}. ⟫ Eingeschliffen: {0} Punkte angepasst, tiefste Interferenz {1} mm ({2} Stellungen){3}.
+Inslijpen (centrisch + bewegingen)… ⟫ Grinding (centric + movements)… ⟫ Einschleifen (zentrisch + Bewegungen)…
+Inslijpen (centrisch)… ⟫ Grinding (centric)… ⟫ Einschleifen (zentrisch)…
+Kies een element in dezelfde kaak. ⟫ Choose a tooth in the same jaw. ⟫ Wählen Sie einen Zahn im selben Kiefer.
+Kleur: magenta/rood = penetratie · oranje = contact · geel < 0,05 · groen < 0,15 · blauw < 0,35 mm. ⟫ Colour: magenta/red = penetration · orange = contact · yellow < 0.05 · green < 0.15 · blue < 0.35 mm. ⟫ Farbe: magenta/rot = Durchdringung · orange = Kontakt · gelb < 0,05 · grün < 0,15 · blau < 0,35 mm.
+Naast elkaar zetten uit. ⟫ Place side by side off. ⟫ Nebeneinander setzen aus.
+Naast elkaar zetten: tik eerst het element dat moet verhuizen, dan de buur. ⟫ Place side by side: first tap the tooth that should move, then its neighbour. ⟫ Nebeneinander setzen: Tippen Sie zuerst den Zahn an, der umziehen soll, dann den Nachbarn.
+Niets geselecteerd · tik een element (selectie per element, groep of kaak), houd vast en sleep om te verplaatsen. ⟫ Nothing selected · tap a tooth (selection per tooth, group or jaw), hold and drag to move. ⟫ Nichts ausgewählt · tippen Sie einen Zahn an (Auswahl pro Zahn, Gruppe oder Kiefer), halten und ziehen zum Verschieben.
+Niets in te slijpen: kies elementen met een tegenpartij. ⟫ Nothing to grind: choose teeth with an opposing partner. ⟫ Nichts einzuschleifen: Wählen Sie Zähne mit Gegenzahn.
+Niets om terug te zetten. ⟫ Nothing to undo. ⟫ Nichts rückgängig zu machen.
+Nodig: tegenkaak-elementen of een antagonistscan. ⟫ Required: opposing jaw teeth or an antagonist scan. ⟫ Erforderlich: Gegenkieferzähne oder ein Antagonistenscan.
+Nog geen bibliotheek op dit apparaat. ⟫ No library on this device yet. ⟫ Noch keine Bibliothek auf diesem Gerät.
+Onjuist wachtwoord. Controleer het wachtwoord van de ZIP. ⟫ Incorrect password. Check the ZIP password. ⟫ Falsches Passwort. Prüfen Sie das Passwort der ZIP.
+Plaats eerst elementen in de werkkaak. ⟫ First place teeth in the working jaw. ⟫ Platzieren Sie zuerst Zähne im Arbeitskiefer.
+Rood/magenta = interferentie ergens in de beweging; oranje = contact. ⟫ Red/magenta = interference somewhere in the movement; orange = contact. ⟫ Rot/magenta = Interferenz irgendwo in der Bewegung; orange = Kontakt.
+Selecteer eerst een of meer elementen. ⟫ First select one or more teeth. ⟫ Wählen Sie zuerst einen oder mehrere Zähne.
+Slepen verplaatst weer. ⟫ Dragging moves again. ⟫ Ziehen verschiebt wieder.
+Slepen: de rij past zich aan. Laat los om te plaatsen. ⟫ Dragging: the row adapts. Release to place. ⟫ Ziehen: Die Reihe passt sich an. Loslassen zum Platzieren.
+Stel eerst de tegenkaak op. ⟫ First set up the opposing jaw. ⟫ Stellen Sie zuerst den Gegenkiefer auf.
+Stel eerst de werkkaak op. ⟫ First set up the working jaw. ⟫ Stellen Sie zuerst den Arbeitskiefer auf.
+Tegenkaak ⟫ Opposing jaw ⟫ Gegenkiefer
+Tegenkaak opstellen… ⟫ Setting up opposing jaw… ⟫ Gegenkiefer wird aufgestellt…
+Tik nu het element waarnaast {0} moet staan (tik op de mesiale of distale helft). ⟫ Now tap the tooth next to which {0} should go (tap the mesial or distal half). ⟫ Tippen Sie jetzt den Zahn an, neben dem {0} stehen soll (auf die mesiale oder distale Hälfte tippen).
+Tik op de kam of op de opstelling. ⟫ Tap on the ridge or on the setup. ⟫ Tippen Sie auf den Kamm oder auf die Aufstellung.
+Verplaatst. ⟫ Moved. ⟫ Verschoben.
+Verwijderen… ⟫ Deleting… ⟫ Wird gelöscht…
+Werkkaak ⟫ Working jaw ⟫ Arbeitskiefer
+Zeker? ⟫ Sure? ⟫ Sicher?
+Zet eerst de referentiepunten (stap Analyse). ⟫ First set the reference points (Analysis step). ⟫ Setzen Sie zuerst die Referenzpunkte (Schritt Analyse).
+Element {0} ⟫ Tooth {0} ⟫ Zahn {0}
+{0} elementen ({1}) ⟫ {0} teeth ({1}) ⟫ {0} Zähne ({1})
+{0} ({1} elementen{2}) ⟫ {0} ({1} teeth{2}) ⟫ {0} ({1} Zähne{2})
+{0} elementen in de tegenkaak opgesteld en in occlusie gebracht. ⟫ {0} teeth set up in the opposing jaw and brought into occlusion. ⟫ {0} Zähne im Gegenkiefer aufgestellt und in Okklusion gebracht.
+{0} sets gevonden, opslaan op dit apparaat… ⟫ {0} sets found, saving on this device… ⟫ {0} Sets gefunden, werden auf diesem Gerät gespeichert…
+{0} sets geïmporteerd: {1}. Ze staan alleen op dit apparaat. ⟫ {0} sets imported: {1}. They are stored on this device only. ⟫ {0} Sets importiert: {1}. Sie liegen nur auf diesem Gerät.
+{0} staat nu naast {1}. ⟫ {0} is now next to {1}. ⟫ {0} steht jetzt neben {1}.
+{0} · grootte {1} / {2} / {3} % (breedte / hoogte / dikte) ⟫ {0} · size {1} / {2} / {3} % (width / height / thickness) ⟫ {0} · Größe {1} / {2} / {3} % (Breite / Höhe / Stärke)
+· BK {0} · OK {1} · {2} MB ⟫ · UJ {0} · LJ {1} · {2} MB ⟫ · OK {0} · UK {1} · {2} MB
+· {0} punten op het maximum van {1} mm: pas daar de opstelling of geleiding aan ⟫ · {0} points at the maximum of {1} mm: adjust the setup or guidance there ⟫ · {0} Punkte am Maximum von {1} mm: passen Sie dort Aufstellung oder Führung an
+Stop ⟫ Stop ⟫ Stopp
+Lingualiseerd ⟫ Lingualised ⟫ Lingualisiert
+Monoplane ⟫ Monoplane ⟫ Monoplan
+Referentiepunten geven geen bruikbare boog. Controleer rechts, midden en links. ⟫ The reference points do not give a usable arch. Check right, middle and left. ⟫ Die Referenzpunkte ergeben keinen brauchbaren Bogen. Prüfen Sie rechts, Mitte und links.
+De buitenkant kon niet worden opgebouwd (geen rand gevonden). ⟫ The outside could not be built (no edge found). ⟫ Die Außenseite konnte nicht aufgebaut werden (kein Rand gefunden).
+De rand kon na het weghalen van dunne uitsteeksels niet worden gevolgd. Teken de omtrek iets ruimer. ⟫ The edge could not be followed after removing thin protrusions. Draw the outline a little wider. ⟫ Der Rand ließ sich nach dem Entfernen dünner Vorsprünge nicht verfolgen. Zeichnen Sie den Umriss etwas großzügiger.
+De rand kruist of raakt zichzelf op een hoekpunt. Teken de omtrek iets ruimer of repareer de scan. ⟫ The edge crosses or touches itself at a vertex. Draw the outline a little wider or repair the scan. ⟫ Der Rand kreuzt oder berührt sich an einem Eckpunkt. Zeichnen Sie den Umriss etwas großzügiger oder reparieren Sie den Scan.
+De scan is gesloten. Teken eerst een omtrek of snijd het plaatoppervlak uit. ⟫ The scan is closed. First draw an outline or cut out the plate surface. ⟫ Der Scan ist geschlossen. Zeichnen Sie zuerst einen Umriss oder schneiden Sie die Plattenfläche aus.
+De uitblokberekening is te zwaar voor deze scan. ⟫ The block-out calculation is too heavy for this scan. ⟫ Die Ausblockberechnung ist für diesen Scan zu aufwendig.
+Gaten in het oppervlak konden niet automatisch worden gedicht. ⟫ Holes in the surface could not be closed automatically. ⟫ Löcher in der Fläche konnten nicht automatisch geschlossen werden.
+Het oppervlak binnen de omtrek is te groot ({0} facetten, ook na vereenvoudigen). Teken de omtrek kleiner of snijd de scan bij (Scan & mesh). ⟫ The surface inside the outline is too large ({0} faces, even after simplifying). Draw the outline smaller or trim the scan (Scan & mesh). ⟫ Die Fläche innerhalb des Umrisses ist zu groß ({0} Facetten, auch nach dem Vereinfachen). Zeichnen Sie den Umriss kleiner oder beschneiden Sie den Scan (Scan & Mesh).
+Kies een uitblokhoek van 0 tot 10 graden. ⟫ Choose a block-out angle from 0 to 10 degrees. ⟫ Wählen Sie einen Ausblockwinkel von 0 bis 10 Grad.
+Na opschonen bleef er geen bruikbaar oppervlak over. ⟫ No usable surface remained after cleaning up. ⟫ Nach dem Bereinigen blieb keine brauchbare Fläche übrig.
+Uitblokken langs deze as vereist een oppervlak zonder overhang of verticale facetten. Kies de andere richting of pas de scan aan. ⟫ Blocking out along this axis requires a surface without overhangs or vertical faces. Choose the other direction or adjust the scan. ⟫ Ausblocken entlang dieser Achse erfordert eine Fläche ohne Überhänge oder senkrechte Facetten. Wählen Sie die andere Richtung oder passen Sie den Scan an.
+Vul een geldige ruimte en positieve dikte in. ⟫ Enter a valid space and a positive thickness. ⟫ Geben Sie einen gültigen Abstand und eine positive Stärke ein.
+iso-oppervlak buiten ⟫ outer iso-surface ⟫ äußere Iso-Fläche
+oriënteren ⟫ orienting ⟫ ausrichten
+rand en startpunten ⟫ edge and seed points ⟫ Rand und Startpunkte
+Begin op de lijn om een stuk over te tekenen, of teken een hele rondgang (eindig bij je beginpunt) voor een nieuwe omtrek. ⟫ Start on the line to redraw a section, or draw a full loop (end at your starting point) for a new outline. ⟫ Beginnen Sie auf der Linie, um ein Stück neu zu zeichnen, oder zeichnen Sie einen ganzen Umlauf (am Startpunkt enden) für einen neuen Umriss.
+Begin op de lijn om een stuk over te tekenen, of teken een hele rondgang voor een nieuwe omtrek. ⟫ Start on the line to redraw a section, or draw a full loop for a new outline. ⟫ Beginnen Sie auf der Linie, um ein Stück neu zu zeichnen, oder zeichnen Sie einen ganzen Umlauf für einen neuen Umriss.
+De omtrek is gesloten. Teken óver de lijn om een stuk te vervangen, of tik ✓ Klaar en sleep de lijn. ⟫ The outline is closed. Draw over the line to replace a section, or tap ✓ Done and drag the line. ⟫ Der Umriss ist geschlossen. Zeichnen Sie über die Linie, um ein Stück zu ersetzen, oder tippen Sie auf ✓ Fertig und ziehen Sie die Linie.
+Eindig weer óp de lijn: het stuk tussen begin en eind wordt dan vervangen door wat je tekende. ⟫ End on the line again: the section between start and end is then replaced by what you drew. ⟫ Enden Sie wieder auf der Linie: Das Stück zwischen Anfang und Ende wird dann durch das Gezeichnete ersetzt.
+Er is niets veranderd. ⟫ Nothing has changed. ⟫ Es hat sich nichts geändert.
+Lijn getekend. Teken verder, en eindig bij het begin (of tik op het witte beginpunt) om de omtrek te sluiten. ⟫ Line drawn. Keep drawing and end at the start (or tap the white starting point) to close the outline. ⟫ Linie gezeichnet. Zeichnen Sie weiter und enden Sie am Anfang (oder tippen Sie auf den weißen Startpunkt), um den Umriss zu schließen.
+Nieuwe omtrek getekend ({0} punten). Sleep de lijn om hem bij te stellen. ⟫ New outline drawn ({0} points). Drag the line to adjust it. ⟫ Neuer Umriss gezeichnet ({0} Punkte). Ziehen Sie die Linie, um ihn anzupassen.
+Omtrek aangepast. ↶ Terug zet het terug. ⟫ Outline adjusted. ↶ Back restores it. ⟫ Umriss angepasst. ↶ Zurück stellt ihn wieder her.
+Omtrek gesloten. ⟫ Outline closed. ⟫ Umriss geschlossen.
+Omtrek getekend en gesloten. ⟫ Outline drawn and closed. ⟫ Umriss gezeichnet und geschlossen.
+Omtrek gladgestreken. Nog eens tikken = gladder; ↶ Terug zet het terug. ⟫ Outline smoothed. Tap again = smoother; ↶ Back restores it. ⟫ Umriss geglättet. Erneut tippen = glatter; ↶ Zurück stellt ihn wieder her.
+Probeer het opnieuw. ⟫ Try again. ⟫ Versuchen Sie es erneut.
+Sleep de lijn met je vinger of de muis om hem te verplaatsen (meeneemzone {0} mm). ⟫ Drag the line with your finger or the mouse to move it (drag zone {0} mm). ⟫ Ziehen Sie die Linie mit dem Finger oder der Maus, um sie zu verschieben (Mitnahmezone {0} mm).
+Sleep de lijn om hem bij te stellen, of kies ✏️ Teken om een stuk over te tekenen. ⟫ Drag the line to adjust it, or choose ✏️ Draw to redraw a section. ⟫ Ziehen Sie die Linie, um sie anzupassen, oder wählen Sie ✏️ Zeichnen, um ein Stück neu zu zeichnen.
+Sluit eerst de omtrek (of kies 🧭 Automatisch). ⟫ First close the outline (or choose 🧭 Automatic). ⟫ Schließen Sie zuerst den Umriss (oder wählen Sie 🧭 Automatisch).
+Stuk van {0} mm overgetekend. ↶ Terug zet het terug. ⟫ Section of {0} mm redrawn. ↶ Back restores it. ⟫ Stück von {0} mm neu gezeichnet. ↶ Zurück stellt es wieder her.
+Teken op het scanoppervlak (de lijn moet over de scan lopen). ⟫ Draw on the scan surface (the line must run over the scan). ⟫ Zeichnen Sie auf der Scanoberfläche (die Linie muss über den Scan laufen).
+Tik op het zichtbare scanoppervlak. ⟫ Tap on the visible scan surface. ⟫ Tippen Sie auf die sichtbare Scanoberfläche.
+Afgesneden op {0} mm onder de kam ({1} driehoeken netto weg, rand exact gesneden). ⟫ Cut off at {0} mm below the ridge ({1} triangles removed net, edge cut exactly). ⟫ Bei {0} mm unter dem Kamm abgeschnitten ({1} Dreiecke netto entfernt, Rand exakt geschnitten).
+Afsnijden… ⟫ Cutting off… ⟫ Wird abgeschnitten…
+Binnen de lijn ligt geen scan. ⟫ There is no scan inside the line. ⟫ Innerhalb der Linie liegt kein Scan.
+Dit vlak zou bijna de hele scan wegsnijden: kies een grotere hoogte. ⟫ This plane would cut away almost the whole scan: choose a greater height. ⟫ Diese Ebene würde fast den ganzen Scan wegschneiden: Wählen Sie eine größere Höhe.
+Dit zou de hele scan wissen. ⟫ This would erase the whole scan. ⟫ Das würde den ganzen Scan löschen.
+Gaten dichten… ⟫ Closing holes… ⟫ Löcher werden geschlossen…
+Geen gaten gevonden (de buitenrand blijft altijd open). ⟫ No holes found (the outer edge always stays open). ⟫ Keine Löcher gefunden (der Außenrand bleibt immer offen).
+Geen losse delen: de scan is één geheel. ⟫ No loose parts: the scan is one piece. ⟫ Keine losen Teile: Der Scan ist ein Stück.
+Geknipt: {0} driehoeken {1} de lijn verwijderd. ⟫ Cut: {0} triangles {1} the line removed. ⟫ Geschnitten: {0} Dreiecke {1} der Linie entfernt.
+buiten ⟫ outside ⟫ außerhalb
+binnen ⟫ inside ⟫ innerhalb
+Gewist: {0} driehoeken. ⟫ Erased: {0} triangles. ⟫ Gelöscht: {0} Dreiecke.
+Gladgemaakt: {0} driehoeken (rand blijft staan). ⟫ Smoothed: {0} triangles (edge stays in place). ⟫ Geglättet: {0} Dreiecke (Rand bleibt stehen).
+Gladmaken: veeg over ruwe plekken (blauw); loslaten = gladmaken. De scanrand blijft op zijn plek. ⟫ Smooth: brush over rough spots (blue); release = smooth. The scan edge stays in place. ⟫ Glätten: über raue Stellen wischen (blau); loslassen = glätten. Der Scanrand bleibt an seinem Platz.
+Gladmaken… ⟫ Smoothing… ⟫ Wird geglättet…
+Gum: veeg over wat weg moet (rood); loslaten = wissen. ⟫ Eraser: brush over what should go (red); release = erase. ⟫ Radierer: über das wischen, was weg soll (rot); loslassen = löschen.
+Het vlak raakt de scan niet: kies een kleinere hoogte. ⟫ The plane does not touch the scan: choose a smaller height. ⟫ Die Ebene berührt den Scan nicht: Wählen Sie eine geringere Höhe.
+Lasso te klein: trek een grotere lijn rond het deel dat weg moet. ⟫ Lasso too small: draw a larger line around the part that should go. ⟫ Lasso zu klein: Ziehen Sie eine größere Linie um den Teil, der weg soll.
+Lasso: trek met de vinger of muis een lijn rond het deel dat weg moet; loslaten = knippen. Beeld draaien: eerst Lasso uitzetten of met twee vingers. ⟫ Lasso: draw a line with your finger or mouse around the part that should go; release = cut. Rotate the view: first switch Lasso off, or use two fingers. ⟫ Lasso: Ziehen Sie mit Finger oder Maus eine Linie um den Teil, der weg soll; loslassen = schneiden. Ansicht drehen: zuerst Lasso ausschalten oder mit zwei Fingern.
+Losse delen zoeken… ⟫ Finding loose parts… ⟫ Lose Teile werden gesucht…
+Scanbewerking uit: slepen draait weer het beeld. ⟫ Scan editing off: dragging rotates the view again. ⟫ Scanbearbeitung aus: Ziehen dreht wieder die Ansicht.
+{0} ga{1} gedicht; de buitenrand blijft open. ⟫ {0} hole(s) closed; the outer edge stays open. ⟫ {0} Loch/Löcher geschlossen; der Außenrand bleibt offen.
+{0} los{1} deel{2} verwijderd; het grootste deel blijft. ⟫ {0} loose part(s) removed; the largest part remains. ⟫ {0} lose(s) Teil(e) entfernt; der größte Teil bleibt.
+Bestand is geen herkenbare STL. ⟫ The file is not a recognisable STL. ⟫ Die Datei ist keine erkennbare STL.
+Bestand is te klein voor een STL. ⟫ The file is too small for an STL. ⟫ Die Datei ist zu klein für eine STL.
+Deze STL heeft meer dan {0} driehoeken. ⟫ This STL has more than {0} triangles. ⟫ Diese STL hat mehr als {0} Dreiecke.
+Geen geldig bestand. ⟫ Not a valid file. ⟫ Keine gültige Datei.
+Ongeldige ASCII-STL. ⟫ Invalid ASCII STL. ⟫ Ungültige ASCII-STL.
+STL bevat geen driehoeken. ⟫ The STL contains no triangles. ⟫ Die STL enthält keine Dreiecke.
+STL bevat ongeldige coördinaten. ⟫ The STL contains invalid coordinates. ⟫ Die STL enthält ungültige Koordinaten.
+Te veel driehoeken in deze ASCII-STL. ⟫ Too many triangles in this ASCII STL. ⟫ Zu viele Dreiecke in dieser ASCII-STL.
+Te weinig punten voor een boog. ⟫ Too few points for an arch. ⟫ Zu wenige Punkte für einen Bogen.
+Binnen {0} mm van de scanrand blijft geen oppervlak over. Kies een kleinere afstand. ⟫ No surface remains within {0} mm of the scan edge. Choose a smaller distance. ⟫ Innerhalb von {0} mm vom Scanrand bleibt keine Fläche übrig. Wählen Sie einen kleineren Abstand.
+Deze scan heeft geen open rand (gesloten model). Kies "Volgens de anatomie" of teken de omtrek. ⟫ This scan has no open edge (closed model). Choose "Following the anatomy" or draw the outline. ⟫ Dieser Scan hat keinen offenen Rand (geschlossenes Modell). Wählen Sie „Nach der Anatomie“ oder zeichnen Sie den Umriss.
+Geen scanoppervlak binnen de omtrek. ⟫ No scan surface inside the outline. ⟫ Keine Scanoberfläche innerhalb des Umrisses.
+Te weinig omtrekpunten. ⟫ Too few outline points. ⟫ Zu wenige Umrisspunkte.
+Deze ZIP is versleuteld: wachtwoord nodig. ⟫ This ZIP is encrypted: password required. ⟫ Diese ZIP ist verschlüsselt: Passwort erforderlich.
+Geen geldig ZIP-bestand. ⟫ Not a valid ZIP file. ⟫ Keine gültige ZIP-Datei.
+ZIP-inhoudsopgave beschadigd. ⟫ ZIP table of contents damaged. ⟫ ZIP-Inhaltsverzeichnis beschädigt.
+{0}: compressiemethode {1} niet ondersteund. ⟫ {0}: compression method {1} not supported. ⟫ {0}: Kompressionsmethode {1} nicht unterstützt.
+{0}: lokale kop beschadigd. ⟫ {0}: local header damaged. ⟫ {0}: lokaler Header beschädigt.
+{0}: oude ZIP-versleuteling (ZipCrypto) wordt niet ondersteund; pak het bestand eerst uit. ⟫ {0}: old ZIP encryption (ZipCrypto) is not supported; unpack the file first. ⟫ {0}: alte ZIP-Verschlüsselung (ZipCrypto) wird nicht unterstützt; entpacken Sie die Datei zuerst.
+Interactieve 3D-weergave ⟫ Interactive 3D view ⟫ Interaktive 3D-Ansicht
+Verwijder van dit apparaat ⟫ Remove from this device ⟫ Von diesem Gerät entfernen

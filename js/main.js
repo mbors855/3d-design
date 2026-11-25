@@ -1,4 +1,5 @@
 // Digital Denture CAD 65 — hoofdmodule: koppelt interface, 3D-werkruimte en rekenmodules.
+import { tr } from './i18n.js'; // v71: taalkeuze (moet als eerste: vertaalt de pagina vóór de rest opbouwt)
 import * as THREE from 'three';
 import { Viewer, makePolyline, makeDots, makeMesh, COLORS } from './viewer.js';
 import { parseSTL, writeSTL, soupBounds, toBase64, fromBase64, concatSoups } from './stl.js';
@@ -1193,7 +1194,7 @@ $('exportZip').onclick = () => busy('Productiepakket samenstellen…', async () 
     report.push(`${name}: ${int(q.faces)} driehoeken · ${q.dimensions.map(v => fmt(v)).join(' × ')} mm · ${q.watertight ? `gesloten, volume ${fmt(Math.abs(q.volume))} mm³` : `NIET gesloten (${q.open} open randen)`}`);
   }
   report.push('', 'Geen klinische validatie. Controleer alle bestanden vóór productie.');
-  if ($('includeProject').checked) { files.push({ name: dir + 'rapport.txt', data: report.join('\n') }); files.push({ name: dir + 'project.ddcad.json', data: JSON.stringify(projectData(false)) }); }
+  if ($('includeProject').checked) { files.push({ name: dir + 'rapport.txt', data: report.map(l => tr(l)).join('\n') }); files.push({ name: dir + 'project.ddcad.json', data: JSON.stringify(projectData(false)) }); }
   download(makeZip(files), `${safe($('caseName').value)}_productie.zip`);
   S.exported = true; updateDone();
   result('exportResult', `${files.length} bestanden in ZIP gezet.`);
@@ -1277,7 +1278,7 @@ function syncHeaderNav() {
   $('hdrPrev').disabled = i <= 0; $('hdrNext').disabled = i < 0 || i >= v.length - 1;
   const name = id => STEPS.find(s => s[0] === id)?.[1] ?? '';
   $('hdrPrev').title = i > 0 ? `Vorige stap: ${name(v[i - 1])}` : 'Eerste stap'; $('hdrNext').title = i >= 0 && i < v.length - 1 ? `Volgende stap: ${name(v[i + 1])}` : 'Laatste stap';
-  $('hdrStep').textContent = i >= 0 ? `${i + 1}/${v.length} ${name(S.step)}` : name(S.step);
+  $('hdrStep').replaceChildren(...(i >= 0 ? [document.createTextNode(`${i + 1}/${v.length} `)] : []), document.createTextNode(name(S.step))); // v71: naam als eigen tekst (vertaalbaar)
   const can = !!UNDO_MAP[S.step]; $('hdrUndo').disabled = !can; $('hdrRedo').disabled = !can;
 }
 function syncWorkSteps() {
@@ -1399,8 +1400,8 @@ function edgeContour(kind) {
   if (S.mode === 'contour') setMode('orbit');
   delete S.plates[kind];
   updateContourUI(); refreshScanColors(); refreshOverlay();
-  const why = edgeMode(kind) === 'auto' ? 'de plooi is niet gescand, dus ' : '';
-  status(`Rand langs de scanrand: ${why}de ${KIND_NAME[kind]} loopt ${inset > 0 ? `tot ${fmt(inset)} mm binnen` : 'precies tot'} de rand van de scan (${kind === 'lepel' ? 'lepelrand' : 'plaatrand'} = scanrand). Sleep de lijn om een stuk aan te passen.`);
+  const why = edgeMode(kind) === 'auto' ? 'De plooi is niet gescand. ' : ''; // v71: losse zin (vertaalbaar)
+  status(`${why}Rand langs de scanrand: ${{ lepel: 'de lepel', beetplaat: 'de beetplaat', basis: 'de basis' }[kind]} loopt ${inset > 0 ? `tot ${fmt(inset)} mm binnen` : 'precies tot'} de rand van de scan (${kind === 'lepel' ? 'lepelrand' : 'plaatrand'} = scanrand). Sleep de lijn om een stuk aan te passen.`);
 }
 function autoContour(kind) {
   if (!CONTOUR_KINDS.includes(kind)) return;

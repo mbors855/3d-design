@@ -18,6 +18,18 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 71: Nederlands, English, Deutsch
+
+**Taalkeuze rechtsboven in het hoofdmenu** (🌐 NL / EN / DE). Het hele programma is in drie talen: menu's, knoppen, uitleg, hulp en sneltoetsen, meldingen en foutteksten, het controle- en productieoverzicht, het orderoverzicht, het productierapport (`rapport.txt`) en de CSV-export.
+- De keuze wordt onthouden (ook op de telefoon). De eerste keer volgt het programma de taal van de browser; is dat geen van de drie, dan Engels.
+- Wisselen kan midden in het werk: scan, opstelling en werkstukken blijven staan. Terug naar Nederlands geeft precies de oorspronkelijke tekst.
+- Getallen: in het Engels met een punt (12.5 mm, 12,345 facetten), in het Nederlands en Duits met een komma.
+- Kaakafkortingen per taal: Nederlands BK/OK, Engels UJ/LJ (upper/lower jaw), Duits OK/UK (Ober-/Unterkiefer). Let op: het Duitse *OK* is de bovenkaak.
+- Vaktermen volgens de tandtechniek: lepel = *custom tray* / *individueller Löffel*, beetplaat = *baseplate* / *Basisplatte*, beetwal = *bite rim* / *Bisswall*, plooi = *vestibular fold* / *Umschlagfalte*, pasvlak = *fitting surface* / *Passfläche*, uitblokken = *block out* / *Ausblocken*.
+- Namen van geëxporteerde bestanden (STL, JSON, ZIP) blijven ongewijzigd, zodat bestaande werkwijzen in het lab niet veranderen. Patiëntnamen, ordernummers en bestandsnamen worden nooit vertaald.
+
+**Hoe het werkt.** De programmatekst blijft Nederlands; `js/i18n.js` vertaalt alles wat op het scherm komt (ook teksten die later verschijnen) met het woordenboek `js/i18n-data.js`. Meldingen met getallen of namen worden herkend als sjabloon (`Element {0} geselecteerd · kroon {1} × {2} × {3} mm.`), samengestelde meldingen per deel. Vertalingen staan als gewone tekst in `i18n/*.txt`, één regel per tekst: `Nederlands ⟫ English ⟫ Deutsch`. Na een wijziging: `node scripts/i18n-build.mjs`. Een test controleert dat elke zichtbare tekst in `index.html` en `orders.html` een vertaling heeft.
+
 ### Nieuw in 70: lepel op een betande scan, nauwkeuriger afdrukruimte, schoon weefselblok
 
 **Lepel op een betande scan liep vast.** Na ±25 s kwam de melding *"Het oppervlak voor de buitenkant werd te groot"*. De automatische omtrek volgens de anatomie (plooi, kam) is op een scan met tanden onbruikbaar: hij liep als een smalle strook langs de tanden.

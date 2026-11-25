@@ -793,4 +793,51 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     const vol = Math.abs(q.volume), expect = (9.2 * 9.2 - 4.8 * 6.4) * 10; assert.ok(Math.abs(vol - expect) / expect < 0.05, `volume ${vol.toFixed(1)} (verwacht ± ${expect.toFixed(1)})`);
   });
 }
+
+// ---- v71: taalkeuze (Nederlands / English / Deutsch) ----
+{
+  const { tr } = await import(J + 'i18n.js');
+  const DATA = (await import(J + 'i18n-data.js')).default;
+  const { readFileSync } = await import('node:fs');
+  await test('v71 taal: woordenboek compleet (elke tekst Engels en Duits, geen onbekende {n})', () => {
+    const ph = s => new Set([...s.matchAll(/\{(\d+)\}/g)].map(m => m[1]));
+    let n = 0;
+    for (const [nl, v] of Object.entries(DATA)) {
+      n++;
+      assert.ok(Array.isArray(v) && v.length === 2 && v.every(x => typeof x === 'string' && x.trim()), `leeg: ${nl}`);
+      const src = ph(nl); for (const x of v) for (const p of ph(x)) assert.ok(src.has(p), `{${p}} niet in de bron: ${nl}`);
+    }
+    assert.ok(n > 1000, `${n} teksten`);
+  });
+  await test('v71 taal: vaste tekst, sjablonen met getallen (12,5 → 12.5 in het Engels), samengestelde meldingen, meervoud, onbekend blijft staan', () => {
+    assert.equal(tr('Volgende', 'en'), 'Next'); assert.equal(tr('Volgende', 'de'), 'Weiter'); assert.equal(tr('Volgende', 'nl'), 'Volgende');
+    assert.equal(tr('Element 36 geselecteerd · kroon 10,5 × 9,8 × 7,2 mm.', 'en'), 'Tooth 36 selected · crown 10.5 × 9.8 × 7.2 mm.');
+    assert.equal(tr('Element 36 geselecteerd · kroon 10,5 × 9,8 × 7,2 mm.', 'de'), 'Zahn 36 ausgewählt · Krone 10,5 × 9,8 × 7,2 mm.');
+    assert.equal(tr('Scan geladen (12.345 driehoeken)', 'en'), 'Scan loaded (12,345 triangles)');
+    assert.equal(tr('3 gaten gedicht; de buitenrand blijft open.', 'en'), '3 hole(s) closed; the outer edge stays open.');
+    assert.equal(tr('Lepel klaar: 23.456 facetten · gesloten ✓ · volume 3.456 mm³ · ', 'en'), 'Tray ready: 23,456 faces · closed ✓ · volume 3,456 mm³ · ');
+    assert.equal(tr('Monoblock prothese: gesloten mesh', 'de'), 'Monoblock-Prothese: geschlossenes Mesh');
+    assert.equal(tr('  📂 Openen ', 'en'), '  📂 Open ');
+    assert.equal(tr('Contact (kleinste afstand): 36–26 0,12 mm\nRood/magenta = interferentie ergens in de beweging; oranje = contact.', 'en'), 'Contact (smallest distance): 36–26 0.12 mm\nRed/magenta = interference somewhere in the movement; orange = contact.');
+    assert.equal(tr('Rand langs de scanrand: de beetplaat loopt precies tot de rand van de scan (plaatrand = scanrand).', 'de'), 'Rand entlang des Scanrands: die Basisplatte reicht genau bis an den Rand des Scans (Plattenrand = Scanrand).');
+    assert.equal(tr('Xyzzy plugh', 'en'), 'Xyzzy plugh');
+    assert.equal(tr('12,0 mm', 'en'), '12.0 mm'); assert.equal(tr('12,0 mm', 'de'), '12,0 mm');
+  });
+  await test('v71 taal: elke zichtbare tekst in index.html en orders.html heeft een vertaling', () => {
+    const SAME = new Set(['CAD', 'ZIP', 'CSV', 'JSON', 'Digital Denture CAD']); // merknamen: hoeven niet vertaald
+    const bad = [];
+    for (const f of ['index.html', 'orders.html']) {
+      const html = readFileSync(new URL('../' + f, import.meta.url), 'utf8').replace(/<(script|style|noscript|code|kbd)\b[\s\S]*?<\/\1>/g, '<x>');
+      const texts = html.split(/<[^>]*>/).map(t => t.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim());
+      for (const m of html.matchAll(/\s(?:title|placeholder|aria-label)="([^"]*)"/g)) texts.push(m[1]);
+      for (const t of texts) {
+        if (!/[a-zà-ÿ]{3}/i.test(t) || /Digital Denture CAD( [\d.]+)?$/.test(t)) continue;
+        const core = t.replace(/^[^A-Za-zÀ-ÿ0-9(]+/u, '');
+        if (SAME.has(core) || DATA[core] || DATA[t]) continue; // ook bewust gelijk vertaald (Antagonist, Scan, …)
+        for (const l of ['en', 'de']) if (tr(t, l) === t) bad.push(`${f} [${l}] ${t}`);
+      }
+    }
+    assert.ok(!bad.length, 'zonder vertaling:\n' + bad.slice(0, 20).join('\n'));
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

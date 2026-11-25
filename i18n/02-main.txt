@@ -1,0 +1,409 @@
+# Hoofdmodule (js/main.js): stappen, meldingen, resultaten
+(bibliotheekmaat automatisch {0} % zodat de molaren op de kam passen) ⟫ (library size automatically {0} % so the molars fit on the ridge) ⟫ (Bibliotheksgröße automatisch {0} %, damit die Molaren auf den Kamm passen)
+(ideale standen uit de bibliotheek) ⟫ (ideal positions from the library) ⟫ (ideale Positionen aus der Bibliothek)
+(plaatrand = scanrand) ⟫ (plate border = scan edge) ⟫ (Plattenrand = Scanrand)
+({0} losse vlekjes) ⟫ ({0} loose specks) ⟫ ({0} lose Flecken)
+({0} mm erbinnen) ⟫ ({0} mm inside) ⟫ ({0} mm innerhalb)
+({0} plat driehoekje{1} van het samenvoegen, onschadelijk) ⟫ ({0} flat triangle(s){1} from merging, harmless) ⟫ ({0} flache(s) Dreieck(e){1} vom Vereinigen, unschädlich)
+({0} weggelaten: geen ruimte op de kam, kantelgevaar) ⟫ ({0} omitted: no room on the ridge, risk of tipping) ⟫ ({0} weggelassen: kein Platz auf dem Kamm, Kippgefahr)
+, post-dam op {0} punten ⟫ , post dam at {0} points ⟫ , Post-Dam an {0} Punkten
+, tegenkaak ook ⟫ , opposing jaw too ⟫ , Gegenkiefer auch
+, waarvan {0} al in de scan zelf (ruis of dubbel gescand) ⟫ , of which {0} already in the scan itself (noise or scanned twice) ⟫ , davon {0} bereits im Scan selbst (Rauschen oder doppelt gescannt)
+, {0} ondersnijdingsvlakken meegenomen ⟫ , {0} undercut faces included ⟫ , {0} Unterschnittflächen einbezogen
+, {0}% overbrugd ⟫ , {0}% bridged ⟫ , {0} % überbrückt
+3 weefselstops ⟫ 3 tissue stops ⟫ 3 Gewebestopps
+: niet gedaan, de {0} loopt tot de echte scanrand ({1} → Rand) ⟫ : not done, the {0} runs to the real scan edge ({1} → Border) ⟫ : nicht ausgeführt, {0} reicht bis zum echten Scanrand ({1} → Rand)
+: niet nodig, de plooi is gescand ⟫ : not needed, the vestibular fold is scanned ⟫ : nicht nötig, die Umschlagfalte ist gescannt
+: plooi op {0}% van de boog niet gescand → rand {1} mm vloeiend verlengd (paars = ontworpen, niet gescand) · verwachte plooidiepte {2} mm ⟫ : fold not scanned on {0}% of the arch → border smoothly extended by {1} mm (purple = designed, not scanned) · expected fold depth {2} mm ⟫ : Umschlagfalte auf {0} % des Bogens nicht gescannt → Rand um {1} mm fließend verlängert (violett = konstruiert, nicht gescannt) · erwartete Umschlagfaltentiefe {2} mm
+: prothesegebied + {0} mm · {1} facetten verwijderd (sokkel, wang/tong, artefacten) · {2} randfacetten exact gesneden ⟫ : denture area + {0} mm · {1} faces removed (base, cheek/tongue, artefacts) · {2} border faces cut exactly ⟫ : Prothesengebiet + {0} mm · {1} Facetten entfernt (Sockel, Wange/Zunge, Artefakte) · {2} Randfacetten exakt geschnitten
+: {0} facetten · {1} deel · {2} rand · {3} niet-manifold · {4} s · scanpunten niet verschoven{5} ⟫ : {0} faces · {1} part · {2} edge · {3} non-manifold · {4} s · scan points not moved{5} ⟫ : {0} Facetten · {1} Teil · {2} Rand · {3} nicht-manifold · {4} s · Scanpunkte nicht verschoben{5}
+: {0} facetten · {1} deel/delen{2} · {3} spikes · {4} niet-manifold randen · {5} randen/gaten · {6} ⟫ : {0} faces · {1} part(s){2} · {3} spikes · {4} non-manifold edges · {5} edges/holes · {6} ⟫ : {0} Facetten · {1} Teil(e){2} · {3} Spitzen · {4} nicht-manifolde Kanten · {5} Ränder/Löcher · {6}
+: {0} kapotte/dubbele facetten · {1} losse delen ({2} facetten) · {3} spikes · {4} niet-manifold · {5} gaten gedicht ⟫ : {0} broken/duplicate faces · {1} loose parts ({2} faces) · {3} spikes · {4} non-manifold · {5} holes closed ⟫ : {0} defekte/doppelte Facetten · {1} lose Teile ({2} Facetten) · {3} Spitzen · {4} nicht-manifold · {5} Löcher geschlossen
+Aangevuld (niet gescand) gebied in de scan (paars): {0} facetten. Controleer de rand daar klinisch. ⟫ Completed (not scanned) area in the scan (purple): {0} faces. Check the border there clinically. ⟫ Ergänzter (nicht gescannter) Bereich im Scan (violett): {0} Facetten. Prüfen Sie den Rand dort klinisch.
+Aanvullen ⟫ Completion ⟫ Ergänzen
+Afdrukruimte {0}: {1} mm, 99% nergens meer dan {2} mm te dicht bij de scan (doel ≤ 0,05 mm){3} ⟫ Impression space {0}: {1} mm, 99% nowhere more than {2} mm too close to the scan (target ≤ 0.05 mm){3} ⟫ Platz für Abformmaterial {0}: {1} mm, 99 % nirgends mehr als {2} mm zu nah am Scan (Ziel ≤ 0,05 mm){3}
+Afmetingen: {0} mm ⟫ Dimensions: {0} mm ⟫ Abmessungen: {0} mm
+Anatomie analyseren ⟫ Analyse anatomy ⟫ Anatomie analysieren
+Anatomie bijwerken… ⟫ Updating anatomy… ⟫ Anatomie wird aktualisiert…
+Anatomie geanalyseerd. Gebruik bij Lepel/Beetplaat "🧭 Automatisch" voor de omtrek. ⟫ Anatomy analysed. Use "🧭 Automatic" under Tray/Baseplate for the outline. ⟫ Anatomie analysiert. Verwenden Sie bei Löffel/Basisplatte „🧭 Automatisch“ für den Umriss.
+Anatomische beoordeling niet bevestigd ⟫ Anatomical review not confirmed ⟫ Anatomische Prüfung nicht bestätigt
+Anatomische demo-{0} geladen, met vestibulum en frenula. Kies Analyse → 🧭 Analyseer kaak, of bij Lepel/Beetplaat → 🧭 Automatisch. ⟫ Anatomical demo {0} loaded, with vestibule and frenula. Choose Analysis → 🧭 Analyse jaw, or under Tray/Baseplate → 🧭 Automatic. ⟫ Anatomischer Demo-{0} geladen, mit Vestibulum und Bändchen. Wählen Sie Analyse → 🧭 Kiefer analysieren, oder bei Löffel/Basisplatte → 🧭 Automatisch.
+Antagonist aanwezig: occlusie controleerbaar ⟫ Antagonist present: occlusion can be checked ⟫ Antagonist vorhanden: Okklusion prüfbar
+Antagonist geladen. ⟫ Antagonist loaded. ⟫ Antagonist geladen.
+Antagonist inlezen… ⟫ Reading antagonist… ⟫ Antagonist wird eingelesen…
+Automatisch bepaald uit de scan. ⟫ Determined automatically from the scan. ⟫ Automatisch aus dem Scan bestimmt.
+Automatisch vereenvoudigd: ⟫ Simplified automatically: ⟫ Automatisch vereinfacht:
+Automatische omtrek: {0}. Pas aan met Terug/Wis of teken zelf. ⟫ Automatic outline: {0}. Adjust with Back/Clear or draw it yourself. ⟫ Automatischer Umriss: {0}. Mit Zurück/Löschen anpassen oder selbst zeichnen.
+Basis ⟫ Base ⟫ Basis
+Basis met {0} sockets klaar: {1} · socketspeling {2} mm{3}. ⟫ Base with {0} sockets ready: {1} · socket clearance {2} mm{3}. ⟫ Basis mit {0} Sockets fertig: {1} · Socket-Spalt {2} mm{3}.
+Basis opbouwen… ⟫ Building base… ⟫ Basis wird aufgebaut…
+Basis-STL ⟫ Base STL ⟫ Basis-STL
+Basis.stl (met sockets) ⟫ Basis.stl (with sockets) ⟫ Basis.stl (mit Sockets)
+Beetplaat berekenen… ⟫ Calculating baseplate… ⟫ Basisplatte wird berechnet…
+Beetplaat gegenereerd ⟫ Baseplate generated ⟫ Basisplatte erzeugt
+Beetplaat gegenereerd. ⟫ Baseplate generated. ⟫ Basisplatte erzeugt.
+Beetplaat genereren ⟫ Generate baseplate ⟫ Basisplatte erzeugen
+Beetplaat klaar: {0}. ⟫ Baseplate ready: {0}. ⟫ Basisplatte fertig: {0}.
+Beetplaat nog niet gegenereerd ⟫ Baseplate not generated yet ⟫ Basisplatte noch nicht erzeugt
+Beetplaat-STL ⟫ Baseplate STL ⟫ Basisplatten-STL
+Beetwal ⟫ Bite rim ⟫ Bisswall
+Bestand uit orderoverzicht openen… ⟫ Opening file from the order overview… ⟫ Datei aus der Auftragsübersicht wird geöffnet…
+Bestanden → Downloads ⟫ Files → Downloads ⟫ Dateien → Downloads
+Bewerken ⟫ Edit ⟫ Bearbeiten
+Bewerken · buiten het werkstuk draaien ⟫ Editing · rotate outside the workpiece ⟫ Bearbeiten · außerhalb des Werkstücks drehen
+Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om ⟫ Editing: drag over the workpiece · rotate outside the workpiece · Shift swaps add/remove ⟫ Bearbeiten: über das Werkstück ziehen · außerhalb des Werkstücks drehen · Umschalt kehrt Auftragen/Abtragen um
+Bewerking bewaard. {0}: {1}. ⟫ Edit saved. {0}: {1}. ⟫ Bearbeitung gespeichert. {0}: {1}.
+Bewerking geannuleerd; het werkstuk is teruggezet. ⟫ Edit cancelled; the workpiece has been restored. ⟫ Bearbeitung abgebrochen; das Werkstück wurde zurückgesetzt.
+Bijsnijden ⟫ Trimming ⟫ Beschneiden
+Binnen deze afwijking valt er niets weg te halen. ⟫ Nothing can be removed within this deviation. ⟫ Innerhalb dieser Abweichung lässt sich nichts entfernen.
+Boog: breedte {0} mm, diepte {1} mm. ⟫ Arch: width {0} mm, depth {1} mm. ⟫ Bogen: Breite {0} mm, Tiefe {1} mm.
+Booleaanse module kon niet laden; handvat, beetwal en monoblock zijn dan niet beschikbaar. ⟫ The Boolean module could not load; handle, bite rim and monoblock are then unavailable. ⟫ Das Boolesche Modul konnte nicht geladen werden; Griff, Bisswall und Monoblock sind dann nicht verfügbar.
+Contactkaart berekenen… ⟫ Calculating contact map… ⟫ Kontaktkarte wird berechnet…
+Controle… ⟫ Checking… ⟫ Prüfung…
+De demo-antagonist past alleen bij de demo-kaak. ⟫ The demo antagonist only fits the demo jaw. ⟫ Der Demo-Antagonist passt nur zum Demo-Kiefer.
+De scan heeft {0} facetten: dat is al niet meer dan het streefaantal. ⟫ The scan has {0} faces: that is already no more than the target number. ⟫ Der Scan hat {0} Facetten: das ist bereits nicht mehr als die Zielanzahl.
+De scan was te groot voor een plaat en is vereenvoudigd: {0}. ⟫ The scan was too large for a plate and has been simplified: {0}. ⟫ Der Scan war für eine Platte zu groß und wurde vereinfacht: {0}.
+De wijziging is teruggedraaid. ⟫ The change has been undone. ⟫ Die Änderung wurde rückgängig gemacht.
+Delen lukte niet ({0}); de bestanden worden gedownload. ⟫ Sharing failed ({0}); the files will be downloaded. ⟫ Teilen fehlgeschlagen ({0}); die Dateien werden heruntergeladen.
+Demo-kaak maken… ⟫ Creating demo jaw… ⟫ Demo-Kiefer wird erstellt…
+Deze STL is al open (een scan of oppervlak). Weefselzijde halen werkt op een gesloten product. ⟫ This STL is already open (a scan or surface). Extracting the tissue side works on a closed product. ⟫ Dieses STL ist bereits offen (ein Scan oder eine Fläche). Das Herauslösen der Gewebeseite funktioniert bei einem geschlossenen Produkt.
+Digital Denture CAD {0} — productierapport ⟫ Digital Denture CAD {0} — production report ⟫ Digital Denture CAD {0} — Produktionsbericht
+Dikte meten… ⟫ Measuring thickness… ⟫ Stärke wird gemessen…
+Dikte overal ≥ {0} mm. ⟫ Thickness everywhere ≥ {0} mm. ⟫ Stärke überall ≥ {0} mm.
+Dit is een gesloten model. Is het een bestaande lepel/beetplaat? Haal dan hierboven de weefselzijde eruit. ⟫ This is a closed model. Is it an existing tray/baseplate? Then extract the tissue side above. ⟫ Dies ist ein geschlossenes Modell. Ist es ein bestehender Löffel/eine Basisplatte? Dann oben die Gewebeseite herauslösen.
+Downloaden lukt hier niet ({0}). ⟫ Downloading is not possible here ({0}). ⟫ Herunterladen ist hier nicht möglich ({0}).
+Driehoeken: {0} · punten: {1} · delen: {2} ⟫ Triangles: {0} · points: {1} · parts: {2} ⟫ Dreiecke: {0} · Punkte: {1} · Teile: {2}
+Drukdragend {0}% · ontlasten {1}% · afsluiting {2}% · plooi/rand {3}% ⟫ Stress-bearing {0}% · relief {1}% · seal {2}% · fold/border {3}% ⟫ Druckaufnehmend {0} % · entlasten {1} % · Abdichtung {2} % · Umschlagfalte/Rand {3} %
+Eerste stap ⟫ First step ⟫ Erster Schritt
+Element {0} geselecteerd{1} · kroon {2} × {3} × {4} mm. ⟫ Tooth {0} selected{1} · crown {2} × {3} × {4} mm. ⟫ Zahn {0} ausgewählt{1} · Krone {2} × {3} × {4} mm.
+Elementen ⟫ Teeth ⟫ Zähne
+Elementen tegenkaak.stl (opstelling BK) ⟫ Elementen tegenkaak.stl (opposing teeth, UJ setup) ⟫ Elementen tegenkaak.stl (Gegenkieferzähne, OK-Aufstellung)
+Elementen tegenkaak.stl (opstelling OK) ⟫ Elementen tegenkaak.stl (opposing teeth, LJ setup) ⟫ Elementen tegenkaak.stl (Gegenkieferzähne, UK-Aufstellung)
+Elementen.stl (alle tanden) ⟫ Elementen.stl (all teeth) ⟫ Elementen.stl (alle Zähne)
+Er is nog geen omtrek. Tik op 🧭 Automatisch of teken de omtrek: zonder omtrek wordt geen plaat gemaakt. ⟫ There is no outline yet. Tap 🧭 Automatic or draw the outline: without an outline no plate is made. ⟫ Es gibt noch keinen Umriss. Tippen Sie auf 🧭 Automatisch oder zeichnen Sie den Umriss: ohne Umriss wird keine Platte erstellt.
+Frenula: {0} ⟫ Frenula: {0} ⟫ Bändchen: {0}
+Geen antagonist boven: {0}. ⟫ No antagonist above: {0}. ⟫ Kein Antagonist darüber: {0}.
+Geen antagonist: occlusie niet te controleren ⟫ No antagonist: occlusion cannot be checked ⟫ Kein Antagonist: Okklusion nicht prüfbar
+Geen bestand ontvangen uit het orderoverzicht (verlopen?). Open het opnieuw. ⟫ No file received from the order overview (expired?). Open it again. ⟫ Keine Datei aus der Auftragsübersicht erhalten (abgelaufen?). Bitte erneut öffnen.
+Geen bruikbare weefselzijde gevonden. Kies de andere zijde. ⟫ No usable tissue side found. Choose the other side. ⟫ Keine brauchbare Gewebeseite gefunden. Wählen Sie die andere Seite.
+Geen klinische validatie. Controleer alle bestanden vóór productie. ⟫ No clinical validation. Check all files before production. ⟫ Keine klinische Validierung. Prüfen Sie alle Dateien vor der Produktion.
+Geen klinische validatie: controleer alle bestanden in slicer/CAM en klinisch ⟫ No clinical validation: check all files in the slicer/CAM and clinically ⟫ Keine klinische Validierung: alle Dateien im Slicer/CAM und klinisch prüfen
+Geen ondersnijdingen gevonden langs de insteekas. ⟫ No undercuts found along the path of insertion. ⟫ Keine Unterschnitte entlang der Einschubrichtung gefunden.
+Geen scan geladen ⟫ No scan loaded ⟫ Kein Scan geladen
+Geen tandopstelling ⟫ No tooth setup ⟫ Keine Zahnaufstellung
+Geen was. De plaat ligt exact op de scan. ⟫ No wax. The plate lies exactly on the scan. ⟫ Kein Wachs. Die Platte liegt exakt auf dem Scan.
+Genereer eerst een lepel, beetplaat of prothesebasis. ⟫ First generate a tray, baseplate or denture base. ⟫ Erzeugen Sie zuerst einen Löffel, eine Basisplatte oder eine Prothesenbasis.
+Genereer {0} ⟫ Generate {0} ⟫ {0} erzeugen
+Geselecteerd: ⟫ Selected: ⟫ Ausgewählt:
+Gesloten model: kies bij Scan & mesh "Weefselzijde uit product halen" om er een nieuwe plaat op te maken. ⟫ Closed model: choose "Extract tissue side from product" under Scan & mesh to make a new plate on it. ⟫ Geschlossenes Modell: Wählen Sie unter Scan & Mesh „Gewebeseite aus Produkt lösen“, um darauf eine neue Platte zu erstellen.
+Grote scan ({0} facetten) vereenvoudigen… ⟫ Simplifying large scan ({0} faces)… ⟫ Großer Scan ({0} Facetten) wird vereinfacht…
+Handmatig opstellen: kies hieronder een element en tik op de kam waar het moet staan. Het volgende element wordt automatisch voorgesteld. ⟫ Manual setup: choose a tooth below and tap on the ridge where it should go. The next tooth is suggested automatically. ⟫ Manuelle Aufstellung: Wählen Sie unten einen Zahn und tippen Sie auf den Kamm, wo er stehen soll. Der nächste Zahn wird automatisch vorgeschlagen.
+Handmatig: kies een element en tik op de kam. ⟫ Manual: choose a tooth and tap on the ridge. ⟫ Manuell: Zahn wählen und auf den Kamm tippen.
+In deze stap valt niets terug te zetten. ⟫ There is nothing to undo in this step. ⟫ In diesem Schritt gibt es nichts rückgängig zu machen.
+In occlusie brengen met de antagonist ⟫ Bring into occlusion with the antagonist ⟫ Mit dem Antagonisten in Okklusion bringen
+Inslijpen · buiten de elementen draaien ⟫ Grinding · rotate outside the teeth ⟫ Einschleifen · außerhalb der Zähne drehen
+Inslijpen: sleep over een element (kleur = contact met de tegenkaak) · buiten de elementen draaien ⟫ Grinding: drag over a tooth (colour = contact with the opposing jaw) · rotate outside the teeth ⟫ Einschleifen: über einen Zahn ziehen (Farbe = Kontakt zum Gegenkiefer) · außerhalb der Zähne drehen
+Instellingen geladen. Open de STL-scan opnieuw. ⟫ Settings loaded. Open the STL scan again. ⟫ Einstellungen geladen. Öffnen Sie den STL-Scan erneut.
+Kaak analyseren… ⟫ Analysing jaw… ⟫ Kiefer wird analysiert…
+Kamlijn zoeken… ⟫ Finding ridge line… ⟫ Kammlinie wird gesucht…
+Kamlijn-referentiepunten gezet ⟫ Ridge line reference points set ⟫ Kammlinien-Referenzpunkte gesetzt
+Kies een gegenereerd werkstuk. ⟫ Choose a generated workpiece. ⟫ Wählen Sie ein erzeugtes Werkstück.
+Kies minstens één beschikbaar bestand. ⟫ Choose at least one available file. ⟫ Wählen Sie mindestens eine verfügbare Datei.
+Klaar in {0} s. Controleer het resultaat hieronder en ga naar Productie. ⟫ Done in {0} s. Check the result below and go to Production. ⟫ Fertig in {0} s. Prüfen Sie das Ergebnis unten und gehen Sie zu Produktion.
+Kleur: rood = penetratie · oranje < 0,1 · geel < 0,3 · groen < 0,8 mm. ⟫ Colour: red = penetration · orange < 0.1 · yellow < 0.3 · green < 0.8 mm. ⟫ Farbe: rot = Durchdringung · orange < 0,1 · gelb < 0,3 · grün < 0,8 mm.
+Laad eerst een antagonist (stap Scan & mesh). ⟫ First load an antagonist (Scan & mesh step). ⟫ Laden Sie zuerst einen Antagonisten (Schritt Scan & Mesh).
+Laad eerst een gesloten product (STL). ⟫ First load a closed product (STL). ⟫ Laden Sie zuerst ein geschlossenes Produkt (STL).
+Laad eerst een scan. ⟫ First load a scan. ⟫ Laden Sie zuerst einen Scan.
+Laatste stap ⟫ Last step ⟫ Letzter Schritt
+Lepel ⟫ Tray ⟫ Löffel
+Lepel berekenen… ⟫ Calculating tray… ⟫ Löffel wird berechnet…
+Lepel gegenereerd ⟫ Tray generated ⟫ Löffel erzeugt
+Lepel gegenereerd. ⟫ Tray generated. ⟫ Löffel erzeugt.
+Lepel genereren ⟫ Generate tray ⟫ Löffel erzeugen
+Lepel klaar: {0}. ⟫ Tray ready: {0}. ⟫ Löffel fertig: {0}.
+Lepel nog niet gegenereerd ⟫ Tray not generated yet ⟫ Löffel noch nicht erzeugt
+Lepel opbouwen ({0} mm afdrukruimte)… ⟫ Building tray ({0} mm impression space)… ⟫ Löffel wird aufgebaut ({0} mm Platz für Abformmaterial)…
+Lepel opbouwen… ⟫ Building tray… ⟫ Löffel wird aufgebaut…
+Lepel-STL ⟫ Tray STL ⟫ Löffel-STL
+Let op: de was hoorde bij de oude scan en is verwijderd. Breng hem opnieuw aan (Analyse). ⟫ Note: the wax belonged to the old scan and has been removed. Apply it again (Analysis). ⟫ Achtung: Das Wachs gehörte zum alten Scan und wurde entfernt. Tragen Sie es erneut auf (Analyse).
+Let op: delen die door het pasvlak steken konden niet automatisch worden weggesneden. Controleer het pasvlak. ⟫ Note: parts that stick through the fitting surface could not be cut away automatically. Check the fitting surface. ⟫ Achtung: Teile, die durch die Passfläche ragen, konnten nicht automatisch weggeschnitten werden. Prüfen Sie die Passfläche.
+Let op: rechts en links lijken verwisseld ten opzichte van de kaakoriëntatie. De opstelling volgt de anatomie. ⟫ Note: right and left appear swapped relative to the jaw orientation. The setup follows the anatomy. ⟫ Achtung: Rechts und links scheinen gegenüber der Kieferausrichtung vertauscht. Die Aufstellung folgt der Anatomie.
+Losse elementen per FDI ⟫ Separate teeth per FDI ⟫ Einzelne Zähne pro FDI
+Markeren: sleep over de scan ⟫ Marking: drag over the scan ⟫ Markieren: über den Scan ziehen
+Mesh analyseren… ⟫ Analysing mesh… ⟫ Mesh wird analysiert…
+Mesh gerepareerd. Controleer het resultaat. ⟫ Mesh repaired. Check the result. ⟫ Mesh repariert. Prüfen Sie das Ergebnis.
+Mesh repareren… ⟫ Repairing mesh… ⟫ Mesh wird repariert…
+Mijn bestanden → Downloads ⟫ My Files → Downloads ⟫ Eigene Dateien → Downloads
+Monoblock klaar: {0}. ⟫ Monoblock ready: {0}. ⟫ Monoblock fertig: {0}.
+Monoblock prothese ⟫ Monoblock denture ⟫ Monoblock-Prothese
+Monoblock-STL ⟫ Monoblock STL ⟫ Monoblock-STL
+Monoblock.stl (basis + tanden) ⟫ Monoblock.stl (base + teeth) ⟫ Monoblock.stl (Basis + Zähne)
+NIET gesloten ({0} open randen) ⟫ NOT closed ({0} open edges) ⟫ NICHT geschlossen ({0} offene Kanten)
+Niets om opnieuw te doen in de scan. ⟫ Nothing to redo in the scan. ⟫ Nichts im Scan zu wiederholen.
+Niets om terug te zetten in de scan. ⟫ Nothing to undo in the scan. ⟫ Nichts im Scan rückgängig zu machen.
+Nodig: opstelling en antagonist. ⟫ Required: setup and antagonist. ⟫ Erforderlich: Aufstellung und Antagonist.
+Nog geen omtrek: kies 🧭 Automatisch, of ✏️ Teken en trek de lijn rond het plaatgebied. ⟫ No outline yet: choose 🧭 Automatic, or ✏️ Draw and trace the line around the plate area. ⟫ Noch kein Umriss: Wählen Sie 🧭 Automatisch, oder ✏️ Zeichnen und ziehen Sie die Linie um das Plattengebiet.
+Nog geen opstelling. ⟫ No setup yet. ⟫ Noch keine Aufstellung.
+Nog geen punten. ⟫ No points yet. ⟫ Noch keine Punkte.
+Nog geen werkstuk gegenereerd ⟫ No workpiece generated yet ⟫ Noch kein Werkstück erzeugt
+Normaalrichting omgekeerd. ⟫ Normal direction reversed. ⟫ Normalenrichtung umgekehrt.
+Occlusale richting: ({0}) ⟫ Occlusal direction: ({0}) ⟫ Okklusale Richtung: ({0})
+Occlusie zoeken… ⟫ Finding occlusion… ⟫ Okklusion wird gesucht…
+Omgekeerde buren: {0} · platte facetten: {1} ⟫ Flipped neighbours: {0} · flat faces: {1} ⟫ Umgekehrte Nachbarn: {0} · flache Facetten: {1}
+Omtrek basis volgens de anatomie ⟫ Base outline following the anatomy ⟫ Umriss der Basis nach der Anatomie
+Omtrek bepalen volgens de anatomie… ⟫ Determining outline from the anatomy… ⟫ Umriss wird nach der Anatomie bestimmt…
+Omtrek gesloten. Pak de lijn op elke plek en sleep (vinger of muis); de gele zone gaat mee (meeneemzone). ✏️ Teken = stuk overtekenen · 〰 Glad = gladstrijken. ⟫ Outline closed. Grab the line anywhere and drag (finger or mouse); the yellow zone follows (drag zone). ✏️ Draw = redraw a section · 〰 Smooth = smooth out. ⟫ Umriss geschlossen. Greifen Sie die Linie an beliebiger Stelle und ziehen Sie (Finger oder Maus); die gelbe Zone geht mit (Mitnahmezone). ✏️ Zeichnen = Stück neu zeichnen · 〰 Glätten = glatt streichen.
+Omtrek gewijzigd: tik op ⟫ Outline changed: tap ⟫ Umriss geändert: tippen Sie auf
+voor het nieuwe werkstuk (en de STL). ⟫ for the new workpiece (and the STL). ⟫ für das neue Werkstück (und die STL).
+Omtrek {0} (anatomie of scanrand) ⟫ Outline {0} (anatomy or scan edge) ⟫ Umriss {0} (Anatomie oder Scanrand)
+Onbekend projectbestand. ⟫ Unknown project file. ⟫ Unbekannte Projektdatei.
+Ondersnijdingen berekenen… ⟫ Calculating undercuts… ⟫ Unterschnitte werden berechnet…
+Ondersnijdingen niet beoordeeld ⟫ Undercuts not reviewed ⟫ Unterschnitte nicht geprüft
+Ondersnijdingen opvullen met was… ⟫ Filling undercuts with wax… ⟫ Unterschnitte werden mit Wachs ausgeblockt…
+Ondersnijdingen opvullen… ⟫ Filling undercuts… ⟫ Unterschnitte werden ausgeblockt…
+Ongeldige schaalfactor. ⟫ Invalid scale factor. ⟫ Ungültiger Skalierungsfaktor.
+Ongeldige verplaatsing. ⟫ Invalid displacement. ⟫ Ungültige Verschiebung.
+Open eerst een STL-scan of kies Demo-kaak, en tik dan op ⚡ Alles automatisch. ⟫ First open an STL scan or choose Demo jaw, then tap ⚡ Fully automatic. ⟫ Öffnen Sie zuerst einen STL-Scan oder wählen Sie Demo-Kiefer, und tippen Sie dann auf ⚡ Alles automatisch.
+Open eerst een scan (of Demo-kaak). ⟫ First open a scan (or Demo jaw). ⟫ Öffnen Sie zuerst einen Scan (oder Demo-Kiefer).
+Open randen: {0} ({1} lus{2}) · niet-manifold: {3} ⟫ Open edges: {0} ({1} loop(s){2}) · non-manifold: {3} ⟫ Offene Kanten: {0} ({1} Schleife(n){2}) · nicht-manifold: {3}
+Opgeslagen: {0} ({1} MB) → {2} ⟫ Saved: {0} ({1} MB) → {2} ⟫ Gespeichert: {0} ({1} MB) → {2}
+Oppervlak: {0} mm²{1} ⟫ Surface area: {0} mm²{1} ⟫ Oberfläche: {0} mm²{1}
+Opstelling ⟫ Setup ⟫ Aufstellung
+Opstelling gewijzigd: genereer de prothese opnieuw. ⟫ Setup changed: generate the denture again. ⟫ Aufstellung geändert: Erzeugen Sie die Prothese erneut.
+Originele scan terug ({0} facetten). De werkstukken blijven zoals ze waren; bij Genereer wordt de scan eerst vereenvoudigd. ⟫ Original scan restored ({0} faces). The workpieces stay as they were; on Generate the scan is simplified first. ⟫ Originalscan wiederhergestellt ({0} Facetten). Die Werkstücke bleiben wie sie waren; bei Erzeugen wird der Scan zuerst vereinfacht.
+Overdracht mislukt: ⟫ Transfer failed: ⟫ Übertragung fehlgeschlagen:
+Overtekenen: begin óp de lijn, teken de nieuwe rand en eindig weer óp de lijn. Een hele rondgang = nieuwe omtrek. ✓ Klaar om te stoppen. ⟫ Redrawing: start on the line, draw the new border and end on the line again. A full loop = new outline. ✓ Done to stop. ⟫ Neu zeichnen: auf der Linie beginnen, den neuen Rand zeichnen und wieder auf der Linie enden. Ein ganzer Umlauf = neuer Umriss. ✓ Fertig zum Beenden.
+Pasvlak controleren… ⟫ Checking fitting surface… ⟫ Passfläche wird geprüft…
+Pasvlak {0}: 99% ≤ {1} mm van de scan (doel ≤ 0,05 mm), mediaan {2} mm{3} ⟫ Fitting surface {0}: 99% ≤ {1} mm from the scan (target ≤ 0.05 mm), median {2} mm{3} ⟫ Passfläche {0}: 99 % ≤ {1} mm vom Scan (Ziel ≤ 0,05 mm), Median {2} mm{3}
+Perforaties ⟫ Perforations ⟫ Perforationen
+Plaat opbouwen ({0} mm afstand tot de scan)… ⟫ Building plate ({0} mm distance to the scan)… ⟫ Platte wird aufgebaut ({0} mm Abstand zum Scan)…
+Plaat opbouwen… ⟫ Building plate… ⟫ Platte wird aufgebaut…
+Plaatoppervlak uitsnijden… ⟫ Cutting out plate surface… ⟫ Plattenfläche wird ausgeschnitten…
+Plooidiepte mediaan {0} mm{1} ⟫ Fold depth median {0} mm{1} ⟫ Umschlagfaltentiefe Median {0} mm{1}
+Productie ⟫ Production ⟫ Produktion
+Productiepakket samenstellen… ⟫ Assembling production package… ⟫ Produktionspaket wird zusammengestellt…
+Project geopend. Omtrekken zijn heropend: sluit ze opnieuw voordat je werkstukken genereert. ⟫ Project opened. Outlines have been reopened: close them again before you generate workpieces. ⟫ Projekt geöffnet. Umrisse wurden wieder geöffnet: Schließen Sie sie erneut, bevor Sie Werkstücke erzeugen.
+Project openen… ⟫ Opening project… ⟫ Projekt wird geöffnet…
+Project opgeslagen, inclusief scan. ⟫ Project saved, including scan. ⟫ Projekt gespeichert, einschließlich Scan.
+Project opslaan… ⟫ Saving project… ⟫ Projekt wird gespeichert…
+Project: {0} · {1} ⟫ Project: {0} · {1} ⟫ Projekt: {0} · {1}
+Projectcode ingevuld ⟫ Project code filled in ⟫ Projektcode eingetragen
+Projectcode ontbreekt ⟫ Project code missing ⟫ Projektcode fehlt
+Prothese berekenen (booleaanse bewerkingen)… ⟫ Calculating denture (Boolean operations)… ⟫ Prothese wird berechnet (Boolesche Operationen)…
+Prothese gegenereerd. ⟫ Denture generated. ⟫ Prothese erzeugt.
+Prothesebasis gegenereerd ⟫ Denture base generated ⟫ Prothesenbasis erzeugt
+Prothesebasis genereren ⟫ Generate denture base ⟫ Prothesenbasis erzeugen
+Prothesebasis met sockets ⟫ Denture base with sockets ⟫ Prothesenbasis mit Sockets
+Prothesebasis nog niet gegenereerd ⟫ Denture base not generated yet ⟫ Prothesenbasis noch nicht erzeugt
+Rand aanvullen… ⟫ Completing border… ⟫ Rand wird ergänzt…
+De plooi is niet gescand. ⟫ The vestibular fold was not scanned. ⟫ Die Umschlagfalte ist nicht gescannt.
+Rand langs de scanrand: {0} loopt {1} de rand van de scan ({2} = scanrand). ⟫ Border along the scan edge: {0} runs {1} the edge of the scan ({2} = scan edge). ⟫ Rand entlang des Scanrands: {0} reicht {1} den Rand des Scans ({2} = Scanrand).
+Sleep de lijn om een stuk aan te passen. ⟫ Drag the line to adjust a section. ⟫ Ziehen Sie die Linie, um ein Stück anzupassen.
+de lepel ⟫ the tray ⟫ der Löffel
+de beetplaat ⟫ the baseplate ⟫ die Basisplatte
+de basis ⟫ the base ⟫ die Basis
+precies tot ⟫ exactly up to ⟫ genau bis an
+tot {0} mm binnen ⟫ up to {0} mm inside ⟫ bis {0} mm vor
+lepelrand ⟫ tray border ⟫ Löffelrand
+plaatrand ⟫ plate border ⟫ Plattenrand
+Rand {0} automatisch… ⟫ Border {0} automatically… ⟫ Rand {0} automatisch…
+Rand {0} bepalen… ⟫ Determining border {0}… ⟫ Rand {0} wird bestimmt…
+Randlijnen: {0} · stegen: {1} · referentiepunten: {2}. Ze liggen op het scanoppervlak en draaien mee. ⟫ Border lines: {0} · bars: {1} · reference points: {2}. They lie on the scan surface and rotate with it. ⟫ Randlinien: {0} · Stege: {1} · Referenzpunkte: {2}. Sie liegen auf der Scanoberfläche und drehen sich mit.
+Referentiepunten automatisch bepaald. Controleer ze en verplaats ze zo nodig met de knoppen Rechts/Midden/Links. ⟫ Reference points determined automatically. Check them and move them if necessary with the Right/Middle/Left buttons. ⟫ Referenzpunkte automatisch bestimmt. Prüfen Sie sie und verschieben Sie sie bei Bedarf mit den Tasten Rechts/Mitte/Links.
+Referentiepunten automatisch gezet (controleer bij Analyse). ⟫ Reference points set automatically (check under Analysis). ⟫ Referenzpunkte automatisch gesetzt (unter Analyse prüfen).
+Referentiepunten en anatomie… ⟫ Reference points and anatomy… ⟫ Referenzpunkte und Anatomie…
+Referentiepunten konden niet automatisch gezet worden. Zet ze bij Analyse. ⟫ Reference points could not be set automatically. Set them under Analysis. ⟫ Referenzpunkte konnten nicht automatisch gesetzt werden. Setzen Sie sie unter Analyse.
+Referentiepunten niet automatisch te bepalen: zet ze bij Analyse. ⟫ Reference points cannot be determined automatically: set them under Analysis. ⟫ Referenzpunkte nicht automatisch bestimmbar: Setzen Sie sie unter Analyse.
+Referentiepunten ontbreken ⟫ Reference points missing ⟫ Referenzpunkte fehlen
+Referentiepunten op de kam ⟫ Reference points on the ridge ⟫ Referenzpunkte auf dem Kamm
+Referentiepunten op de kam… ⟫ Reference points on the ridge… ⟫ Referenzpunkte auf dem Kamm…
+Reparatie ⟫ Repair ⟫ Reparatur
+Reparatie: {0} ongeldig, {1} plat, {2} dubbel verwijderd · {3} facetten omgedraaid · {4} gaten gedicht{5}. ⟫ Repair: {0} invalid, {1} flat, {2} duplicate removed · {3} faces flipped · {4} holes closed{5}. ⟫ Reparatur: {0} ungültig, {1} flach, {2} doppelt entfernt · {3} Facetten umgedreht · {4} Löcher geschlossen{5}.
+Resultaat ⟫ Result ⟫ Ergebnis
+STL inlezen… ⟫ Reading STL… ⟫ STL wird eingelesen…
+Scan aangepast: {0} punten ontlast{1}. Genereer de werkstukken opnieuw. ⟫ Scan adjusted: {0} points relieved{1}. Generate the workpieces again. ⟫ Scan angepasst: {0} Punkte entlastet{1}. Erzeugen Sie die Werkstücke erneut.
+Scan aanpassen… ⟫ Adjusting scan… ⟫ Scan wird angepasst…
+Scan analyseren… ⟫ Analysing scan… ⟫ Scan wird analysiert…
+Scan bewerken · Esc = stoppen ⟫ Edit scan · Esc = stop ⟫ Scan bearbeiten · Esc = beenden
+Scan bewerken: zie de aanwijzing onderaan · Esc = stoppen ⟫ Edit scan: see the hint at the bottom · Esc = stop ⟫ Scan bearbeiten: siehe Hinweis unten · Esc = beenden
+Scan bijgewerkt; {0} opnieuw gemaakt. De opstelling is behouden. ⟫ Scan updated; {0} rebuilt. The setup has been kept. ⟫ Scan aktualisiert; {0} neu erstellt. Die Aufstellung bleibt erhalten.
+Scan bijsnijden… ⟫ Trimming scan… ⟫ Scan wird beschnitten…
+Scan gecentreerd rond de oorsprong. ⟫ Scan centred on the origin. ⟫ Scan um den Ursprung zentriert.
+Scan geladen ({0} driehoeken) ⟫ Scan loaded ({0} triangles) ⟫ Scan geladen ({0} Dreiecke)
+Scan geladen: {0} · {1} driehoeken{2}.{3} ⟫ Scan loaded: {0} · {1} triangles{2}.{3} ⟫ Scan geladen: {0} · {1} Dreiecke{2}.{3}
+Scan geschaald met factor {0}. ⟫ Scan scaled by factor {0}. ⟫ Scan mit Faktor {0} skaliert.
+Scan gespiegeld. ⟫ Scan mirrored. ⟫ Scan gespiegelt.
+Scan repareren… ⟫ Repairing scan… ⟫ Scan wird repariert…
+Scan vereenvoudigd: {0}. ⟫ Scan simplified: {0}. ⟫ Scan vereinfacht: {0}.
+Scan vereenvoudigen… ⟫ Simplifying scan… ⟫ Scan wird vereinfacht…
+Scan verplaatst {0} mm. ⟫ Scan moved {0} mm. ⟫ Scan um {0} mm verschoben.
+Scan voorbereid. Controleer het paarse (aangevulde) deel en ga verder met de omtrek. ⟫ Scan prepared. Check the purple (completed) part and continue with the outline. ⟫ Scan vorbereitet. Prüfen Sie den violetten (ergänzten) Teil und fahren Sie mit dem Umriss fort.
+Scan voorbereiden (repareren, bijsnijden, aanvullen) ⟫ Prepare scan (repair, trim, complete) ⟫ Scan vorbereiten (reparieren, beschneiden, ergänzen)
+Scan voorbereiden… ⟫ Preparing scan… ⟫ Scan wird vorbereitet…
+Scan {0}° geroteerd. ⟫ Scan rotated {0}°. ⟫ Scan um {0}° gedreht.
+Scanbewerking hersteld. ⟫ Scan edit restored. ⟫ Scanbearbeitung wiederhergestellt.
+Scanbewerking teruggedraaid. ⟫ Scan edit undone. ⟫ Scanbearbeitung rückgängig gemacht.
+Scheidingslijn beoordeeld ⟫ Boundary line reviewed ⟫ Trennlinie geprüft
+Scheidingslijn niet beoordeeld ⟫ Boundary line not reviewed ⟫ Trennlinie nicht geprüft
+Selecteer eerst een element. ⟫ First select a tooth. ⟫ Wählen Sie zuerst einen Zahn.
+Sluit eerst de omtrek door op het eerste punt te tikken. ⟫ First close the outline by tapping the first point. ⟫ Schließen Sie zuerst den Umriss, indem Sie auf den ersten Punkt tippen.
+Statiek niet gecontroleerd: analyseer eerst de kaak (Analyse → 🧭) ⟫ Statics not checked: first analyse the jaw (Analysis → 🧭) ⟫ Statik nicht geprüft: Analysieren Sie zuerst den Kiefer (Analyse → 🧭)
+Statiek: zijdelingse elementen boven de kam{0}, geen elementen voorbij het einde van de kam ⟫ Statics: posterior teeth over the ridge{0}, no teeth beyond the end of the ridge ⟫ Statik: Seitenzähne über dem Kamm{0}, keine Zähne jenseits des Kammendes
+Stel eerst de tanden op. ⟫ First set up the teeth. ⟫ Stellen Sie zuerst die Zähne auf.
+Symmetrie werkt pas als de referentiepunten gezet zijn (stap Analyse). ⟫ Symmetry only works once the reference points are set (Analysis step). ⟫ Symmetrie funktioniert erst, wenn die Referenzpunkte gesetzt sind (Schritt Analyse).
+Tanden opgesteld{0}. Tik een element om te selecteren, houd vast en sleep om te verplaatsen. ⟫ Teeth set up{0}. Tap a tooth to select it, hold and drag to move it. ⟫ Zähne aufgestellt{0}. Tippen Sie einen Zahn an, um ihn auszuwählen; halten und ziehen, um ihn zu verschieben.
+Tanden opstellen op de kamlijn ⟫ Set up teeth on the ridge line ⟫ Zähne auf der Kammlinie aufstellen
+Tanden opstellen… ⟫ Setting up teeth… ⟫ Zähne werden aufgestellt…
+Tekenen: trek de lijn met vinger of muis · begin óp de lijn = dat stuk overtekenen · tik = punt · twee vingers of rechtermuisknop = draaien · knijpen/scrollen = zoomen ⟫ Drawing: trace the line with finger or mouse · start on the line = redraw that section · tap = point · two fingers or right mouse button = rotate · pinch/scroll = zoom ⟫ Zeichnen: Linie mit Finger oder Maus ziehen · auf der Linie beginnen = dieses Stück neu zeichnen · tippen = Punkt · zwei Finger oder rechte Maustaste = drehen · Pinch/Scrollen = zoomen
+Tik nogmaals op 👁 om terug te gaan. ⟫ Tap 👁 again to go back. ⟫ Tippen Sie erneut auf 👁, um zurückzugehen.
+Tik om een referentiepunt te zetten ⟫ Tap to set a reference point ⟫ Tippen, um einen Referenzpunkt zu setzen
+Tik op de kam voor punt ⟫ Tap on the ridge for point ⟫ Auf den Kamm tippen für Punkt
+Tik op het scanoppervlak. ⟫ Tap on the scan surface. ⟫ Tippen Sie auf die Scanoberfläche.
+Trek de omtrek in één beweging rond het plaatgebied en eindig bij je beginpunt. Tikken zet losse punten. ⟫ Trace the outline in one stroke around the plate area and end at your starting point. Tapping sets single points. ⟫ Ziehen Sie den Umriss in einem Zug um das Plattengebiet und enden Sie an Ihrem Startpunkt. Tippen setzt einzelne Punkte.
+Uitgesneden oppervlak: {0} facetten. ⟫ Cut-out surface: {0} faces. ⟫ Ausgeschnittene Fläche: {0} Facetten.
+Uitsnijden… ⟫ Cutting out… ⟫ Wird ausgeschnitten…
+Volgende stap: {0} ⟫ Next step: {0} ⟫ Nächster Schritt: {0}
+Vorige stap: {0} ⟫ Previous step: {0} ⟫ Vorheriger Schritt: {0}
+Was aangebracht op {0} punten (max {1} mm, uitblokhoek {2}°). Bewerk met ✋ Was bewerken. ⟫ Wax applied at {0} points (max {1} mm, block-out angle {2}°). Edit with ✋ Edit wax. ⟫ Wachs an {0} Punkten aufgetragen (max. {1} mm, Ausblockwinkel {2}°). Bearbeiten mit ✋ Wachs bearbeiten.
+Was bewerken: sleep over scan of was · buiten de scan draaien · Shift keert toevoegen/wegnemen om ⟫ Editing wax: drag over scan or wax · rotate outside the scan · Shift swaps add/remove ⟫ Wachs bearbeiten: über Scan oder Wachs ziehen · außerhalb des Scans drehen · Umschalt kehrt Auftragen/Abtragen um
+Was op {0} punten · max {1} mm · gem. {2} mm. De plaat wordt op scan + was gebouwd. ⟫ Wax at {0} points · max {1} mm · avg. {2} mm. The plate is built on scan + wax. ⟫ Wachs an {0} Punkten · max. {1} mm · Mittel {2} mm. Die Platte wird auf Scan + Wachs aufgebaut.
+Was · buiten de scan draaien ⟫ Wax · rotate outside the scan ⟫ Wachs · außerhalb des Scans drehen
+Wat door het pasvlak steekt wegsnijden… ⟫ Cutting away what sticks through the fitting surface… ⟫ Was durch die Passfläche ragt, wird weggeschnitten…
+Weefselblok opnieuw proberen… ⟫ Retrying tissue block… ⟫ Gewebeblock wird erneut versucht…
+Weefselstops ⟫ Tissue stops ⟫ Gewebestopps
+Weefselzijde klaar. Ga naar Lepel of Beetplaat: de rand volgt het originele product, er hoeft geen omtrek getekend te worden. ⟫ Tissue side ready. Go to Tray or Baseplate: the border follows the original product, no outline needs to be drawn. ⟫ Gewebeseite fertig. Gehen Sie zu Löffel oder Basisplatte: Der Rand folgt dem Originalprodukt, es muss kein Umriss gezeichnet werden.
+Weefselzijde zoeken… ⟫ Finding tissue side… ⟫ Gewebeseite wird gesucht…
+Weefselzijde: {0} van {1} facetten{2}. ↶ Terug zet het product terug.{3} ⟫ Tissue side: {0} of {1} faces{2}. ↶ Back restores the product.{3} ⟫ Gewebeseite: {0} von {1} Facetten{2}. ↶ Zurück stellt das Produkt wieder her.{3}
+Werkstuk gewisseld naar {0}. ⟫ Workpiece switched to {0}. ⟫ Werkstück gewechselt zu {0}.
+Werkstuk klaarmaken voor bewerken… ⟫ Preparing workpiece for editing… ⟫ Werkstück wird für die Bearbeitung vorbereitet…
+Werkstukken opnieuw maken op de bijgewerkte scan… ⟫ Rebuilding workpieces on the updated scan… ⟫ Werkstücke werden auf dem aktualisierten Scan neu erstellt…
+afdrukruimte {0} mm: {1}% binnen 0,05 mm, nergens meer dan {2} mm te dicht (99%) ⟫ impression space {0} mm: {1}% within 0.05 mm, nowhere more than {2} mm too close (99%) ⟫ Platz für Abformmaterial {0} mm: {1} % innerhalb 0,05 mm, nirgends mehr als {2} mm zu nah (99 %)
+beetwal overgeslagen: {0}. Zet "Volgens de regels" uit en kies een walhoogte als je toch een wal wilt ⟫ bite rim skipped: {0}. Turn off "By the rules" and choose a rim height if you still want a rim ⟫ Bisswall übersprungen: {0}. Schalten Sie „Nach den Regeln“ aus und wählen Sie eine Wallhöhe, wenn Sie trotzdem einen Wall möchten
+beetwal volgens regels (kamlijn; hoogte voor {0} / achter {1} mm boven de kam{2}) ⟫ bite rim by the rules (ridge line; height anterior {0} / posterior {1} mm above the ridge{2}) ⟫ Bisswall nach den Regeln (Kammlinie; Höhe vorn {0} / hinten {1} mm über dem Kamm{2})
+beetwal {0} mm ⟫ bite rim {0} mm ⟫ Bisswall {0} mm
+boog op de gemeten kamlijn ⟫ arch on the measured ridge line ⟫ Bogen auf der gemessenen Kammlinie
+boog {0} × {1} mm ⟫ arch {0} × {1} mm ⟫ Bogen {0} × {1} mm
+bovenkaak (met torus) ⟫ upper jaw (with torus) ⟫ Oberkiefer (mit Torus)
+onderkaak ⟫ lower jaw ⟫ Unterkiefer
+de plooi is niet gescand, dus ⟫ the vestibular fold was not scanned, so ⟫ die Umschlagfalte ist nicht gescannt, daher
+de plooi is niet gescand, dus de plooiregel (occlusievlak) is niet te bepalen ⟫ the vestibular fold was not scanned, so the fold rule (occlusal plane) cannot be determined ⟫ die Umschlagfalte ist nicht gescannt, daher lässt sich die Umschlagfaltenregel (Okklusionsebene) nicht bestimmen
+en wortelreliëf ⟫ and root eminences ⟫ und Wurzelrelief
+geen (opstelling gebruikt de hele kaak) ⟫ none (setup uses the whole jaw) ⟫ keine (Aufstellung verwendet den ganzen Kiefer)
+geen antagonist binnen 3 mm ⟫ no antagonist within 3 mm ⟫ kein Antagonist innerhalb von 3 mm
+geen duidelijk gevonden ⟫ none clearly found ⟫ keines eindeutig gefunden
+gesloten (model met sokkel?) ⟫ closed (model with base?) ⟫ geschlossen (Modell mit Sockel?)
+gesloten mesh ⟫ closed mesh ⟫ geschlossenes Mesh
+gesloten ✓{0} ⟫ closed ✓{0} ⟫ geschlossen ✓{0}
+gesloten, volume {0} mm³ ⟫ closed, volume {0} mm³ ⟫ geschlossen, Volumen {0} mm³
+gesloten, {0} niet-manifold rand{1} (delen raken elkaar; controleer in de slicer) ⟫ closed, {0} non-manifold edge(s){1} (parts touch each other; check in the slicer) ⟫ geschlossen, {0} nicht-manifolde Kante(n){1} (Teile berühren sich; im Slicer prüfen)
+gingiva met festoenen en papillen (eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling) ⟫ gingiva with festoons and papillae (simple profile: the anatomical shape did not close for this setup) ⟫ Gingiva mit Girlanden und Papillen (einfaches Profil: die anatomische Form ließ sich bei dieser Aufstellung nicht schließen)
+gingiva met festoenen, papillen{0} (rand {1} mm boven de halslijn) ⟫ gingiva with festoons, papillae{0} (margin {1} mm above the cervical line) ⟫ Gingiva mit Girlanden, Papillen{0} (Rand {1} mm über der Zahnhalslinie)
+gladgemaakt, ⟫ smoothed, ⟫ geglättet,
+je map Downloads ⟫ your Downloads folder ⟫ Ihren Ordner Downloads
+let op: delen raken elkaar; controleer in de slicer ⟫ note: parts touch each other; check in the slicer ⟫ Achtung: Teile berühren sich; im Slicer prüfen
+links distaal ⟫ left distal ⟫ links distal
+met ⟫ with ⟫ mit
+midden (incisief) ⟫ middle (incisive) ⟫ Mitte (inzisal)
+occlusievlak volgens plooiregel: voor {0} / achter {1} mm boven de kam{2} ⟫ occlusal plane by fold rule: anterior {0} / posterior {1} mm above the ridge{2} ⟫ Okklusionsebene nach Umschlagfaltenregel: vorn {0} / hinten {1} mm über dem Kamm{2}
+occlusievlak {0} mm boven de kam{1} ⟫ occlusal plane {0} mm above the ridge{1} ⟫ Okklusionsebene {0} mm über dem Kamm{1}
+om een map te kiezen. ⟫ to choose a folder. ⟫ , um einen Ordner zu wählen.
+om ze te mailen of ⟫ to email them or ⟫ , um sie zu mailen, oder
+open scan ⟫ open scan ⟫ offener Scan
+pasvlak {0}% binnen 0,05 mm van de scan, 99% ≤ {1} mm ⟫ fitting surface {0}% within 0.05 mm of the scan, 99% ≤ {1} mm ⟫ Passfläche {0} % innerhalb 0,05 mm vom Scan, 99 % ≤ {1} mm
+rand langs de scanrand{0} ⟫ border along the scan edge{0} ⟫ Rand entlang des Scanrands{0}
+rand volgens de anatomie ⟫ border following the anatomy ⟫ Rand nach der Anatomie
+rechts distaal ⟫ right distal ⟫ rechts distal
+torus palatinus ⟫ torus palatinus ⟫ Torus palatinus
+vestibulum grotendeels niet gescand (scan eindigt bij de plaatrand) ⟫ vestibule largely not scanned (scan ends at the plate border) ⟫ Vestibulum größtenteils nicht gescannt (Scan endet am Plattenrand)
+volgens de plooiregel ligt het occlusievlak hier niet boven de kam ({0} / {1} mm; betande scan?) ⟫ according to the fold rule the occlusal plane does not lie above the ridge here ({0} / {1} mm; dentate scan?) ⟫ nach der Umschlagfaltenregel liegt die Okklusionsebene hier nicht über dem Kamm ({0} / {1} mm; bezahnter Scan?)
+zonder code ⟫ no code ⟫ ohne Code
+zonder tanden (alleen basis) ⟫ without teeth (base only) ⟫ ohne Zähne (nur Basis)
+{0} STL-bestanden gedownload naar {1}. ⟫ {0} STL files downloaded to {1}. ⟫ {0} STL-Dateien heruntergeladen nach {1}.
+{0} automatisch gemaakt: {1}. Sleep de lijn om de rand aan te passen (of ✏️ Teken om een stuk over te tekenen) en tik daarna op Genereer. ⟫ {0} created automatically: {1}. Drag the line to adjust the border (or ✏️ Draw to redraw a section) and then tap Generate. ⟫ {0} automatisch erstellt: {1}. Ziehen Sie die Linie, um den Rand anzupassen (oder ✏️ Zeichnen, um ein Stück neu zu zeichnen), und tippen Sie dann auf Erzeugen.
+{0} bestanden gedeeld. Kies in het menu ⟫ {0} files shared. In the menu choose ⟫ {0} Dateien geteilt. Wählen Sie im Menü
+{0} bestanden in ZIP gezet. ⟫ {0} files put into a ZIP. ⟫ {0} Dateien in ZIP gepackt.
+{0} elementen in contact gebracht (gem. verplaatsing {1} mm). ⟫ {0} teeth brought into contact (avg. displacement {1} mm). ⟫ {0} Zähne in Kontakt gebracht (mittlere Verschiebung {1} mm).
+{0} elementen opgesteld ⟫ {0} teeth set up ⟫ {0} Zähne aufgestellt
+{0} elementen opgesteld{1} · {2} · {3} · {4}. ⟫ {0} teeth set up{1} · {2} · {3} · {4}. ⟫ {0} Zähne aufgestellt{1} · {2} · {3} · {4}.
+{0} facetten in ondersnijding ({1} mm²). Rood = niet bereikbaar langs de invoerrichting. ⟫ {0} faces in undercut ({1} mm²). Red = not reachable along the path of insertion. ⟫ {0} Facetten im Unterschnitt ({1} mm²). Rot = entlang der Einschubrichtung nicht erreichbar.
+{0} facetten · {1} · volume {2} mm³ ⟫ {0} faces · {1} · volume {2} mm³ ⟫ {0} Facetten · {1} · Volumen {2} mm³
+{0} mm per streek ⟫ {0} mm per stroke ⟫ {0} mm pro Strich
+{0} opbouwen… ⟫ Building {0}… ⟫ {0} wird aufgebaut…
+{0} open randen, {1} niet-manifold ⟫ {0} open edges, {1} non-manifold ⟫ {0} offene Kanten, {1} nicht-manifold
+{0} opnieuw opbouwen… ⟫ Rebuilding {0}… ⟫ {0} wird neu aufgebaut…
+{0} overgeslagen: zet eerst de referentiepunten (stap Analyse). ⟫ {0} skipped: first set the reference points (Analysis step). ⟫ {0} übersprungen: Setzen Sie zuerst die Referenzpunkte (Schritt Analyse).
+{0} punten. Teken verder en eindig bij het witte beginpunt (of tik erop) om te sluiten. ⟫ {0} points. Keep drawing and end at the white starting point (or tap it) to close. ⟫ {0} Punkte. Zeichnen Sie weiter und enden Sie am weißen Startpunkt (oder tippen Sie darauf), um zu schließen.
+{0} samenvoegen met de plaat… ⟫ Merging {0} with the plate… ⟫ {0} wird mit der Platte vereinigt…
+{0} · {1} STL-bestand{2} ⟫ {0} · {1} STL file(s){2} ⟫ {0} · {1} STL-Datei(en){2}
+{0} · {1} driehoeken ⟫ {0} · {1} triangles ⟫ {0} · {1} Dreiecke
+{0} · {1} driehoeken · {2} mm.{3} ⟫ {0} · {1} triangles · {2} mm.{3} ⟫ {0} · {1} Dreiecke · {2} mm.{3}
+{0} · {1} punten{2} · {3} bewerking(en).{4} ⟫ {0} · {1} points{2} · {3} edit(s).{4} ⟫ {0} · {1} Punkte{2} · {3} Bearbeitung(en).{4}
+{0} · {1} · {2} · {3} elementen ⟫ {0} · {1} · {2} · {3} teeth ⟫ {0} · {1} · {2} · {3} Zähne
+{0}/3 punten gezet. ⟫ {0}/3 points set. ⟫ {0}/3 Punkte gesetzt.
+{0}: geen zelfdoorsnijding ⟫ {0}: no self-intersection ⟫ {0}: keine Selbstdurchdringung
+{0}: mislukt — zie de melding onderaan. Los het op en tik opnieuw. ⟫ {0}: failed — see the message at the bottom. Fix it and tap again. ⟫ {0}: fehlgeschlagen — siehe Meldung unten. Beheben Sie das Problem und tippen Sie erneut.
+{0}: {1} driehoeken · {2} mm · {3} ⟫ {0}: {1} triangles · {2} mm · {3} ⟫ {0}: {1} Dreiecke · {2} mm · {3}
+{0}: {1} elkaar snijdende driehoekparen{2} ⟫ {0}: {1} intersecting triangle pairs{2} ⟫ {0}: {1} sich schneidende Dreieckspaare{2}
+(of meer) ⟫ (or more) ⟫ (oder mehr)
+aangevuld deel apart ⟫ completed part separate ⟫ ergänzter Teil separat
+aangevuld deel niet meegeteld ⟫ completed part not counted ⟫ ergänzter Teil nicht mitgezählt
+kartelige scanrand gladgestreken (laatste {0} mm niet meegeteld) ⟫ jagged scan edge smoothed (last {0} mm not counted) ⟫ gezackter Scanrand geglättet (letzte {0} mm nicht mitgezählt)
+naar buiten gericht ⟫ oriented outwards ⟫ nach außen gerichtet
+oppervlak vereenvoudigd ({0} → {1} facetten, max. {2} mm) ⟫ surface simplified ({0} → {1} faces, max. {2} mm) ⟫ Fläche vereinfacht ({0} → {1} Facetten, max. {2} mm)
+rand ligt op de scan (afstand loopt in de laatste {0} mm naar 0) ⟫ border rests on the scan (distance runs down to 0 over the last {0} mm) ⟫ Rand liegt auf dem Scan (Abstand läuft auf den letzten {0} mm auf 0)
+scan vereenvoudigd ({0} → {1} facetten): elk origineel scanpunt binnen {2} mm ⟫ scan simplified ({0} → {1} faces): every original scan point within {2} mm ⟫ Scan vereinfacht ({0} → {1} Facetten): jeder originale Scanpunkt innerhalb {2} mm
+slepen = draaien, knijpen/scrollen = zoomen ⟫ drag = rotate, pinch/scroll = zoom ⟫ ziehen = drehen, Pinch/Scrollen = zoomen
+tip: een beetplaat heeft normaal 0 mm afstand tot de scan ⟫ tip: a baseplate normally has 0 mm distance to the scan ⟫ Tipp: Eine Basisplatte hat normalerweise 0 mm Abstand zum Scan
+tolerantie verhoogd tot {0} mm om onder {1} te komen ⟫ tolerance raised to {0} mm to get below {1} ⟫ Toleranz auf {0} mm erhöht, um unter {1} zu kommen
+uitblokken {0}° ({1} punten, max {2} mm) ⟫ block-out {0}° ({1} points, max {2} mm) ⟫ Ausblocken {0}° ({1} Punkte, max. {2} mm)
+volume: {0} mm³ ⟫ volume: {0} mm³ ⟫ Volumen: {0} mm³
+was behouden ⟫ wax kept ⟫ Wachs behalten
+was op {0} punten (max {1} mm): daar ligt de plaat bewust vrij van de scan ⟫ wax at {0} points (max {1} mm): there the plate deliberately stays clear of the scan ⟫ Wachs an {0} Punkten (max. {1} mm): dort liegt die Platte bewusst frei vom Scan
+{0} beschermd (pasvlak) ⟫ {0} protected (fitting surface) ⟫ {0} geschützt (Passfläche)
+{0} doorgaande openingen (perforaties) worden bij de plaat gedicht ⟫ {0} through openings (perforations) are closed in the plate ⟫ {0} durchgehende Öffnungen (Perforationen) werden in der Platte geschlossen
+{0} facetten van dunne punten aan de scanrand weggelaten ⟫ {0} faces of thin spikes at the scan edge left out ⟫ {0} Facetten dünner Spitzen am Scanrand weggelassen
+{0} frenulum-uitsparing(en) ⟫ {0} frenum relief(s) ⟫ {0} Bändchenaussparung(en)
+{0} gaten in de scan gedicht ⟫ {0} holes in the scan closed ⟫ {0} Löcher im Scan geschlossen
+{0}% overbrugd (smalle plooien) ⟫ {0}% bridged (narrow folds) ⟫ {0} % überbrückt (schmale Falten)
+één doorlopende rand ⟫ one continuous edge ⟫ ein durchgehender Rand
+{0} losse delen (raakt handvat of wal de plaat niet? verklein de afstand of schakel het onderdeel uit) ⟫ {0} loose parts (does the handle or rim not touch the plate? reduce the distance or switch the part off) ⟫ {0} lose Teile (berührt Griff oder Wall die Platte nicht? Abstand verringern oder das Teil ausschalten)
+controleer in de slicer ⟫ check in the slicer ⟫ im Slicer prüfen
+de plaat zelf is schoon ⟫ the plate itself is clean ⟫ die Platte selbst ist sauber
+de plaat zelf: {0} heel kleine overlapjes (rand of tussen tanden), onschadelijk voor het printen ⟫ the plate itself: {0} very small overlaps (border or between teeth), harmless for printing ⟫ die Platte selbst: {0} sehr kleine Überlappungen (Rand oder zwischen Zähnen), unschädlich für den Druck
+nog niet gegenereerd ⟫ not generated yet ⟫ noch nicht erzeugt
+→ {0} (vereenvoudigd, max. afwijking {1} mm; ↶ Terug bij Scan & mesh = origineel) ⟫ → {0} (simplified, max. deviation {1} mm; ↶ Back under Scan & mesh = original) ⟫ → {0} (vereinfacht, max. Abweichung {1} mm; ↶ Zurück unter Scan & Mesh = Original)
+↶ Terug zet het terug. ⟫ ↶ Back restores it. ⟫ ↶ Zurück stellt es wieder her.
+Meshfouten gevonden: gebruik Repareer ⟫ Mesh errors found: use Repair ⟫ Meshfehler gefunden: Reparieren verwenden
+Zeer groot: staat de scan in millimeters? ⟫ Very large: is the scan in millimetres? ⟫ Sehr groß: Ist der Scan in Millimetern?
+Zeer klein: controleer de eenheden. ⟫ Very small: check the units. ⟫ Sehr klein: Prüfen Sie die Einheiten.
+niet volledig gesloten ({0} open randen) ⟫ not fully closed ({0} open edges) ⟫ nicht vollständig geschlossen ({0} offene Kanten)
+op {0}% van de buitenkant minder dan ⅓ van de dikte tot de scan: in smalle ruimtes (tussen tanden) schiet de buitenkant over de scan heen. Vul die ruimtes eerst met was (Analyse) of kies een kleinere afstand/dikte ⟫ on {0}% of the outside less than ⅓ of the thickness to the scan: in narrow spaces (between teeth) the outside shoots past the scan. Fill those spaces with wax first (Analysis) or choose a smaller distance/thickness ⟫ auf {0} % der Außenseite weniger als ⅓ der Stärke zum Scan: in engen Räumen (zwischen Zähnen) schießt die Außenseite über den Scan hinaus. Füllen Sie diese Räume zuerst mit Wachs (Analyse) oder wählen Sie einen kleineren Abstand/eine kleinere Stärke
+{0} punten dunner dan {1} mm (dunste {2} mm). ⟫ {0} points thinner than {1} mm (thinnest {2} mm). ⟫ {0} Punkte dünner als {1} mm (dünnste {2} mm).
+Klaar in {0} s: {1} stappen. Controleer en pas zo nodig aan; elke stap is daarna los te wijzigen. ⟫ Done in {0} s: {1} steps. Check and adjust if necessary; each step can then be changed separately. ⟫ Fertig in {0} s: {1} Schritte. Prüfen und bei Bedarf anpassen; jeder Schritt lässt sich danach einzeln ändern.
+Tekenen · twee vingers = draaien/zoomen ⟫ Drawing · two fingers = rotate/zoom ⟫ Zeichnen · zwei Finger = drehen/zoomen
+Gesloten en manifold ⟫ Closed and manifold ⟫ Geschlossen und manifold
+Schoon open oppervlak met één buitenrand (normaal voor een kaakscan) ⟫ Clean open surface with one outer edge (normal for a jaw scan) ⟫ Saubere offene Fläche mit einem Außenrand (normal für einen Kieferscan)
+boog {0} × {1} mm (lab-mediaan {2} × {3}) ⟫ arch {0} × {1} mm (lab median {2} × {3}) ⟫ Bogen {0} × {1} mm (Labor-Median {2} × {3})
+buccaal rechts ⟫ buccal right ⟫ bukkal rechts
+buccaal links ⟫ buccal left ⟫ bukkal links
+(binnen de Pound-lijn) ⟫ (inside the Pound line) ⟫ (innerhalb der Pound-Linie)
+Pound-lijn ⟫ Pound line ⟫ Pound-Linie
+Statiek: {0} ⟫ Statics: {0} ⟫ Statik: {0}
+Bekijk dit bestand los in 3D ⟫ View this file separately in 3D ⟫ Diese Datei einzeln in 3D ansehen
+Alleen dit bestand downloaden ⟫ Download only this file ⟫ Nur diese Datei herunterladen
+{0}: gesloten mesh ⟫ {0}: closed mesh ⟫ {0}: geschlossenes Mesh
+Scan (referentie).stl ⟫ Scan (reference).stl ⟫ Scan (Referenz).stl
+Antagonist (referentie).stl ⟫ Antagonist (reference).stl ⟫ Antagonist (Referenz).stl
+Digital Denture CAD ⟫ Digital Denture CAD ⟫ Digital Denture CAD
+Digital Denture CAD {0} ⟫ Digital Denture CAD {0} ⟫ Digital Denture CAD {0}
+PMMA ⟫ PMMA ⟫ PMMA
+lepel ⟫ tray ⟫ Löffel
+beetplaat ⟫ baseplate ⟫ Basisplatte
+basis ⟫ base ⟫ Basis
+prothese ⟫ denture ⟫ Prothese
+prothesebasis ⟫ denture base ⟫ Prothesenbasis
+monoblock ⟫ monoblock ⟫ Monoblock
+{0} facetten ⟫ {0} faces ⟫ {0} Facetten
+{0} driehoeken ⟫ {0} triangles ⟫ {0} Dreiecke
+{0} punten ⟫ {0} points ⟫ {0} Punkte
+{0} elementen ⟫ {0} teeth ⟫ {0} Zähne
