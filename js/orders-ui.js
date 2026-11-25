@@ -1,4 +1,5 @@
 // Orderoverzicht: inlezen, tonen, printsimulatie en overdracht naar het CAD-programma.
+import { tr } from './i18n.js'; // v71: taalkeuze (moet als eerste: vertaalt de pagina vóór de rest opbouwt)
 import { listZip, readZipEntry } from './unzip.js';
 import { decodeText, stlMetrics, analyseOrders, simulatePrint, PRINTERS, PRODUCTS, classifyGeometry, suggestedName, namingStyle } from './orders.js';
 import { putHandoff } from './handoff.js';
@@ -95,7 +96,7 @@ function renderPatients() {
     const orders = p.orders.filter(orderMatches);
     if (!orders.length) continue;
     const deliveries = [...new Set(p.orders.map(o => o.delivery).filter(Boolean))].sort();
-    html.push(`<article class="op-patient"><div class="head"><span class="nr">${esc(p.orderNo ?? '––––')}</span><span class="name">${esc(p.name)}</span>
+    html.push(`<article class="op-patient"><div class="head"><span class="nr" translate="no">${esc(p.orderNo ?? '––––')}</span><span class="name" translate="no">${esc(p.name)}</span>
       ${p.jaws.map(j => `<span class="chip jaw">${esc(j.toUpperCase())}</span>`).join('')}${p.note ? `<span class="chip">${esc(p.note)}</span>` : ''}
       <span class="meta">${deliveries.length ? 'levering ' + deliveries.join(', ') : 'geen leverdatum'}</span></div>
       ${orders.map(orderHtml).join('')}</article>`);
@@ -107,7 +108,7 @@ function orderHtml(o) {
     const m = s.metrics, g = m && classifyGeometry(m);
     const info = m ? `${fmt(m.volume / 1000, 1)} ml · ${m.dims.map(v => fmt(v)).join('×')} mm · ${fmt(m.triangles)} △ ${m.watertight ? '<span class="chip ok">gesloten</span>' : '<span class="chip late">open</span>'}${g === 'fragment' ? ' <span class="chip late">fragment</span>' : ''}` : esc(s.error ?? '');
     const canOpen = m && g !== 'fragment' && g !== 'provisorium';
-    return `<div class="stl"><span class="file">${esc(s.file)}</span><span>${info}</span>
+    return `<div class="stl"><span class="file" translate="no">${esc(s.file)}</span><span>${info}</span>
       ${canOpen ? `<button data-open="${esc(s.file)}" title="Open in CAD en haal de weefselzijde eruit">🦷 Nieuwe plaat hierop</button>` : ''}
       <button data-view="${esc(s.file)}" title="Bekijk in 3D">👁</button><button data-download="${esc(s.file)}" title="Download">↓</button></div>`;
   }).join('');
@@ -117,7 +118,7 @@ function orderHtml(o) {
     ${o.late ? `<span class="chip late">levering ${esc(o.delivery)} verstreken</span>` : o.delivery ? `<span class="sub">levering ${esc(o.delivery)}</span>` : ''}
     ${o.operator ? `<span class="sub">door ${esc(o.operator)}</span>` : ''}<span class="sub">${esc(o.source)}</span>
     ${o.pts.length ? `<span class="sub">${o.pts.length} curvebestand(en)</span>` : ''}</div>
-    <div class="file">${esc(o.key)}</div>
+    <div class="file" translate="no">${esc(o.key)}</div>
     <div class="stls">${stls}</div>
     ${o.issues.length ? `<ul class="issues">${o.issues.map(([l, t]) => `<li class="${levelClass(l)}">${esc(t)}</li>`).join('')}</ul>` : ''}</div>`;
 }
@@ -158,7 +159,7 @@ const PALETTE = { lepel: '#3fb7c2', beetplaat: '#7c8cf0', beetwal: '#c58be8', co
 function renderSim() {
   const sim = simulatePrint(printableParts(), { printer: $('simPrinter').value, orientation: $('simOrient').value, layer: +$('simLayer').value, resinPerL: +$('simResin').value || 0, layerSec: +$('simLayerSec').value || null });
   const h = Math.floor(sim.minutes / 60), m = sim.minutes % 60;
-  $('simSummary').innerHTML = `<b>${sim.plates.length}</b> printplaat${sim.plates.length === 1 ? '' : 'en'} · ca. <b>${h} u ${m} min</b> printtijd · <b>${fmt(sim.resinMl)} ml</b> hars (≈ €${fmt(sim.resinCost)})`
+  $('simSummary').innerHTML = `<b>${sim.plates.length}</b> ${sim.plates.length === 1 ? 'printplaat' : 'printplaten'} · ca. <b>${h} u ${m} min</b> printtijd · <b>${fmt(sim.resinMl)} ml</b> hars (≈ €${fmt(sim.resinCost)})`
     + (sim.tooBig.length ? ` · <span style="color:var(--bad)">${sim.tooBig.length} past niet: ${sim.tooBig.map(i => esc(i.label)).join(', ')}</span>` : '');
   const P = sim.printer;
   $('simPlates').innerHTML = sim.plates.map((pl, i) => {
@@ -183,11 +184,11 @@ function renderNaming() {
 function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
 $('exportCsv').onclick = () => {
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = [['ordernr', 'patiënt', 'order', 'werkstuk', 'kaak', 'elementen', 'levering', 'operator', 'bron', 'stl', 'volume_ml', 'gesloten', 'niveau', 'melding']];
+  const rows = [['ordernr', 'patiënt', 'order', 'werkstuk', 'kaak', 'elementen', 'levering', 'operator', 'bron', 'stl', 'volume_ml', 'gesloten', 'niveau', 'melding'].map(h => tr(h))]; // v71: in de gekozen taal
   for (const p of R.patients) for (const o of p.orders) {
     const vol = o.stl.reduce((s, x) => s + (x.metrics?.volume ?? 0), 0) / 1000, closed = o.stl.every(x => x.metrics?.watertight);
-    const base = [p.orderNo, p.name, o.key, PRODUCTS[o.product] ?? o.product, o.jaw, o.teeth.join(' '), o.delivery, o.operator, o.source, o.stl.length, vol.toFixed(2), closed ? 'ja' : 'nee'];
-    if (!o.issues.length) rows.push([...base, '', '']); else for (const [l, t] of o.issues) rows.push([...base, l, t]);
+    const base = [p.orderNo, p.name, o.key, tr(PRODUCTS[o.product] ?? o.product), o.jaw, o.teeth.join(' '), o.delivery, o.operator, o.source, o.stl.length, vol.toFixed(2), tr(closed ? 'ja' : 'nee')];
+    if (!o.issues.length) rows.push([...base, '', '']); else for (const [l, t] of o.issues) rows.push([...base, tr(l), tr(t)]);
   }
   download(`orders_${today}.csv`, '﻿' + rows.map(r => r.map(q).join(';')).join('\r\n'), 'text/csv');
 };
