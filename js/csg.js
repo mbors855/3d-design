@@ -60,15 +60,21 @@ function meshToSoup(man, snap = 1e-5, minVolume = null) {
     if (vol.size > 1) { const big = Math.max(...[...vol.values()].map(Math.abs)); keepRoot = new Set([...vol].filter(([, v]) => Math.abs(v) >= Math.max(minVolume, big * 1e-3)).map(([r]) => r)); }
   }
   // Punten die vrijwel samenvallen (na float32-afronding) worden samengevoegd; naaldfacetten vervallen.
-  const rep = new Int32Array(count), pos = new Float32Array(count * 3), inv = 1 / snap;
-  let size = 16; while (size < count * 1.5 + 16) size *= 2;
-  const mask = size - 1, table = new Int32Array(size).fill(-1), K = new Float64Array(count * 3);
+  // v73: ook als de twee punten net in buurcellen van het raster vallen (afstand ≤ snap). Anders bleef zo'n naaldje
+  // staan; een slicer of een latere bewerking die de punten wél samenvoegt, zag dan een niet-manifold rand.
+  const rep = new Int32Array(count), pos = new Float32Array(count * 3), inv = 1 / snap, cells = new Map(), s2 = snap * snap;
+  const hash = (kx, ky, kz) => (Math.imul(kx | 0, 73856093) ^ Math.imul(ky | 0, 19349663) ^ Math.imul(kz | 0, 83492791));
   for (let v = 0; v < count; v++) {
     const x = Math.fround(src[v * n]), y = Math.fround(src[v * n + 1]), z = Math.fround(src[v * n + 2]);
-    const kx = Math.round(x * inv), ky = Math.round(y * inv), kz = Math.round(z * inv);
-    let h = (Math.imul(kx | 0, 73856093) ^ Math.imul(ky | 0, 19349663) ^ Math.imul(kz | 0, 83492791)) & mask, r = -1;
-    for (;;) { const id = table[h]; if (id < 0) { table[h] = v; r = v; K[v * 3] = kx; K[v * 3 + 1] = ky; K[v * 3 + 2] = kz; break; } if (K[id * 3] === kx && K[id * 3 + 1] === ky && K[id * 3 + 2] === kz) { r = id; break; } h = (h + 1) & mask; }
-    rep[v] = r; pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = z;
+    const kx = Math.floor(x * inv), ky = Math.floor(y * inv), kz = Math.floor(z * inv);
+    pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = z;
+    let r = -1;
+    search: for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      const list = cells.get(hash(kx + dx, ky + dy, kz + dz)); if (!list) continue;
+      for (const id of list) { const ex = pos[id * 3] - x, ey = pos[id * 3 + 1] - y, ez = pos[id * 3 + 2] - z; if (ex * ex + ey * ey + ez * ez <= s2) { r = id; break search; } }
+    }
+    if (r < 0) { r = v; const h = hash(kx, ky, kz), list = cells.get(h); if (list) list.push(v); else cells.set(h, [v]); }
+    rep[v] = r;
   }
   const out = new Float32Array(f.length * 3); let o = 0;
   for (let i = 0; i < f.length; i += 3) {
@@ -128,6 +134,35 @@ export async function unionSubtract(soups, cutters, report = {}) {
   const u = parts.length === 1 ? parts[0] : w.Manifold.union(parts);
   let r = u;
   if (cs.length) { const c = cs.length === 1 ? cs[0] : w.Manifold.union(cs); r = u.subtract(c); if (c !== cs[0]) c.delete(); }
+  const out = fromManifold(r);
+  if (r !== u) r.delete(); if (u !== parts[0]) u.delete();
+  for (const x of [...parts, ...cs]) x.delete();
+  return loose.length ? concat([out, ...loose]) : out;
+}
+
+// v73: samenvoegen, aftrekken én wegsnijden wat door het pasvlak steekt (weefselblok), alles in één Manifold-sessie.
+// Na de float32-export van de tussenstap was de plaat soms net niet manifold (een geknepen hoekpunt bij een steg); dan
+// weigerde het wegsnijden en bleef de gingivaband tot 9 mm in het weefsel hangen (prothese over een steg: pasvlak 63%).
+// makers: functies die een weefselblok maken (de eerste die lukt, wordt gebruikt); report.clip = index of -1.
+export async function unionSubtractClip(soups, cutters, makers = [], report = {}) {
+  const w = await loadManifold();
+  const parts = [], loose = [];
+  for (const s of soups) { if (!s?.length) continue; try { parts.push(await toManifold(s)); } catch { try { parts.push(await toManifold(heal(s))); report.healed = (report.healed || 0) + 1; } catch { loose.push(s); } } }
+  report.loose = loose.length; report.clip = -1;
+  if (!parts.length) return concat(loose);
+  const cs = []; report.skipped = 0;
+  for (const s of cutters) { if (!s?.length) continue; try { cs.push(await toManifold(s)); } catch { report.skipped++; } }
+  const u = parts.length === 1 ? parts[0] : w.Manifold.union(parts);
+  let r = u;
+  if (cs.length) { const c = cs.length === 1 ? cs[0] : w.Manifold.union(cs); r = u.subtract(c); if (c !== cs[0]) c.delete(); }
+  for (let i = 0; i < makers.length; i++) {
+    let c = null;
+    try { const s = await makers[i](); try { c = await toManifold(s); } catch { c = await toManifold(heal(s)); } }
+    catch (e) { report.clipError = e?.message ?? String(e); continue; }
+    try { const r2 = r.subtract(c); if (!r2.isEmpty()) { if (r !== u) r.delete(); r = r2; report.clip = i; break; } r2.delete(); }
+    catch (e) { report.clipError = e?.message ?? String(e); }
+    finally { c.delete(); }
+  }
   const out = fromManifold(r);
   if (r !== u) r.delete(); if (u !== parts[0]) u.delete();
   for (const x of [...parts, ...cs]) x.delete();

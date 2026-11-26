@@ -88,6 +88,29 @@ export function biteRim(frame, { width = 7, height = 10, embed = 1.5, form = 'ov
   }, { form, tStart: -0.97, tEnd: 0.97, conform, arch });
 }
 
+/** v73: hoe hoog komt een kap (over een steg) onder de beetwal? Per boogpositie t de hoogste kap langs N, gemeten vanaf
+ *  het boogvlak (zelfde maat als de walhoogte), binnen de walbreedte + side mm opzij (top) en daarbuiten (beside).
+ *  Geeft { ts, top, beside } (Float64Array per t, -Infinity = geen kap). */
+export function capUnderRim(frame, capSoup, { width = 8, anteriorWidth = null, form = 'oval', arch = null, tStart = -0.97, tEnd = 0.97, side = 2, samples = 240 } = {}) {
+  const curve = arch ?? formArch({ width: frame.width, depth: frame.depth, form });
+  const ts = [], C = [];
+  for (let i = 0; i <= samples; i++) { const t = tStart + (tEnd - tStart) * i / samples; ts.push(t); C.push(curve(t)); }
+  const half = t => (anteriorWidth ? anteriorWidth + (width - anteriorWidth) * Math.min(1, Math.abs(t) * 1.6) : width) / 2;
+  const top = new Float64Array(samples + 1).fill(-Infinity), beside = new Float64Array(samples + 1).fill(-Infinity), { O, X, Y, N } = frame;
+  const seen = new Set();
+  for (let i = 0; i < capSoup.length; i += 3) {
+    const key = Math.round(capSoup[i] * 200) + ',' + Math.round(capSoup[i + 1] * 200) + ',' + Math.round(capSoup[i + 2] * 200);
+    if (seen.has(key)) continue; seen.add(key);
+    const dx = capSoup[i] - O[0], dy = capSoup[i + 1] - O[1], dz = capSoup[i + 2] - O[2];
+    const x = dx * X[0] + dy * X[1] + dz * X[2], y = dx * Y[0] + dy * Y[1] + dz * Y[2], n = dx * N[0] + dy * N[1] + dz * N[2];
+    let bi = 0, bd = Infinity;
+    for (let k = 0; k <= samples; k++) { const d = (C[k][0] - x) ** 2 + (C[k][1] - y) ** 2; if (d < bd) { bd = d; bi = k; } }
+    if (Math.sqrt(bd) <= half(ts[bi]) + side) { if (n > top[bi]) top[bi] = n; }
+    else if (n > beside[bi]) beside[bi] = n;
+  }
+  return { ts, top, beside };
+}
+
 // Anatomisch gingivaprofiel: labiaal licht bol, vloeiend afgerond naar de halslijn, met wortelreliëf (juga):
 // bulge = extra buccale welving (mm) op de plek van een wortel, het sterkst bij de hals en uitlopend naar de flens.
 function gingivaProfile(width, bottom, top, topWidth, bulge = 0, flare = 0) {

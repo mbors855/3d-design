@@ -1,0 +1,153 @@
+[
+ {
+  "name": "A_lepel",
+  "file": "out/cases/ok_steg_volledig.stl",
+  "jaw": "onder",
+  "work": "lepel"
+ },
+ {
+  "name": "B_lepel_scanrand",
+  "file": "out/cases/ok_steg_scanrand.stl",
+  "jaw": "onder",
+  "work": "lepel"
+ },
+ {
+  "name": "A_beet_wal_regels",
+  "file": "out/cases/ok_steg_volledig.stl",
+  "jaw": "onder",
+  "work": "beetplaat",
+  "pre": {
+   "rimOn": true,
+   "rimRule": true
+  }
+ },
+ {
+  "name": "A_beet_wal_8mm",
+  "file": "out/cases/ok_steg_volledig.stl",
+  "jaw": "onder",
+  "work": "beetplaat",
+  "pre": {
+   "rimOn": true,
+   "rimRule": false,
+   "rimHeight": 8
+  }
+ },
+ {
+  "name": "B_beet_wal_regels",
+  "file": "out/cases/ok_steg_scanrand.stl",
+  "jaw": "onder",
+  "work": "beetplaat",
+  "pre": {
+   "rimOn": true,
+   "rimRule": true
+  }
+ },
+ {
+  "name": "C_beet_wal_regels",
+  "file": "out/cases/bk_steg_4impl.stl",
+  "jaw": "boven",
+  "work": "beetplaat",
+  "pre": {
+   "rimOn": true,
+   "rimRule": true
+  }
+ },
+ {
+  "name": "C_lepel",
+  "file": "out/cases/bk_steg_4impl.stl",
+  "jaw": "boven",
+  "work": "lepel"
+ },
+ {
+  "name": "A_prothese",
+  "file": "out/cases/ok_steg_volledig.stl",
+  "jaw": "onder",
+  "work": "prothese"
+ },
+ {
+  "name": "A_prothese_sockets",
+  "file": "out/cases/ok_steg_volledig.stl",
+  "jaw": "onder",
+  "work": "prothese",
+  "pre": {
+   "coupling": "socket"
+  }
+ },
+ {
+  "name": "C_prothese",
+  "file": "out/cases/bk_steg_4impl.stl",
+  "jaw": "boven",
+  "work": "prothese"
+ },
+ {
+  "name": "B2_lepel",
+  "file": "out/cases/ok_steg_linguaal1mm.stl",
+  "jaw": "onder",
+  "work": "lepel"
+ },
+ {
+  "name": "B3_lepel",
+  "file": "out/cases/ok_steg_inham.stl",
+  "jaw": "onder",
+  "work": "lepel"
+ },
+ {
+  "name": "B2_beet_wal",
+  "file": "out/cases/ok_steg_linguaal1mm.stl",
+  "jaw": "onder",
+  "work": "beetplaat",
+  "pre": {
+   "rimOn": true,
+   "rimRule": true
+  }
+ },
+ {
+  "name": "B3_beet",
+  "file": "out/cases/ok_steg_inham.stl",
+  "jaw": "onder",
+  "work": "beetplaat"
+ },
+ {
+  "name": "A_lepel_zonder",
+  "file": "out/cases/ok_steg_volledig.stl",
+  "jaw": "onder",
+  "work": "lepel",
+  "partMode": "apart"
+ },
+ {
+  "name": "D_lepel_demo_onder",
+  "jaw": "onder",
+  "work": "lepel"
+ },
+ {
+  "name": "D_beet_boven_wal_handvat",
+  "jaw": "boven",
+  "work": "beetplaat",
+  "pre": {
+   "rimOn": true,
+   "beetHandle": true
+  }
+ },
+ {
+  "name": "D_prothese_boven",
+  "jaw": "boven",
+  "work": "prothese"
+ },
+ {
+  "name": "C_prothese_zonder",
+  "file": "out/cases/bk_steg_4impl.stl",
+  "jaw": "boven",
+  "work": "prothese",
+  "partMode": "apart"
+ },
+ {
+  "name": "A_prothese_sockets_zonder",
+  "file": "out/cases/ok_steg_volledig.stl",
+  "jaw": "onder",
+  "work": "prothese",
+  "pre": {
+   "coupling": "socket"
+  },
+  "partMode": "apart"
+ }
+]

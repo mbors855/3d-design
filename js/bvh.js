@@ -122,6 +122,39 @@ export class TriBVH {
   }
 }
 
+// v73: eerste snijpunt van een straal (o + t·d, t > tMin) met het oppervlak; geeft t of Infinity (facet in this.face).
+TriBVH.prototype.ray = function (ox, oy, oz, dx, dy, dz, tMin = 1e-6, tMax = Infinity) {
+  this.face = -1;
+  if (!this.faces) return Infinity;
+  const box = this.box, cnt = this.count, st = this.start, lf = this.left, idx = this.idx, s = this.soup;
+  const ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
+  const hitBox = n => { const o = n * 6; let t0 = tMin, t1 = best;
+    let a = (box[o] - ox) * ix, b = (box[o + 3] - ox) * ix; if (a > b) { const t = a; a = b; b = t; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) return false;
+    a = (box[o + 1] - oy) * iy; b = (box[o + 4] - oy) * iy; if (a > b) { const t = a; a = b; b = t; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) return false;
+    a = (box[o + 2] - oz) * iz; b = (box[o + 5] - oz) * iz; if (a > b) { const t = a; a = b; b = t; } if (a > t0) t0 = a; if (b < t1) t1 = b; return t0 <= t1; };
+  let best = tMax, found = -1, stack = this._stack, sp = 0;
+  stack[sp++] = 0;
+  while (sp > 0) {
+    const n = stack[--sp]; if (!hitBox(n)) continue;
+    const c = cnt[n];
+    if (c > 0) {
+      for (let i = st[n], e = st[n] + c; i < e; i++) { // Möller–Trumbore
+        const f = idx[i], o = f * 9, e1x = s[o + 3] - s[o], e1y = s[o + 4] - s[o + 1], e1z = s[o + 5] - s[o + 2], e2x = s[o + 6] - s[o], e2y = s[o + 7] - s[o + 1], e2z = s[o + 8] - s[o + 2];
+        const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x, det = e1x * px + e1y * py + e1z * pz;
+        if (Math.abs(det) < 1e-14) continue;
+        const inv = 1 / det, tx = ox - s[o], ty = oy - s[o + 1], tz = oz - s[o + 2], u = (tx * px + ty * py + tz * pz) * inv; if (u < 0 || u > 1) continue;
+        const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x, v = (dx * qx + dy * qy + dz * qz) * inv; if (v < 0 || u + v > 1) continue;
+        const t = (e2x * qx + e2y * qy + e2z * qz) * inv; if (t > tMin && t < best) { best = t; found = f; }
+      }
+      continue;
+    }
+    if (sp + 2 >= stack.length) { const s2 = new Int32Array(stack.length * 2); s2.set(stack); stack = this._stack = s2; }
+    stack[sp++] = lf[n]; stack[sp++] = lf[n] + 1;
+  }
+  this.face = found;
+  return found < 0 ? Infinity : best;
+};
+
 function boxDist2(box, n, px, py, pz) {
   const o = n * 6;
   const dx = px < box[o] ? box[o] - px : px > box[o + 3] ? px - box[o + 3] : 0;
