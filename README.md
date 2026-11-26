@@ -18,6 +18,28 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 72: steg apart, rand strak, altijd terug, 3D-voorbeeld, handvat vormen
+
+**Steg en andere losse onderdelen.** Een STL uit exocad of 3Shape met een steg op implantaten bevat de steg als apart, gesloten deel naast de (open) kaakscan. Vroeger verdween de steg bij *losse delen weg*, of erger: *Scan voorbereiden* hield de steg over en gooide de kaak weg. Nu wordt elk gesloten deel bij het openen apart gezet (`js/parts.js`). Per onderdeel, bij Scan & mesh of in het paneel van het werkstuk:
+- **Over de steg**: lepel, beetplaat en basis krijgen een kap over de steg (2 mm, of de wanddikte), de steg met alles eronder wordt uitgespaard langs de insteekas (geen ondersnijding, schroefkanalen dicht), opzij 0,3 mm speling. Zoals een technicus onder een steg uitblokt. Bij een lepel blijft rondom de afdrukruimte. Geen weefselstop onder de steg.
+- **Zonder steg**: het werkstuk ligt alleen op de kaak; de steg blijft doorzichtig zichtbaar (laag *Steg*).
+- Bestandsnamen krijgen `_over_steg` of `_zonder_steg`, zodat je beide varianten kunt bewaren. De steg is los te downloaden (en staat als referentie in de ZIP). De keuze gaat mee in het project en is terug te draaien.
+- Het pasvlakverslag telt de uitgespaarde ruimte onder de steg niet mee.
+
+**Rand strak** (`js/border.js`, bij *Scan voorbereiden* en met de knop *Rand strak maken*):
+- **Franjes weg**: dunne tongetjes, draadjes en haakjes aan de scanrand (scanruis, wang, tong) die smaller zijn dan 3 mm verdwijnen ('opening' over het oppervlak). Brede delen blijven precies zoals gescand. Direct onder een steg blijft alles staan.
+- **Inhammen dicht** (tot 10 mm breed, instelbaar): een smalle inham in de rand, zoals het gat in het front onder een steg, wordt glad dichtgemaakt. Een uitstekend stuk (het eind van de kam, een tong) wordt niet overbrugd: een inham ligt met de klok mee om lege ruimte, een tong tegen de klok in om het oppervlak.
+- **Gaten** in de scan (de opening rond een implantaat, een niet gescand stukje tandvlees) tot 25 mm worden gedicht. Dichtgemaakte stukken horen bij het scanoppervlak: een werkstuk *langs de scanrand* gaat eroverheen.
+- Op een echte scan met steg: van 7.278 rafelpunten naar één gladde rand.
+
+**Automatische omtrek scheef bij een scheve boog.** Bij een ongelijke kaak (één kant langer gescand) lag het middenpunt M 10–15 mm opzij, en dan liep de hele omtrek scheef en kruiste hij zichzelf. M ligt nu op de middelloodlijn van R en L. Een automatische omtrek kruist zichzelf nooit meer: lusjes worden eruit gehaald. *Aanvullen* van de plooi gaf bij een grillige rand een verfrommelde rok; de richtingen worden nu over 3 mm gladgestreken.
+
+**Altijd terug (↶/↷).** Eén logboek over alle stappen: scanbewerking, markeringen, was, omtrek, handvat, opstelling, slijpen en boetseren. ↶ werkt in elke stap; hoort de laatste handeling bij een andere stap, dan meldt het programma welke. Ronde knoppen linksonder in het beeld (ook op de telefoon).
+
+**3D-voorbeeld van de STL's** (👁 bij Productie): eigen venster met de echte STL-bytes, aanzichten, scan erbij, doorsnede en downloaden/delen.
+
+**Handvat met de vinger vormen** (lepel en beetplaat): één vinger sleept hoogte, voorover en draai, twee vingers knijpen de breedte en draaien. Voorkeuzes recht, schuin en L. Het handvat is een gebogen buis met afgeronde top, gesloten en manifold.
+
 ### Nieuw in 71: Nederlands, English, Deutsch
 
 **Taalkeuze rechtsboven in het hoofdmenu** (🌐 NL / EN / DE). Het hele programma is in drie talen: menu's, knoppen, uitleg, hulp en sneltoetsen, meldingen en foutteksten, het controle- en productieoverzicht, het orderoverzicht, het productierapport (`rapport.txt`) en de CSV-export.

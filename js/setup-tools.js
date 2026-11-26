@@ -448,7 +448,7 @@ export function initSetupTools(ctx) {
     const capped = [...budget.values()].reduce((n, u) => n + u.filter(x => x >= maxTotal - 1e-3).length, 0);
     status(verts ? `Ingeslepen: ${verts} punten aangepast, diepste interferentie ${fmt(maxD, 2)} mm (${poses.length} standen)${capped ? ` · ${capped} punten op het maximum van ${fmt(maxTotal, 1)} mm: pas daar de opstelling of geleiding aan` : ''}.` : 'Geen interferenties gevonden: niets ingeslepen.');
   }
-  function pushGrind(objs) { S.grindHistory.push(geometrySnapshot(objs)); if (S.grindHistory.length > 8) S.grindHistory.shift(); for (const o of objs) o.userData.ground = true; }
+  function pushGrind(objs) { S.grindHistory.push(geometrySnapshot(objs)); if (S.grindHistory.length > 8) S.grindHistory.shift(); for (const o of objs) o.userData.ground = true; ctx.note?.('grind'); }
   // handmatig slijpen
   let grinding = null;
   function grindDown(e) {

@@ -77,7 +77,8 @@ function fillTemplate(t, s, l, depth) {
   for (const re of alts(t)) { const mm = re.exec(s); if (mm && good(mm)) return fill(mm); }
   return fill(m);
 }
-function core(s, l, depth) {
+// strict: alleen een volledige vertaling telt (een deel na ': ' of ', ' mag niet half vertaald terugkomen)
+function core(s, l, depth, noSplit = false, strict = false) {
   if (!s) return s;
   const i = IDX[l];
   let e = exact.get(s); if (e) return e[i];
@@ -97,18 +98,28 @@ function core(s, l, depth) {
   for (const sep of [' · ', ' — ', ' – ', '; ', ' → ', ', ', ': ']) {
     if (!s.includes(sep)) continue;
     let any = false, all = true;
-    const parts = s.split(sep).map(p => { const r = LETTERS.test(p) ? core(norm(p), l, depth + 1) : null; if (r != null) { any = true; return r; } if (LETTERS.test(p)) all = false; return convNum(p, l); });
-    if (sep === ', ' || sep === ': ' ? any && all : any) return parts.join(sep);
+    const st = strict || sep === ', ' || sep === ': ';
+    const parts = s.split(sep).map(p => { const r = LETTERS.test(p) ? core(norm(p), l, depth + 1, false, st) : null; if (r != null) { any = true; return r; } if (LETTERS.test(p)) all = false; return convNum(p, l); });
+    if (st ? any && all : any) return parts.join(sep);
   }
   // tussen haakjes: de inhoud vertalen
   if (s.length > 2 && s[0] === '(' && s[s.length - 1] === ')') { const r = core(s.slice(1, -1), l, depth + 1); if (r != null) return '(' + r + ')'; }
-  // zinnen (zonder lookbehind: oudere Safari kent dat niet)
-  const bits = s.split(/([.!?:)])\s+(?=[A-Z0-9(“"'‘↶✓⚠✏🧭〰])/u), sent = [];
-  for (let k = 0; k < bits.length; k += 2) sent.push(bits[k] + (bits[k + 1] ?? ''));
-  if (sent.length > 1) {
-    let any = false;
-    const parts = sent.map(p => { const r = core(p, l, depth + 1); if (r != null) { any = true; return r; } return convNum(p, l); });
-    if (any) return parts.join(' ');
+  // zinnen (zonder lookbehind: oudere Safari kent dat niet). Steeds de langste reeks opeenvolgende zinnen die als
+  // geheel bekend is: een melding van twee zinnen + een aangeplakte zin ('De wijziging is teruggedraaid.') blijft zo
+  // helemaal vertaald.
+  if (!noSplit) {
+    const bits = s.split(/([.!?:)])\s+(?=[A-Z0-9(“"'‘↶✓⚠✏🧭〰])/u), sent = [];
+    for (let k = 0; k < bits.length; k += 2) sent.push(bits[k] + (bits[k + 1] ?? ''));
+    if (sent.length > 1) {
+      let any = false; const out = [];
+      for (let i = 0; i < sent.length;) {
+        let hit = null, jj = i + 1;
+        for (let j = sent.length - (i === 0 ? 1 : 0); j > i; j--) { const r = core(sent.slice(i, j).join(' '), l, depth + 1, true, strict); if (r != null) { hit = r; jj = j; break; } }
+        if (hit != null) { out.push(hit); any = true; } else { if (strict) return null; out.push(convNum(sent[i], l)); }
+        i = jj;
+      }
+      if (any) return out.join(' ');
+    }
   }
   // tekens ervoor (emoji, pijlen, ·, ⚠, ✓) en leestekens erna los laten: eerst alleen voor, dan alleen na, dan beide
   const lead = /^[^A-Za-zÀ-ÿ0-9{(“"'‘]+/u.exec(s)?.[0] ?? '', trail = /[\s.,:;!?…·→✓⚠↓↑]+$/u.exec(s)?.[0] ?? '';
@@ -116,7 +127,7 @@ function core(s, l, depth) {
   if (lead) tries.push([lead, s.slice(lead.length), '']);
   if (trail && trail.length < s.length) tries.push(['', s.slice(0, s.length - trail.length), trail]);
   if (lead && trail && lead.length + trail.length < s.length) tries.push([lead, s.slice(lead.length, s.length - trail.length), trail]);
-  for (const [a, mid, b] of tries) { if (!LETTERS.test(mid)) continue; const r = core(mid, l, depth + 1); if (r != null) return a + r + convNum(b, l); }
+  for (const [a, mid, b] of tries) { if (!LETTERS.test(mid)) continue; const r = core(mid, l, depth + 1, false, strict); if (r != null) return a + r + convNum(b, l); }
   return null;
 }
 

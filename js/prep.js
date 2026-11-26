@@ -2,6 +2,7 @@
 // Uitgangspunt: punten van de scan worden nooit verschoven (nauwkeurigheid); er wordt alleen verwijderd of toegevoegd.
 // Toegevoegde (ontworpen) facetten staan achteraan in de soup; report.designedFrom geeft de eerste index.
 import { weld, clean, edgeMap, boundaryLoops, fillHoles, toSoup, compact, quality, loopLength } from './mesh.js';
+import { nearNormals } from './border.js';
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const crs = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -129,20 +130,33 @@ export function extendBorder(soup, { length = 6, step = 0.6, bend = null, onlyWh
   const lens = loops.map(l => loopLength(mesh, l)), loop = loops[lens.indexOf(Math.max(...lens))];
   const P = v => [p[v * 3], p[v * 3 + 1], p[v * 3 + 2]], m = loop.length;
   // per randpunt: richting naar buiten in het raakvlak (loodrecht op de rand, weg van het oppervlak)
+  // v72: raaklijn over ±1,5 mm en normaal van het oppervlak binnen 2 mm, daarna gladgestreken over ±3 mm langs de rand.
+  // Vroeger telde alleen het laatste randfacet: bij een grillige rand liepen de richtingen alle kanten op en werd
+  // de aanvulling een verfrommelde rok.
   const faceOfEdge = new Map(); for (const e of edges.values()) if (e.count === 1) faceOfEdge.set(e.from + ',' + e.to, e.faces[0]);
+  const cum = new Float64Array(m + 1); for (let i = 0; i < m; i++) cum[i + 1] = cum[i] + Math.hypot(...sub(P(loop[(i + 1) % m]), P(loop[i])));
+  const total = cum[m], at = (i, ds) => { // index op booglengte ds van i (± richting)
+    let j = i, s = 0; const dir = Math.sign(ds);
+    while (s < Math.abs(ds) && Math.abs(j - i) < m) { const a = ((j % m) + m) % m, b = (((j + dir) % m) + m) % m; s += Math.hypot(...sub(P(loop[b]), P(loop[a]))); j += dir; }
+    return ((j % m) + m) % m;
+  };
+  const normalNear = nearNormals(mesh, 2);
   const dirs = loop.map((v, i) => {
-    const a = P(loop[(i - 1 + m) % m]), b = P(loop[(i + 1) % m]), t = nrm(sub(b, a));
+    const t = nrm(sub(P(loop[at(i, 1.5)]), P(loop[at(i, -1.5)])));
     const fi = faceOfEdge.get(v + ',' + loop[(i + 1) % m]) ?? faceOfEdge.get(loop[(i - 1 + m) % m] + ',' + v);
-    let n = [0, 0, 1];
-    if (fi !== undefined) { const A = P(f[fi * 3]), B = P(f[fi * 3 + 1]), C = P(f[fi * 3 + 2]); n = nrm(crs(sub(B, A), sub(C, A))); }
+    let n = normalNear(P(v));
+    if (!(Math.abs(n[0]) + Math.abs(n[1]) + Math.abs(n[2]) > 0.1) && fi !== undefined) { const A = P(f[fi * 3]), B = P(f[fi * 3 + 1]), C = P(f[fi * 3 + 2]); n = nrm(crs(sub(B, A), sub(C, A))); }
     let d = nrm(crs(t, n)); // in het vlak, loodrecht op de rand
     // naar buiten: weg van het binnenpunt van het randfacet
     if (fi !== undefined) { const c = [0, 1, 2].map(k => (p[f[fi * 3] * 3 + k] + p[f[fi * 3 + 1] * 3 + k] + p[f[fi * 3 + 2] * 3 + k]) / 3); if (dt(d, sub(P(v), c)) < 0) d = d.map(x => -x); }
     return d;
   });
-  // richtingen gladstrijken langs de rand (geen kruisende ringen bij een grillige scanrand)
-  let D = dirs;
-  for (let it = 0; it < 6; it++) D = D.map((d, i) => nrm([0, 1, 2].map(k => D[(i - 1 + m) % m][k] + 2 * d[k] + D[(i + 1) % m][k])));
+  // richtingen gladstrijken langs de rand (Gauss, σ = 3 mm over de booglengte): geen kruisende ringen
+  const sigma = Math.min(3, total / 12), D = dirs.map((_, i) => {
+    const acc = [0, 0, 0];
+    for (const sgn of [1, -1]) { let j = i, s = 0; for (let k = 0; k < m && s <= sigma * 3; k++) { const w = Math.exp(-(s * s) / (2 * sigma * sigma)) * (k === 0 && sgn < 0 ? 0 : 1); for (let q = 0; q < 3; q++) acc[q] += dirs[j][q] * w; const nj = (j + sgn + m) % m; s += Math.hypot(...sub(P(loop[nj]), P(loop[j]))); j = nj; } }
+    return nrm(acc);
+  });
   const active = loop.map(v => onlyWhere ? onlyWhere(P(v)) : true);
   const rings = [loop.map(P)], steps = Math.max(1, Math.round(length / step));
   for (let s = 1; s <= steps; s++) {
@@ -152,9 +166,10 @@ export function extendBorder(soup, { length = 6, step = 0.6, bend = null, onlyWh
       let d = D[i]; if (bend) d = nrm([0, 1, 2].map(k => d[k] + bend[k] * 0.06 * s)); // optioneel buigen (richting plooi)
       return [q[0] + d[0] * step, q[1] + d[1] * step, q[2] + d[2] * step];
     }));
-    // ring ontspannen: punten gelijkmatig tussen hun buren (geen plooien of kruisingen bij hoeken in de scanrand)
+    // ring ontspannen: punten gelijkmatig tussen hun buren (geen plooien of kruisingen bij hoeken in de scanrand);
+    // hoe verder van de scan, hoe gladder (de buitenrand van de aanvulling wordt een vloeiende lijn)
     const R = rings[s];
-    for (let it = 0; it < 2; it++) { const c = R.map(q => q.slice()); for (let i = 0; i < m; i++) if (active[i]) for (let k = 0; k < 3; k++) R[i][k] = 0.25 * c[(i - 1 + m) % m][k] + 0.5 * c[i][k] + 0.25 * c[(i + 1) % m][k]; }
+    for (let it = 0; it < 2 + Math.floor(s / 3); it++) { const c = R.map(q => q.slice()); for (let i = 0; i < m; i++) if (active[i]) for (let k = 0; k < 3; k++) R[i][k] = 0.25 * c[(i - 1 + m) % m][k] + 0.5 * c[i][k] + 0.25 * c[(i + 1) % m][k]; }
   }
   const out = Array.from(soup), designedFrom = soup.length / 9;
   // oriëntatie: randrand a→b behoort bij een bestaand facet; nieuwe facetten gebruiken b→a
