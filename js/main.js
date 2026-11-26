@@ -1,26 +1,30 @@
 // Digital Denture CAD 65 — hoofdmodule: koppelt interface, 3D-werkruimte en rekenmodules.
 import { tr } from './i18n.js'; // v71: taalkeuze (moet als eerste: vertaalt de pagina vóór de rest opbouwt)
+import { openStlPreview } from './preview.js';
+import { initHandleTools } from './steps/handle-tools.js';
 import * as THREE from 'three';
 import { Viewer, makePolyline, makeDots, makeMesh, COLORS } from './viewer.js';
 import { parseSTL, writeSTL, soupBounds, toBase64, fromBase64, concatSoups } from './stl.js';
 import { fitReport, weld, quality, repair, toSoup, flipSoup, applyMatrixToSoup, boundaryLoops } from './mesh.js';
 import { shell, shellAsync } from './shell.js';
 import { selfIntersections } from './meshcheck.js';
-import { ContourSet, editableOutline } from './contour.js';
+import { ContourSet, editableOutline, untangle } from './contour.js';
 import { simplifySoup, simplifyText, SCAN_LIMIT } from './decimate.js';
 import { occlusalAxis, autoLandmarks, undercutMarks, vec } from './analysis.js';
 import { archFrame, defaultFrame, placeTeeth, autoOcclude, contactMap, clearContactMap, framePoint, archPoint } from './setup.js';
 import { FDI_UPPER, FDI_LOWER, formArch } from './teeth.js';
-import { biteRim, gingivaBand, trayHandle, perforations, tissueStops } from './construct.js';
-import { unionSoups, subtractSoups, subtractFirst, loadManifold } from './csg.js';
+import { biteRim, gingivaBand, trayHandle, handleGeometry, HANDLE_DEFAULT, perforations, tissueStops } from './construct.js';
+import { unionSoups, subtractSoups, subtractFirst, loadManifold, unionSubtract, clipToOutline } from './csg.js';
 import { demoJaw, demoAntagonist, anatomicJaw } from './demo.js';
 import { makeZip } from './zip.js';
 import { extractIntaglio } from './intaglio.js';
 import { takeHandoff } from './handoff.js';
 import { Sculpt, TOOLS } from './sculpt.js';
 import { analyzeScan, repairScan, extendBorder, keepComponentNear } from './prep.js';
-import { trimByOutline, trimByEdge } from './trim.js';
+import { trimByOutline, trimByEdge, axisBasis } from './trim.js';
 import { WaxLayer } from './wax.js';
+import { splitParts, partZone, keepOutlineClear, barBlocks } from './parts.js';
+import { tidyBorder } from './border.js';
 import { initSetupTools, geometrySoup } from './setup-tools.js';
 import { VERSION } from './version.js';
 import { initScanTools } from './steps/scan-tools.js';
@@ -47,11 +51,11 @@ const workSteps = () => WORK_STEPS[$('work').value === 'partieel' ? 'prothese' :
 const isDenture = () => ['prothese', 'partieel'].includes($('work').value);
 const LM_COLORS = { R: 0xff6b6b, M: 0xffd166, L: 0x4dabf7 };
 const MARK_COLORS = { boundary: 0x55d8f5, bar: 0xff6877, reference: 0xffce72 };
-const MODE_SHORT = { contour: '✏️ Tekenen · twee vingers = draaien/zoomen', scanedit: 'Scan bewerken · Esc = stoppen', sculpt: 'Bewerken · buiten het werkstuk draaien', wax: 'Was · buiten de scan draaien', grind: 'Inslijpen · buiten de elementen draaien' };
-const MODE_TEXT = { scanedit: 'Scan bewerken: zie de aanwijzing onderaan · Esc = stoppen', grind: 'Inslijpen: sleep over een element (kleur = contact met de tegenkaak) · buiten de elementen draaien', wax: 'Was bewerken: sleep over scan of was · buiten de scan draaien · Shift keert toevoegen/wegnemen om', contourHint: ' · slepen = draaien, knijpen/scrollen = zoomen', sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Tekenen: trek de lijn met vinger of muis · begin óp de lijn = dat stuk overtekenen · tik = punt · twee vingers of rechtermuisknop = draaien · knijpen/scrollen = zoomen', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
+const MODE_SHORT = { handle: '✋ Handvat · sleep de oranje bol', contour: '✏️ Tekenen · twee vingers = draaien/zoomen', scanedit: 'Scan bewerken · Esc = stoppen', sculpt: 'Bewerken · buiten het werkstuk draaien', wax: 'Was · buiten de scan draaien', grind: 'Inslijpen · buiten de elementen draaien' };
+const MODE_TEXT = { handle: 'Handvat vormen: sleep de oranje bol · twee vingers op het handvat = breedte/zijwaarts · buiten het handvat draaien', scanedit: 'Scan bewerken: zie de aanwijzing onderaan · Esc = stoppen', grind: 'Inslijpen: sleep over een element (kleur = contact met de tegenkaak) · buiten de elementen draaien', wax: 'Was bewerken: sleep over scan of was · buiten de scan draaien · Shift keert toevoegen/wegnemen om', contourHint: ' · slepen = draaien, knijpen/scrollen = zoomen', sculpt: 'Bewerken: sleep over het werkstuk · buiten het werkstuk draaien · Shift keert toevoegen/wegnemen om', contour: 'Tekenen: trek de lijn met vinger of muis · begin óp de lijn = dat stuk overtekenen · tik = punt · twee vingers of rechtermuisknop = draaien · knijpen/scrollen = zoomen', landmark: 'Tik op de kam voor punt ', mark: 'Markeren: sleep over de scan', reference: 'Tik om een referentiepunt te zetten' };
 
 const S = {
-  scan: null, scanName: 'scan.stl', history: [], future: [],
+  scan: null, scanName: 'scan.stl', history: [], future: [], parts: [], // v72: parts = losse onderdelen (steg)
   antagonist: null, antagonistName: null,
   axis: null, landmarks: {}, marks: [], marksRedo: [],
   contours: new ContourSet(), plates: {},
@@ -63,8 +67,8 @@ const S = {
 const viewer = new Viewer($('viewport'));
 let tools = null; // opstelgereedschap (v65), wordt onderaan gestart
 let scanTools = null; // scanbewerking (v65.3)
-let contourTools = null; // omtrek tekenen/slepen (v67)
-window.ddcad = { S, viewer, get buildBasis() { return buildBasis; }, get tools() { return tools; } }; // voor ontwikkeling en tests
+let contourTools = null, handleTools = null; // omtrek tekenen/slepen (v67)
+window.ddcad = { S, viewer, get buildBasis() { return buildBasis; }, get tools() { return tools; }, get handleTools() { return handleTools; }, setPartMode: (i, m) => setPartMode(i, m), get scanForPlates() { return scanForPlates; }, get surfaceFor() { return surfaceFor; } }; // voor ontwikkeling en tests
 
 // ---------- algemene hulpmiddelen ----------
 let toastTimer;
@@ -222,7 +226,7 @@ for (const e of document.querySelectorAll('[data-persist]')) e.addEventListener(
 // ---------- scan ----------
 const SIMPLIFIED = new WeakMap(); // scan → rapport van het vereenvoudigen (nauwkeurigheidsmelding bij het werkstuk)
 const ORIGINALS = new WeakSet();  // onbewerkte scans zoals geopend (terugzetten daarnaartoe = niet vereenvoudigd)
-function setScan(soup, name, { reset = true, designedFrom = null, keepWax = false } = {}) {
+function setScan(soup, name, { reset = true, designedFrom = null, keepWax = false, parts = null } = {}) {
   // een bewerking op een vereenvoudigde scan blijft 'vereenvoudigd' (zelfde foutgrens t.o.v. het origineel)
   if (soup && !reset && S.scan && !SIMPLIFIED.has(soup) && !ORIGINALS.has(soup) && SIMPLIFIED.has(S.scan)) SIMPLIFIED.set(soup, SIMPLIFIED.get(S.scan));
   if (soup && reset) ORIGINALS.add(soup);
@@ -235,11 +239,14 @@ function setScan(soup, name, { reset = true, designedFrom = null, keepWax = fals
   if (reset) {
     S.history = []; S.future = []; S.landmarks = {}; S.marks = []; S.marksRedo = []; S.axis = null; S.frame = null;
     S.contours.reset(); clearPlates(); clearTeeth();
+    S.parts = parts ?? [];
   } else reopenContours();
+  viewer.setParts(S.parts); updatePartsUI();
   S.undercut = null;
   if (S.waxMoved) { S.waxMoved = false; showWax(); }
   applyLayers();
   updateScanInfo(); refreshScanColors(); refreshOverlay(); updateDone();
+  syncHeaderNav(); // v72: ↶ ↷ op het beeld tonen zodra er een scan is
 }
 function reopenContours() { for (const k of S.contours.shapes.keys()) S.contours.invalidate(k); updateContourUI(); }
 function updateScanInfo() {
@@ -272,7 +279,7 @@ function reduceScan({ forPlates = false } = {}) {
   const prev = SIMPLIFIED.get(S.scan); // twee keer vereenvoudigd: de afwijkingen tellen hooguit op
   SIMPLIFIED.set(r.soup, prev ? { ...r.report, maxDeviation: r.report.maxDeviation + prev.maxDeviation, before: prev.before } : r.report);
   const wax = S.wax?.stats().points;
-  S.history.push({ soup: S.scan, aux: snapshotAux() }); if (S.history.length > 8) S.history.shift(); S.future = [];
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); noteAction('scan'); if (S.history.length > 8) S.history.shift(); S.future = [];
   setScan(r.soup, S.scanName, { reset: false, designedFrom: r.lockFrom });
   if (wax) toast('Let op: de was hoorde bij de oude scan en is verwijderd. Breng hem opnieuw aan (Analyse).', true);
   simplifyReport(r.report);
@@ -301,16 +308,20 @@ function autoSimplify(soup) {
 async function loadScanFile(file) {
   await busy('STL inlezen…', async () => {
     let soup = parseSTL(await file.arrayBuffer());
-    const raw = soup.length / 9; ORIGINALS.add(soup);
+    const raw = soup.length / 9;
+    // v72: gesloten onderdelen (steg) naast de kaak apart zetten, vóór vereenvoudigen en voorbereiden
+    const sp = splitParts(soup); soup = sp.scan;
+    const parts = sp.parts.map(p => ({ ...p, id: ++PART_SEQ, mode: 'scan' }));
+    ORIGINALS.add(soup);
     if ($('simpAuto').checked && raw > SCAN_LIMIT) { $('busyText').textContent = `Grote scan (${int(raw)} facetten) vereenvoudigen…`; await new Promise(r => setTimeout(r, 30)); }
     const auto = autoSimplify(soup); soup = auto.soup;
-    setScan(soup, file.name);
+    setScan(soup, file.name, { parts });
     if (auto.original) S.history = [{ soup: auto.original, aux: snapshotAux() }];
     else $('simpReport').textContent = '';
     let closed = false;
     try { closed = soup.length / 9 < 1_500_000 && quality(weld(soup, 1e-5)).open === 0; } catch { /* alleen hint */ }
     $('intaglioInfo').textContent = closed ? 'Dit is een gesloten model. Is het een bestaande lepel/beetplaat? Haal dan hierboven de weefselzijde eruit.' : '';
-    status(`Scan geladen: ${file.name} · ${int(raw)} driehoeken${auto.original ? ` → ${int(soup.length / 9)} (vereenvoudigd, max. afwijking ${fmt(auto.report.maxDeviation, 3)} mm; ↶ Terug bij Scan & mesh = origineel)` : ''}.${closed ? ' Gesloten model: kies bij Scan & mesh "Weefselzijde uit product halen" om er een nieuwe plaat op te maken.' : ''}`);
+    status(`Scan geladen: ${file.name} · ${int(raw)} driehoeken${auto.original ? ` → ${int(soup.length / 9)} (vereenvoudigd, max. afwijking ${fmt(auto.report.maxDeviation, 3)} mm; ↶ Terug bij Scan & mesh = origineel)` : ''}.${closed ? ' Gesloten model: kies bij Scan & mesh "Weefselzijde uit product halen" om er een nieuwe plaat op te maken.' : ''}${parts.length ? ' ' + partsLoadedText(parts) : ''}`);
     if (S.step === 'opdracht') showStep('scan');
   });
 }
@@ -322,7 +333,7 @@ $('intaglioBtn').onclick = () => busy('Weefselzijde zoeken…', async () => {
   const { soup, report } = extractIntaglio(S.scan, { side: +$('intaglioSide').value });
   if (soup.length / 9 < 500) throw Error('Geen bruikbare weefselzijde gevonden. Kies de andere zijde.');
   setScan(soup, name.replace(/\.stl$/i, '') + '_weefselzijde.stl');
-  S.history = [{ soup: before, aux: snapshotAux() }]; S.future = [];
+  S.history = [{ soup: before, aux: snapshotAux() }]; S.future = []; noteAction('scan');
   const holes = boundaryLoops(weld(soup, 1e-5)).loops.length - 1;
   // De occlusale richting is bekend (van het weefsel af); zet meteen de referentiepunten zodat beetwal en handvat werken.
   let lmNote = '';
@@ -346,8 +357,8 @@ $('demoBtn').onclick = () => busy('Demo-kaak maken…', async () => {
 $('viewport').addEventListener('dragover', e => e.preventDefault());
 $('viewport').addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f && /\.stl$/i.test(f.name)) loadScanFile(f); });
 
-function snapshotAux() { return JSON.parse(JSON.stringify({ landmarks: S.landmarks, marks: S.marks, axis: S.axis, contours: S.contours.toJSON(), designedFrom: S.designedFrom ?? null })); }
-function restoreAux(a) { S.designedFrom = a.designedFrom ?? null; S.landmarks = a.landmarks; S.marks = a.marks; S.axis = a.axis; S.contours.reset(); for (const c of a.contours) { const s = S.contours.ensure(c.kind); s.points = c.points; s.closed = !!c.closed; s.axis = c.axis ?? null; s.edge = c.edge ?? null; } }
+function snapshotAux() { const a = JSON.parse(JSON.stringify({ landmarks: S.landmarks, marks: S.marks, axis: S.axis, contours: S.contours.toJSON(), designedFrom: S.designedFrom ?? null })); a.parts = S.parts; return a; }
+function restoreAux(a) { S.designedFrom = a.designedFrom ?? null; S.landmarks = a.landmarks; S.marks = a.marks; S.axis = a.axis; S.contours.reset(); for (const c of a.contours) { const s = S.contours.ensure(c.kind); s.points = c.points; s.closed = !!c.closed; s.axis = c.axis ?? null; s.edge = c.edge ?? null; }  if (a.parts) S.parts = a.parts; }
 // Scan bewerken zonder het ontwerp kwijt te raken: de opstelling blijft (bij verplaatsen/draaien/schalen gaat hij mee)
 // en lepel, beetplaat en basis worden daarna automatisch opnieuw gegenereerd op de bijgewerkte scan.
 function keepDesign(matrix = null) {
@@ -373,7 +384,7 @@ function restoreDesign(keep) {
 }
 function transformScan(matrix, label, { winding = false } = {}) {
   if (!S.scan) return status('Laad eerst een scan.', true);
-  S.history.push({ soup: S.scan, aux: snapshotAux() }); if (S.history.length > 8) S.history.shift(); S.future = [];
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); noteAction('scan'); if (S.history.length > 8) S.history.shift(); S.future = [];
   const soup = winding ? flipSoup(S.scan) : applyMatrixToSoup(S.scan, matrix.elements);
   if (!winding) {
     const tp = p => p && new THREE.Vector3(...p).applyMatrix4(matrix).toArray();
@@ -381,6 +392,8 @@ function transformScan(matrix, label, { winding = false } = {}) {
     for (const m of S.marks) m.points = m.points.map(tp);
     for (const s of S.contours.shapes.values()) s.points = s.points.map(tp);
     if (S.axis) S.axis = new THREE.Vector3(...S.axis).transformDirection(matrix).toArray();
+    // v72: onderdelen (steg) bewegen mee; spiegelen keert de facetten om, dan weer naar buiten richten
+    if (S.parts.length) S.parts = S.parts.map(p => { const t = applyMatrixToSoup(p.soup, matrix.elements); return { ...p, soup: matrix.determinant() < 0 ? flipSoup(t) : t }; });
   }
   const keep = keepDesign(matrix);
   setScan(soup, S.scanName, { reset: false });
@@ -410,7 +423,7 @@ $('meshQA').onclick = () => busy('Mesh analyseren…', async () => { if (!S.scan
 $('meshRepair').onclick = () => busy('Mesh repareren…', async () => {
   if (!S.scan) throw Error('Laad eerst een scan.');
   const { mesh, report } = repair(S.scan, { fill: $('repairFill').checked, keepLargest: true });
-  S.history.push({ soup: S.scan, aux: snapshotAux() }); S.future = [];
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); noteAction('scan'); S.future = [];
   setScan(toSoup(mesh), S.scanName, { reset: false });
   $('meshReport').textContent = `Reparatie: ${report.invalid} ongeldig, ${report.flat} plat, ${report.duplicate} dubbel verwijderd · ${report.flips} facetten omgedraaid · ${report.filled} gaten gedicht${report.outward ? ' · naar buiten gericht' : ''}.\n\n` + qaText(quality(mesh));
   status('Mesh gerepareerd. Controleer het resultaat.');
@@ -436,7 +449,7 @@ $('fitBtn').onclick = () => viewer.fit();
 $('zoomIn').onclick = () => viewer.zoom(0.8);
 $('zoomOut').onclick = () => viewer.zoom(1.25);
 // Lagen: elke laag apart aan/uit en met een fader voor de doorzichtigheid.
-const LAYERS = { Scan: 'scan', Wax: 'wax', Plates: 'plates', Teeth: 'teeth', Antagonist: 'antagonist' };
+const LAYERS = { Scan: 'scan', Parts: 'parts', Wax: 'wax', Plates: 'plates', Teeth: 'teeth', Antagonist: 'antagonist' };
 function setGroupOpacity(group, op) {
   group.traverse(o => { if (!o.isMesh || !o.material) return; const m = o.material; m.userData.baseOpacity ??= m.opacity ?? 1; const v = Math.min(1, m.userData.baseOpacity * op); m.opacity = v; m.transparent = v < 0.999; m.depthWrite = v >= 0.6; m.needsUpdate = true; });
 }
@@ -469,6 +482,8 @@ function setMode(mode, arg = null) {
   $('waxEdit').setAttribute('aria-pressed', String(mode === 'wax'));
   $('contourToggle').textContent = mode === 'contour' ? '✓ Klaar' : '✏️ Teken';
   contourTools?.onMode(mode);
+  if (mode !== 'handle') handleTools?.stop?.();
+  for (const id of ['handleEdit', 'beetHandleEdit']) { const b = $(id); if (b) { b.setAttribute('aria-pressed', String(mode === 'handle')); b.textContent = mode === 'handle' ? '✓ Klaar met handvat' : '✋ Handvat vormen'; } }
   for (const b of document.querySelectorAll('[data-landmark]')) b.setAttribute('aria-pressed', String(mode === 'landmark' && b.dataset.landmark === arg));
   for (const b of document.querySelectorAll('[data-mark]')) b.setAttribute('aria-pressed', String(mode === 'mark' && b.dataset.mark === arg));
 }
@@ -506,7 +521,7 @@ canvas.addEventListener('pointerdown', e => {
   press = pointers.size === 1 ? { x: e.clientX, y: e.clientY, id: e.pointerId, type: e.pointerType } : null;
   if (S.mode === 'mark' && S.modeArg !== 'reference' && pointers.size === 1 && e.button === 0) {
     const hit = viewer.pick(e.clientX, e.clientY);
-    if (hit) { stroke = { kind: S.modeArg, points: [hit.point.toArray()] }; S.marks.push(stroke); S.marksRedo = []; refreshOverlay(); }
+    if (hit) { stroke = { kind: S.modeArg, points: [hit.point.toArray()] }; S.marks.push(stroke); S.marksRedo = []; noteAction('mark'); refreshOverlay(); }
   }
 });
 canvas.addEventListener('pointermove', e => {
@@ -542,7 +557,7 @@ function handleTap(e, type) {
   }
   if (S.mode === 'mark' && S.modeArg === 'reference') {
     const hit = viewer.pick(e.clientX, e.clientY);
-    if (hit) { S.marks.push({ kind: 'reference', points: [hit.point.toArray()] }); S.marksRedo = []; updateMarkInfo(); refreshOverlay(); }
+    if (hit) { S.marks.push({ kind: 'reference', points: [hit.point.toArray()] }); S.marksRedo = []; noteAction('mark'); updateMarkInfo(); refreshOverlay(); }
     return;
   }
   if (tools?.handleTap(e)) return;
@@ -649,8 +664,8 @@ $('undercutRun').onclick = () => busy('Ondersnijdingen berekenen…', async () =
 });
 $('undercutClear').onclick = () => { S.undercut = null; refreshScanColors(); };
 for (const b of document.querySelectorAll('[data-mark]')) b.onclick = () => { if (!S.scan) return status('Laad eerst een scan.', true); setMode(S.mode === 'mark' && S.modeArg === b.dataset.mark ? 'orbit' : 'mark', b.dataset.mark); };
-$('markUndo').onclick = () => { if (S.marks.length) S.marksRedo.push(S.marks.pop()); updateMarkInfo(); refreshOverlay(); };
-$('markRedo').onclick = () => { if (S.marksRedo.length) S.marks.push(S.marksRedo.pop()); updateMarkInfo(); refreshOverlay(); };
+$('markUndo').onclick = () => { if (S.marks.length) { S.marksRedo.push(S.marks.pop()); status('Markering teruggedraaid.'); } else status('Niets om terug te zetten.'); updateMarkInfo(); refreshOverlay(); };
+$('markRedo').onclick = () => { if (S.marksRedo.length) { S.marks.push(S.marksRedo.pop()); status('Markering hersteld.'); } updateMarkInfo(); refreshOverlay(); };
 $('markClear').onclick = () => { S.marks = []; S.marksRedo = []; updateMarkInfo(); refreshOverlay(); };
 function updateMarkInfo() { const c = k => S.marks.filter(m => m.kind === k).length; $('markInfo').textContent = `Randlijnen: ${c('boundary')} · stegen: ${c('bar')} · referentiepunten: ${c('reference')}. Ze liggen op het scanoppervlak en draaien mee.`; }
 
@@ -688,10 +703,78 @@ function surfaceFor(kind) {
   const s = S.contours.get(kind);
   if (s?.points.length && !s.closed) throw Error('Sluit eerst de omtrek door op het eerste punt te tikken.');
   if (!s?.closed) throw Error('Er is nog geen omtrek. Tik op 🧭 Automatisch of teken de omtrek: zonder omtrek wordt geen plaat gemaakt.');
-  return S.contours.surface(kind, scanForPlates(), S.designedFrom ?? null);
+  return S.contours.surface(kind, scanBase(), S.designedFrom ?? null);
 }
 // Scan + was (als er was ligt); zelfde facetvolgorde als de scan.
-function scanForPlates() { return S.wax && S.wax.soup === S.scan && S.waxSoup ? S.waxSoup : S.scan; }
+function scanBase() { return S.wax && S.wax.soup === S.scan && S.waxSoup ? S.waxSoup : S.scan; }
+const scanForPlates = scanBase;
+
+// ---------- v72: losse onderdelen (steg) ----------
+// Bij het openen worden gesloten delen naast de kaak (een steg op implantaten) apart gezet (parts.js). Per onderdeel:
+// 'scan' = het werkstuk gaat eroverheen (onder het onderdeel opgevuld langs de insteekas, zoals uitblokken),
+// 'apart' = het werkstuk ligt alleen op de kaak. De keuze is terug te draaien (↶) en gaat mee in het project.
+let PART_SEQ = 0;
+const includedParts = () => S.parts.filter(p => p.mode !== 'apart');
+const partWord = p => p.kind === 'steg' ? 'steg' : 'onderdeel';
+const partDe = p => p.kind === 'steg' ? 'de steg' : 'het onderdeel';
+// Over de steg (zoals in het lab): plaat op het tandvlees ∪ kap over de steg − uitsparing (de steg met alles eronder,
+// schroefkanalen dicht). Zo zit er nooit plaatmateriaal onder de steg en klemt het werkstuk niet vast (parts.js).
+// De kap wordt bijgesneden tot 0,4 mm binnen de omtrek: voorbij de plaatrand is geen scan, en daar schampte de kap
+// anders net langs de dunne plaatrand (niet-manifold randen).
+const PART_BLOCKS = new WeakMap();
+async function partBlocks(kind, surface, gap, wall) {
+  const inc = includedParts(); if (!inc.length || !surface) return null;
+  const axis = contourAxis(), s = S.contours.get(kind), key = [kind, gap, wall, ...axis.map(x => x.toFixed(4)), s?.points?.length ?? 0].join('|');
+  let c = PART_BLOCKS.get(surface);
+  if (!c || c.parts !== S.parts || c.key !== key) {
+    const r = barBlocks(inc.map(p => p.soup), axis, { gap, wall, scan: surface });
+    if (r && s?.closed && s.points?.length > 2) { await loadManifold(); try { r.cap = await clipToOutline(r.cap, s.points, s.axis, { inset: gap > 0.05 ? 1.2 : 0.4 }); } catch (e) { console.warn('kap bijsnijden', e); } }
+    c = { parts: S.parts, key, r }; PART_BLOCKS.set(surface, c);
+  }
+  return c.r;
+}
+function partsLoadedText(parts) {
+  const n = parts.length, stegs = parts.filter(p => p.kind === 'steg').length;
+  return `${n === 1 ? (stegs ? 'Steg' : 'Los onderdeel') : `${n} losse onderdelen`} apart gezet (${int(parts.reduce((a, p) => a + p.faces, 0))} facetten): het werkstuk gaat er nu overheen. Kies bij Scan & mesh of bij het werkstuk 'Zonder steg' voor een werkstuk alleen op de kaak.`;
+}
+function partSuffix() { if (!S.parts.length) return ''; const w = partWord(S.parts[0]); return includedParts().length ? `_over_${w}` : `_zonder_${w}`; }
+function partNote(wall = null) {
+  if (!S.parts.length) return '';
+  const inc = includedParts(), w = partWord(S.parts[0]), de = partDe(S.parts[0]);
+  return inc.length ? ` · over ${de}${wall ? `: kap van ${fmt(wall, 1)} mm, de ruimte onder ${de} uitgespaard (geen ondersnijding)` : ''}` : ` · zonder ${w} (alleen op de kaak)`;
+}
+function updatePartsUI() {
+  const has = S.parts.length > 0;
+  $('partsBox').classList.toggle('hide', !has);
+  for (const e of document.querySelectorAll('.part-field, .parts-layer')) e.classList.toggle('hide', !has);
+  if (!has) { $('partsList').innerHTML = ''; return; }
+  $('partsList').innerHTML = S.parts.map((p, i) => {
+    const w = partWord(p), de = partDe(p), name = p.kind === 'steg' ? 'Steg' : `Onderdeel ${i + 1}`;
+    return `<div class="part-row"><div class="part-title"><b>${name}</b><span class="sub">${int(p.faces)} facetten · ${p.size.map(v => fmt(v)).join(' × ')} mm</span></div>`
+      + `<div class="seg" role="group" aria-label="${name}"><button type="button" data-part="${i}" data-pmode="scan" aria-pressed="${p.mode !== 'apart'}">Over ${de}</button><button type="button" data-part="${i}" data-pmode="apart" aria-pressed="${p.mode === 'apart'}">Zonder ${w}</button></div>`
+      + `<a class="download" href="#" data-part-dl="${i}">↓ ${name} als STL</a></div>`;
+  }).join('');
+  const mode = includedParts().length === S.parts.length ? 'scan' : includedParts().length ? '' : 'apart';
+  for (const id of ['lepelPart', 'beetPart', 'basisPart']) { const sel = $(id); sel.value = mode || 'scan'; for (const o of sel.options) o.textContent = o.value === 'scan' ? `Over ${partDe(S.parts[0])} (hoort bij de scan)` : `Zonder ${partWord(S.parts[0])} (alleen op de kaak)`; }
+}
+function setPartMode(i, mode) {
+  const list = i == null ? S.parts.map((_, k) => k) : [i];
+  if (!list.some(k => S.parts[k] && S.parts[k].mode !== mode)) return;
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); noteAction('scan'); if (S.history.length > 8) S.history.shift(); S.future = [];
+  S.parts = S.parts.map((p, k) => list.includes(k) ? { ...p, mode } : p);
+  const keep = keepDesign();
+  viewer.setParts(S.parts); updatePartsUI(); showWax(); refreshOverlay();
+  const w = partWord(S.parts[list[0]]), de = partDe(S.parts[list[0]]);
+  status(mode === 'apart' ? `Zonder ${w}: lepel, beetplaat en basis liggen alleen op de kaak. ${de[0].toUpperCase() + de.slice(1)} blijft doorzichtig zichtbaar.` : `Over ${de}: lepel, beetplaat en basis krijgen een kap over ${de}; de ruimte eronder wordt uitgespaard.`);
+  restoreDesign(keep);
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-pmode]'); if (b) { setPartMode(+b.dataset.part, b.dataset.pmode); return; }
+  const a = e.target.closest('[data-part-dl]'); if (!a) return; e.preventDefault();
+  const i = +a.dataset.partDl, p = S.parts[i]; if (!p) return;
+  download(writeSTL(p.soup, p.kind === 'steg' ? 'Steg' : 'Onderdeel'), `${p.kind === 'steg' ? 'STEG' : 'ONDERDEEL' + (i + 1)}_${safe(S.scanName.replace(/(_voorbereid)?\.stl$/i, ''))}.stl`);
+});
+for (const id of ['lepelPart', 'beetPart', 'basisPart']) $(id).addEventListener('change', e => setPartMode(null, e.target.value));
 // Alles wat door het pasvlak heen steekt (wortels van tanden, onderkant van wal/gingivaband/handvat) wegsnijden met
 // een 'weefselblok' waarvan één zijde exact het scanoppervlak is (iets ruimer dan de omtrek). Zo blijft het pasvlak gelijk aan de scan.
 async function clipToTissue(kind, soup, reverse, { deep = false } = {}) {
@@ -720,15 +803,26 @@ const SCAN_SI = new WeakMap();
 function scanSelfIntersections() { if (!S.scan) return 0; let v = SCAN_SI.get(S.scan); if (v === undefined) { v = selfIntersections(weld(S.scan, 1e-6), { maxPairs: 5e6 }).pairs; SCAN_SI.set(S.scan, v); } return v; }
 // v69: de kartelige scanrand wordt in het raakvlak gladgestreken (hooguit 0,3 mm); die laatste strook niet meetellen
 const rimBandOf = rep => rep?.rimSmoothed > 0.02 ? 0.5 : 0;
-function waxNote() { const st = S.wax && S.wax.soup === S.scan ? S.wax.stats() : null; return st?.points ? ` · was op ${int(st.points)} punten (max ${fmt(st.max, 2)} mm): daar ligt de plaat bewust vrij van de scan` : ''; }
+function waxNote() { const st = S.wax && S.wax.soup === S.scan ? S.wax.stats() : null; return (st?.points ? ` · was op ${int(st.points)} punten (max ${fmt(st.max, 2)} mm): daar ligt de plaat bewust vrij van de scan` : ''); }
 // Pasvlak-controle: afstand scan → plaat t.o.v. de ingestelde ruimte; het aangevulde (ontworpen) deel telt niet mee.
 S.fit = {};
 function fitCheck(kind, surface, soup, gap, rimSeal = 0, rimBand = 0) {
-  const s = S.contours.get(kind), skip = s?.splitIndex != null && s.splitIndex < surface.length / 9 ? s.splitIndex : null;
+  const s = S.contours.get(kind); let skip = s?.splitIndex != null && s.splitIndex < surface.length / 9 ? s.splitIndex : null;
+  // v72: onder een steg die bij de scan hoort is bewust ruimte uitgespaard: daar niet meten
+  const inc = includedParts(); let barTail = '';
+  if (inc.length) {
+    const zone = partZone(inc.map(p => p.soup), contourAxis(), 0.5), keep = [], n = surface.length / 9; let kept = 0;
+    for (let t = 0; t < n; t++) {
+      if (skip != null && t === skip) skip = kept;
+      const c = [0, 1, 2].map(k => (surface[t * 9 + k] + surface[t * 9 + 3 + k] + surface[t * 9 + 6 + k]) / 3);
+      if (zone(c)) continue; keep.push(t); kept++;
+    }
+    if (keep.length < n) { const sub = new Float32Array(keep.length * 9); keep.forEach((t, i) => sub.set(surface.subarray(t * 9, t * 9 + 9), i * 9)); surface = sub; barTail = ` · ruimte onder ${partDe(inc[0])} niet meegeteld`; }
+  }
   const f = fitReport(surface, soup, gap, { skipFrom: skip, rimSeal, rimBand });
   S.fit[kind] = f ? { ...f, gap, designed: skip != null } : null;
   if (!f) return '';
-  const tail = (skip != null ? ' · aangevuld deel niet meegeteld' : '') + (rimBand > 0 ? ` · kartelige scanrand gladgestreken (laatste ${fmt(rimBand, 1)} mm niet meegeteld)` : '');
+  const tail = (skip != null ? ' · aangevuld deel niet meegeteld' : '') + (rimBand > 0 ? ` · kartelige scanrand gladgestreken (laatste ${fmt(rimBand, 1)} mm niet meegeteld)` : '') + barTail;
   if (!gap) { const ok = f.p99 <= 0.05; return ` · <span class="${ok ? 'ok' : 'err'}">pasvlak ${Math.round(f.within * 1000) / 10}% binnen 0,05 mm van de scan, 99% ≤ ${fmt(f.p99, 3)} mm</span>${tail}`; }
   const ok = f.closeP99 <= 0.05;
   return ` · <span class="${ok ? 'ok' : 'err'}">afdrukruimte ${fmt(gap, 2)} mm: ${Math.round(f.within * 1000) / 10}% binnen 0,05 mm, nergens meer dan ${fmt(f.closeP99, 3)} mm te dicht (99%)</span>${f.bridged > 0.005 ? ` · ${Math.round(f.bridged * 1000) / 10}% overbrugd (smalle plooien)` : ''}${tail}`;
@@ -794,17 +888,23 @@ async function buildLepel() {
   let soup = await shellAsync(surface, { gap, wall, reverse, checkThin: true, trimSpikes: !!edge }, rep, () => tick());
   const shellSoup = soup; // pasvlak meten zonder weefselstops (die raken de scan bewust)
   const extras = [], notes = [];
-  if ($('lepelHandle').checked && needFrame('Handvat')) { extras.push(trayHandle(S.frame, { base: gap, height: num('handleHeight'), width: num('handleWidth'), conform: conformTo(gap + wall * 0.5) })); notes.push('handvat'); }
-  if ($('lepelStops').checked && gap > 0 && needFrame('Weefselstops')) { extras.push(...tissueStops(['R', 'M', 'L'].map(k => S.landmarks[k]), S.frame.N, { gap, wall })); notes.push('3 weefselstops'); }
+  if ($('lepelHandle').checked && needFrame('Handvat')) { extras.push(handleGeometry(S.frame, handleParams(), handleOpts('lepel'))); notes.push('handvat'); }
+  if ($('lepelStops').checked && gap > 0 && needFrame('Weefselstops')) {
+    // v72: geen stop onder of naast een steg die bij de scan hoort (daar is de lepel uitgespaard)
+    const inc = includedParts(), zone = inc.length ? partZone(inc.map(p => p.soup), S.frame.N, gap + wall + 1) : null;
+    const pts = ['R', 'M', 'L'].map(k => S.landmarks[k]).filter(p => p && !(zone && zone(p)));
+    if (pts.length) { extras.push(...tissueStops(pts, S.frame.N, { gap, wall })); notes.push(`${pts.length} weefselstop${pts.length === 1 ? '' : 's'}`); }
+  }
   const cutters = $('lepelPerforated').checked && needFrame('Perforaties') ? perforations(S.frame, { form: $('archForm').value }) : [];
   if (cutters.length) notes.push(cutters.length + ' perforaties');
+  const pb = await partBlocks('lepel', surface, gap, wall); // v72: over de steg
+  if (pb) { extras.push(pb.cap); cutters.push(pb.relief); }
   if (extras.length || cutters.length) {
     await loadManifold();
-    soup = (await unionSoups([soup, ...extras])).soup;
-    if (cutters.length) soup = await subtractSoups(soup, cutters);
+    soup = await unionSubtract([soup, ...extras], cutters);
   }
-  const { text } = plateSummary(soup), fitTxt = fitCheck('lepel', surface, shellSoup, gap, 0, rimBandOf(rep)) + waxNote();
-  S.plates.lepel = { soup, name: 'Individuele lepel', file: `LEPEL_${safe($('caseName').value)}.stl` };
+  const { text } = plateSummary(soup), fitTxt = fitCheck('lepel', surface, shellSoup, gap, 0, rimBandOf(rep)) + waxNote() + partNote(pb ? wall : null);
+  S.plates.lepel = { soup, name: 'Individuele lepel', file: `LEPEL_${safe($('caseName').value)}${partSuffix()}.stl` };
   showPlate('lepel', soup, COLORS.plate.lepel);
   const edgeTxt = edge ? ` · rand langs de scanrand${edge.inset ? ` (${fmt(edge.inset)} mm erbinnen)` : ''}${rep.openedFaces ? ` · ${int(rep.openedFaces)} facetten van dunne punten aan de scanrand weggelaten` : ''}` : '';
   result('lepelResult', `Lepel klaar: ${text}${edgeTxt}${fitTxt}${thinNote(rep)}${reducedNote(rep)}${rep.holesFilled ? ` · ${rep.holesFilled} gaten in de scan gedicht` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('lepel', 'Lepel-STL')}`);
@@ -840,18 +940,20 @@ async function buildBeet() {
       notes.push(rs?.rule ? `beetwal volgens regels (kamlijn; hoogte voor ${fmt(rs.rule.front)} / achter ${fmt(rs.rule.back)} mm boven de kam${rs.rule.notes.length ? '; ' + rs.rule.notes.join('; ') : ''})` : `beetwal ${fmt(num('rimHeight'))} mm`);
     }
   }
-  if ($('beetHandle').checked && needFrame('Handvat')) { extras.push(trayHandle(S.frame, { base: gap + wall, height: num('handleHeight'), width: num('handleWidth'), labial: 6, conform: conformTo(gap + wall * 0.5) })); notes.push('handvat'); }
+  if ($('beetHandle').checked && needFrame('Handvat')) { extras.push(handleGeometry(S.frame, handleParams(), handleOpts('beetplaat'))); notes.push('handvat'); }
+  const clip = extras.length > 0; // beetwal of handvat: wat door het pasvlak steekt wegsnijden (de kap raakt het pasvlak niet)
+  const pb = await partBlocks('beetplaat', surf2, gap, wall); // v72: over de steg
+  if (pb) extras.push(pb.cap);
   if (extras.length) {
-    await tick(`${notes.some(n => n.startsWith('beetwal')) ? 'Beetwal' : 'Handvat'} samenvoegen met de plaat…`);
+    await tick(`${notes.some(n => n.startsWith('beetwal')) ? 'Beetwal' : notes.includes('handvat') ? 'Handvat' : 'Kap'} samenvoegen met de plaat…`);
     await loadManifold();
-    soup = (await unionSoups([soup, ...extras])).soup;
-    await tick('Wat door het pasvlak steekt wegsnijden…');
-    if (!draft) soup = await clipToTissue('beetplaat', soup, reverse);
+    soup = await unionSubtract([soup, ...extras], pb ? [pb.relief] : []);
+    if (clip && !draft) { await tick('Wat door het pasvlak steekt wegsnijden…'); soup = await clipToTissue('beetplaat', soup, reverse); }
   }
   await tick('Pasvlak controleren…');
   const edge = S.contours.get('beetplaat')?.edge;
-  const { text } = plateSummary(soup), fitTxt = fitCheck('beetplaat', surf2, soup, gap, seal, rimBandOf(rep)) + waxNote();
-  S.plates.beetplaat = { soup, name: 'Beetplaat', file: `BEETPLAAT_${safe($('caseName').value)}.stl` };
+  const { text } = plateSummary(soup), fitTxt = fitCheck('beetplaat', surf2, soup, gap, seal, rimBandOf(rep)) + waxNote() + partNote(pb ? wall : null);
+  S.plates.beetplaat = { soup, name: 'Beetplaat', file: `BEETPLAAT_${safe($('caseName').value)}${partSuffix()}.stl` };
   showPlate('beetplaat', soup, COLORS.plate.beetplaat);
   const edgeTxt = edge ? ` · rand langs de scanrand${edge.inset ? ` (${fmt(edge.inset)} mm erbinnen)` : ' (plaatrand = scanrand)'}${rep.openedFaces ? ` · ${int(rep.openedFaces)} facetten van dunne punten aan de scanrand weggelaten` : ''}` : '';
   const sealTxt = seal ? ` · rand ligt op de scan (afstand loopt in de laatste ${fmt(seal)} mm naar 0)` : '';
@@ -872,7 +974,7 @@ const toothMaterial = () => new THREE.MeshStandardMaterial({ color: COLORS.tooth
 function clearTeeth() { selectTooth(null); tools?.centric(); tools?.clearOpp(); viewer.clearGroup('teeth'); S.teeth = []; S.teethHistory = []; S.teethFuture = []; S.teethInitial = null; S.grindHistory = []; tools?.resetRows(); renderToothList(); }
 function teethSnapshot() { return tools ? tools.snapshot() : S.teeth.map(t => ({ fdi: t.userData.fdi, p: t.position.toArray(), q: t.quaternion.toArray() })); }
 function applyTeethSnapshot(snap) { if (tools) return tools.applySnapshot(snap); for (const s of snap) { const t = S.teeth.find(o => o.userData.fdi === s.fdi); if (t) { t.position.fromArray(s.p); t.quaternion.fromArray(s.q); t.updateMatrixWorld(); } } viewer.render(); }
-function pushTeethHistory() { S.teethHistory.push(teethSnapshot()); if (S.teethHistory.length > 60) S.teethHistory.shift(); S.teethFuture = []; invalidateTeethDependents(); }
+function pushTeethHistory() { S.teethHistory.push(teethSnapshot()); if (S.teethHistory.length > 60) S.teethHistory.shift(); S.teethFuture = []; noteAction('teeth'); invalidateTeethDependents(); }
 function invalidateTeethDependents() { if (S.plates.monoblock || S.plates.basis) { delete S.plates.monoblock; delete S.plates.basis; delete S.plates.elementen; showPlate('basis', null); showPlate('basisTeeth', null); $('basisResult').innerHTML = '<span class="err">Opstelling gewijzigd: genereer de prothese opnieuw.</span>'; } }
 function syncConceptUI() { $('customConcept').classList.toggle('hide', $('concept').value !== 'custom'); }
 $('concept').addEventListener('change', syncConceptUI);
@@ -1014,6 +1116,9 @@ async function buildBasis() {
   const base = await shellAsync(surface, { gap, wall, reverse, checkThin: true }, rep, () => tick());
   await loadManifold();
   const parts = [base], notes = [];
+  const pb = await partBlocks('basis', surface, gap, wall); // v72: over de steg (overkappingsprothese)
+  if (pb) parts.push(pb.cap);
+  const cut = pb ? [pb.relief] : [];
   let gingivaFallback = null;
   const teeth = teethWorldSoups();
   if ($('gingivaOn').checked && teeth.length && S.frame) {
@@ -1046,19 +1151,19 @@ async function buildBasis() {
     // gingivaprofiel (minder flens, zonder wortelreliëf) tot het wel sluit.
     // v70: ook losse delen tellen als 'niet goed' (eerst alleen niet-manifold randen). De gingivaband steekt hier nog diep
     // onder de scan (embed); daarom bij de prothese het diepe weefselblok van v69.
-    const build = async () => { const r = {}; const u = await unionSoups([...parts, ...teeth.map(t => t.soup)], r); const m = await clipToTissue('basis', u.soup, reverse, { deep: true }); const q = quality(weld(m, 1e-6)); return { m, ok: !r.loose && q.nonManifold === 0 && q.components === 1 }; };
+    const build = async () => { const r = {}; const u = { soup: await unionSubtract([...parts, ...teeth.map(t => t.soup)], cut, r) }; const m = await clipToTissue('basis', u.soup, reverse, { deep: true }); const q = quality(weld(m, 1e-6)); return { m, ok: !r.loose && q.nonManifold === 0 && q.components === 1 }; };
     let res = await build(), simpler = 0;
     while (!res.ok && gingivaFallback && simpler < gingivaFallback.steps.length) { parts[gingivaFallback.index] = gingivaFallback.steps[simpler++](); res = await build(); }
     if (simpler) { const gi = notes.findIndex(n => n.startsWith('gingiva')); if (gi >= 0) notes[gi] = `gingiva met festoenen en papillen (eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling)`; if (!res.ok) notes.push('let op: delen raken elkaar; controleer in de slicer'); }
     const mono = res.m;
-    S.plates.monoblock = { soup: mono, name: 'Monoblock prothese', file: `MONOBLOCK_${safe($('caseName').value)}.stl` };
+    S.plates.monoblock = { soup: mono, name: 'Monoblock prothese', file: `MONOBLOCK_${safe($('caseName').value)}${partSuffix()}.stl` };
     delete S.plates.basis;
     // Weergave: basis in gingivakleur, tanden in tandkleur (export blijft één monoblock).
     // weergave: basis (zonder tanden) in gingivakleur, tanden apart in tandkleur — geen samenvallende vlakken
-    let display = mono; if (teeth.length) try { display = await clipToTissue('basis', (await unionSoups(parts)).soup, reverse, { deep: true }); } catch { /* alleen weergave */ }
+    let display = mono; if (teeth.length) try { display = await clipToTissue('basis', await unionSubtract(parts, cut), reverse, { deep: true }); } catch { /* alleen weergave */ }
     showPlate('basis', display, COLORS.plate.basis);
     showPlate('basisTeeth', teeth.length ? concatSoups(teeth.map(t => t.soup)) : null, COLORS.tooth);
-    const { text } = plateSummary(mono), fitTxt = fitCheck('basis', surface, mono, gap, 0, rimBandOf(rep));
+    const { text } = plateSummary(mono), fitTxt = fitCheck('basis', surface, mono, gap, 0, rimBandOf(rep)) + partNote(pb ? wall : null);
     result('basisResult', `Monoblock klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('monoblock', 'Monoblock-STL')}`);
   } else {
     const g = num('socketGap');
@@ -1068,12 +1173,12 @@ async function buildBasis() {
       return applyMatrixToSoup(t.userData.soup, m.elements);
     });
     const u = await unionSoups(parts);
-    const basis = await clipToTissue('basis', await subtractSoups(u.soup, expanded), reverse, { deep: true });
-    S.plates.basis = { soup: basis, name: 'Prothesebasis met sockets', file: `BASIS_${safe($('caseName').value)}.stl` };
+    const basis = await clipToTissue('basis', await subtractSoups(u.soup, pb ? [...expanded, pb.relief] : expanded), reverse, { deep: true });
+    S.plates.basis = { soup: basis, name: 'Prothesebasis met sockets', file: `BASIS_${safe($('caseName').value)}${partSuffix()}.stl` };
     delete S.plates.monoblock;
     showPlate('basis', basis, COLORS.plate.basis);
     showPlate('basisTeeth', concatSoups(teeth.map(t => t.soup)), COLORS.tooth);
-    const { text } = plateSummary(basis), fitTxt = fitCheck('basis', surface, basis, gap, 0, rimBandOf(rep));
+    const { text } = plateSummary(basis), fitTxt = fitCheck('basis', surface, basis, gap, 0, rimBandOf(rep)) + partNote(pb ? wall : null);
     result('basisResult', `Basis met ${teeth.length} sockets klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)} · socketspeling ${fmt(g, 2)} mm${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('basis', 'Basis-STL')}`);
   }
   if (teethTrimmed.length) S.plates.elementen = { soup: concatSoups(teethTrimmed.map(t => t.soup)), name: 'Elementen', file: `ELEMENTEN_${safe($('caseName').value)}.stl`, parts: teethTrimmed };
@@ -1134,7 +1239,7 @@ $('runChecks').onclick = runChecks;
 // ---------- productie ----------
 function outputList() {
   const P = S.plates, list = [], w = isDenture() ? 'prothese' : $('work').value;
-  const forWork = { lepel: ['lepel', 'scan'], beetplaat: ['beetplaat', 'scan'], prothese: ['monoblock', 'basis', 'elementen', 'losse', 'tegenkaak', 'scan', 'antagonist'] }[w];
+  const forWork = { lepel: ['lepel', 'scan', 'steg'], beetplaat: ['beetplaat', 'scan', 'steg'], prothese: ['monoblock', 'basis', 'elementen', 'losse', 'tegenkaak', 'scan', 'steg', 'antagonist'] }[w];
   const add = (key, label, available, files) => { if (forWork.includes(key) && (available || !['monoblock', 'basis'].includes(key) || !(P.monoblock || P.basis))) list.push({ key, label, available, files }); };
   add('lepel', 'Lepel.stl', !!P.lepel, () => [[`Lepel.stl`, P.lepel.soup]]);
   add('beetplaat', 'Beetplaat.stl', !!P.beetplaat, () => [[`Beetplaat.stl`, P.beetplaat.soup]]);
@@ -1144,6 +1249,7 @@ function outputList() {
   add('losse', 'Losse elementen per FDI', !!P.elementen, () => P.elementen.parts.map(p => [`elementen/element_${p.fdi}.stl`, p.soup]));
   add('tegenkaak', 'Elementen tegenkaak.stl (opstelling ' + (S.frame?.jaw === 'lower' ? 'BK' : 'OK') + ')', !!S.opp?.length, () => [[`Elementen_tegenkaak.stl`, concatSoups(teethWorldSoups(S.opp).map(t => t.soup))]]);
   add('scan', 'Scan (referentie).stl', !!S.scan, () => [[`Scan_referentie.stl`, S.scan]]);
+  if (S.parts.length) add('steg', `${S.parts[0].kind === 'steg' ? 'Steg' : 'Onderdelen'} (referentie).stl`, true, () => S.parts.map((p, i) => [p.kind === 'steg' && S.parts.length === 1 ? 'Steg_referentie.stl' : `Onderdeel_${i + 1}_referentie.stl`, p.soup])); // v72
   add('antagonist', 'Antagonist (referentie).stl', !!S.antagonist, () => [[`Antagonist_referentie.stl`, S.antagonist]]);
   return list;
 }
@@ -1152,7 +1258,7 @@ function renderOutputs() {
   host.innerHTML = '';
   for (const o of outputList()) {
     const l = document.createElement('label'); l.className = 'check' + (o.available ? '' : ' unavailable');
-    l.innerHTML = `<input type="checkbox" value="${o.key}" ${o.available ? '' : 'disabled'} ${o.available && (prev.has(o.key) || !prev.size) && !['scan', 'antagonist'].includes(o.key) ? 'checked' : ''}> <span class="grow">${o.label}${o.available ? '' : ' — nog niet gegenereerd'}</span>`
+    l.innerHTML = `<input type="checkbox" value="${o.key}" ${o.available ? '' : 'disabled'} ${o.available && (prev.has(o.key) || !prev.size) && !['scan', 'steg', 'antagonist'].includes(o.key) ? 'checked' : ''}> <span class="grow">${o.label}${o.available ? '' : ' — nog niet gegenereerd'}</span>`
       + (o.available ? `<button type="button" class="mini" data-preview="${o.key}" title="Bekijk dit bestand los in 3D">👁</button><button type="button" class="mini" data-single="${o.key}" title="Alleen dit bestand downloaden">↓</button>` : '');
     host.appendChild(l);
   }
@@ -1171,7 +1277,8 @@ $('outputs').addEventListener('click', e => {
   e.preventDefault();
   const o = outputList().find(x => x.key === (pv || sg).dataset.preview || x.key === (pv || sg).dataset.single); if (!o) return;
   const files = o.files();
-  if (sg) { if (files.length === 1) download(writeSTL(files[0][1], files[0][0]), files[0][0].replace(/^.*\//, '')); else download(makeZip(files.map(([n, soup]) => ({ name: n, data: writeSTL(soup, n) }))), `${o.key}.zip`); return; }
+  if (sg) { downloadOutput(o); return; }
+  stopPreview(); openPreview(o.key); return; // v72: eigen 3D-voorbeeldvenster (het bestand zelf)
   const same = previewing?.key === o.key; stopPreview(); if (same) return;
   const soup = concatSoups(files.map(f => f[1])), color = COLORS.plate[o.key] ?? (o.key.startsWith('elem') || o.key === 'losse' ? COLORS.tooth : COLORS.plate.basis);
   const vis = [viewer.groups.scan, viewer.groups.antagonist, viewer.groups.plates, viewer.groups.teeth].map(g => [g, g.visible]);
@@ -1182,6 +1289,25 @@ $('outputs').addEventListener('click', e => {
   $('previewInfo').innerHTML = `<b>${o.label}</b><br>${b.size.map(v => fmt(v)).join(' × ')} mm · ${q.text}<br><span class="sub">Tik nogmaals op 👁 om terug te gaan.</span>`;
   viewer.fit(new THREE.Box3().setFromObject(mesh)); viewer.render();
 });
+function downloadOutput(o) {
+  const files = o.files();
+  if (files.length === 1) download(writeSTL(files[0][1], files[0][0]), files[0][0].replace(/^.*\//, ''));
+  else download(makeZip(files.map(([n, soup]) => ({ name: n, data: writeSTL(soup, n) }))), `${o.key}.zip`);
+}
+// v72: 3D-voorbeeld van het STL-bestand (aan het eind van het werk, of per bestand met 👁)
+function openPreview(key = null) {
+  const outs = outputList().filter(o => o.available);
+  if (!outs.length) return status('Genereer eerst een lepel, beetplaat of prothesebasis.', true);
+  const chosen = [...$('outputs').querySelectorAll('input:checked')].map(i => i.value);
+  const start = key ?? outs.find(o => chosen.includes(o.key) && !['scan', 'steg', 'antagonist'].includes(o.key))?.key ?? outs[0].key;
+  const inc = includedParts(); // v72: een steg die bij de scan hoort ook tonen
+  openStlPreview(outs, start, {
+    scan: S.scan && inc.length ? concatSoups([S.scan, ...inc.map(p => p.soup)]) : S.scan, axis: S.frame?.N ?? S.axis ?? null, fmt, int,
+    onDownload: k => { const o = outs.find(x => x.key === k); if (o) downloadOutput(o); },
+    onShare: k => shareOutputs(outs.filter(x => x.key === k)),
+  });
+}
+$('pvOpen').onclick = () => openPreview();
 $('exportZip').onclick = () => busy('Productiepakket samenstellen…', async () => {
   const chosen = new Set([...$('outputs').querySelectorAll('input:checked')].map(i => i.value));
   const outs = outputList().filter(o => o.available && chosen.has(o.key));
@@ -1202,11 +1328,13 @@ $('exportZip').onclick = () => busy('Productiepakket samenstellen…', async () 
 
 // 📤 Mailen of in Bestanden bewaren: losse STL's via het deelmenu van het toestel (iPhone: Mail, "Bewaar in
 // Bestanden", AirDrop). Bestanden worden direct in de klik gemaakt, want het deelmenu mag alleen vanuit een tik openen.
-$('shareFiles').onclick = async () => {
+$('shareFiles').onclick = () => {
+  const chosen = new Set([...$('outputs').querySelectorAll('input:checked')].map(i => i.value));
+  return shareOutputs(outputList().filter(o => o.available && chosen.has(o.key)));
+};
+async function shareOutputs(outs) {
   let files;
   try {
-    const chosen = new Set([...$('outputs').querySelectorAll('input:checked')].map(i => i.value));
-    const outs = outputList().filter(o => o.available && chosen.has(o.key));
     if (!outs.length) throw Error('Kies minstens één beschikbaar bestand.');
     files = [];
     for (const o of outs) for (const [name, soup] of o.files()) files.push(new File([writeSTL(soup, name)], name.replace(/^.*\//, ''), { type: 'model/stl' }));
@@ -1233,6 +1361,7 @@ function projectData(includeScan = true) {
     ground: [...S.teeth, ...(S.opp || [])].filter(t => t.userData.ground).map(t => ({ fdi: t.userData.fdi, opp: !!t.userData.opp, pos: toBase64(new Uint8Array(t.geometry.getAttribute('position').array.buffer.slice(0))) })),
     scanName: S.scanName, scan: includeScan && S.scan ? toBase64(writeSTL(S.scan)) : null,
     antagonistName: S.antagonistName, antagonist: includeScan && S.antagonist ? toBase64(writeSTL(S.antagonist)) : null,
+    parts: includeScan ? S.parts.map(p => ({ kind: p.kind, mode: p.mode, faces: p.faces, volume: p.volume, size: p.size, stl: toBase64(writeSTL(p.soup)) })) : [], // v72
   };
 }
 $('saveProject').onclick = () => busy('Project opslaan…', async () => { download(JSON.stringify(projectData(true)), `${safe($('caseName').value)}.ddcad.json`, 'application/json'); status('Project opgeslagen, inclusief scan.'); });
@@ -1240,7 +1369,7 @@ $('openProject').addEventListener('change', e => { const f = e.target.files?.[0]
   const d = JSON.parse(await f.text());
   if (d.format !== 'ddcad-project' && d.format !== 'denture-cad-project-v1') throw Error('Onbekend projectbestand.');
   applySettings(d.settings); S.selectedTeeth = new Set((d.selectedTeeth || d.settings?.elementen || []).map(Number)); updateTeethMap();
-  if (d.scan) setScan(parseSTL(fromBase64(d.scan)), d.scanName);
+  if (d.scan) setScan(parseSTL(fromBase64(d.scan)), d.scanName, { parts: (d.parts || []).map(p => ({ ...p, stl: undefined, soup: parseSTL(fromBase64(p.stl)), id: ++PART_SEQ })) });
   if (d.antagonist) setAntagonist(parseSTL(fromBase64(d.antagonist)), d.antagonistName);
   S.landmarks = d.landmarks || {}; S.axis = d.axis || null; S.marks = d.marks || [];
   S.contours.reset(); for (const c of d.contours || []) { const s = S.contours.ensure(c.kind); s.points = c.points; s.closed = !!c.closed && !!c.axis; s.axis = c.axis ?? null; s.edge = c.edge ?? null; }
@@ -1262,24 +1391,85 @@ function stepBy(d) { const v = workSteps(), i = Math.max(0, v.indexOf(S.step)); 
 $('prevStep').onclick = () => stepBy(-1);
 $('nextStep').onclick = () => stepBy(1);
 // Ongedaan maken / opnieuw voor de stap waarin je bent (bovenbalk, Ctrl+Z / Ctrl+Y)
-const UNDO_MAP = { scan: ['meshUndo', 'meshRedo'], analyse: ['markUndo', 'markRedo'], opstelling: ['teethUndo', 'teethRedo'], bewerken: ['sculptUndo', 'sculptRedo'], lepel: ['contourUndo', 'contourRedo'], beetplaat: ['contourUndo', 'contourRedo'], basis: ['contourUndo', 'contourRedo'] };
-function stepUndo(redo = false) {
-  if (S.step === 'opstelling' && S.mode === 'grind' && !redo) return $('grindUndo').click();
-  const map = UNDO_MAP[S.step];
-  if (!map) return status('In deze stap valt niets terug te zetten.');
-  $(map[redo ? 1 : 0]).click();
+// v72: ↶ werkt altijd: het draait de laatste handeling terug, in welke stap die ook gebeurde (scan bewerken, scan
+// aanpassen, was, markeringen, omtrek, handvat, tanden, inslijpen, vrij bewerken). ↷ doet het weer. Elke handeling komt
+// in één logboek; de eigen ↶/↷-knoppen van de panelen houden dat logboek ook bij.
+const UNDO_NAME = { scan: 'scanbewerking', mark: 'markering', wax: 'was', contour: 'omtrek', handle: 'handvat', teeth: 'tandopstelling', grind: 'inslijpen', sculpt: 'vrij bewerken' };
+const UNDO_STEP = { scan: 'scan', mark: 'analyse', wax: 'analyse', handle: null, teeth: 'opstelling', grind: 'opstelling', sculpt: 'bewerken' };
+const STEP_SRC = { scan: ['scan'], analyse: ['scan', 'wax', 'mark'], opstelling: ['teeth', 'grind'], bewerken: ['sculpt'], lepel: ['contour', 'handle'], beetplaat: ['contour', 'handle'], basis: ['contour'] };
+const UNDO_MAP = STEP_SRC; // (oude naam)
+const UNDO_BOOK = { done: [], undone: [] };
+{ const snap = ContourSet.prototype.snap; ContourSet.prototype.snap = function (k) { snap.call(this, k); noteAction('contour', k); }; }
+function noteAction(src, kind = null) {
+  UNDO_BOOK.done.push({ src, kind }); if (UNDO_BOOK.done.length > 400) UNDO_BOOK.done.shift();
+  UNDO_BOOK.undone = UNDO_BOOK.undone.filter(x => !(x.src === src && x.kind === kind));
+  syncUndoButtons();
 }
+// per bron: kan het (terug/opnieuw) en hoe
+const UNDO_OPS = {
+  scan: { can: r => (r ? S.future : S.history).length > 0, run: r => $(r ? 'meshRedo' : 'meshUndo').click() },
+  mark: { can: r => (r ? S.marksRedo : S.marks).length > 0, run: r => $(r ? 'markRedo' : 'markUndo').click() },
+  wax: { can: r => !!S.wax && (r ? S.wax.future : S.wax.history).length > 0, run: r => $(r ? 'waxRedo' : 'waxUndo').click() },
+  contour: { can: (r, k) => !!k && (r ? S.contours.canRedo(k) : S.contours.canUndo(k)), run: (r, k) => { if (r) S.contours.redoStep(k); else S.contours.undo(k); updateContourUI(); refreshScanColors(); refreshOverlay(); status(`Omtrek ${k === 'basis' ? 'prothesebasis' : k} ${r ? 'hersteld' : 'teruggezet'}.`); } },
+  handle: { can: r => !!handleTools && (r ? handleTools.canRedo() : handleTools.canUndo()), run: r => (r ? handleTools.redo() : handleTools.undo()) },
+  teeth: { can: r => (r ? S.teethFuture : S.teethHistory)?.length > 0, run: r => { $(r ? 'teethRedo' : 'teethUndo').click(); status(r ? 'Tandopstelling hersteld.' : 'Tandopstelling teruggezet.'); } },
+  grind: { can: r => !r && S.grindHistory?.length > 0, run: () => $('grindUndo').click() },
+  sculpt: { can: r => !!S.sculpt && (r ? S.sculpt.sc.canRedo : S.sculpt.sc.canUndo), run: r => $(r ? 'sculptRedo' : 'sculptUndo').click() },
+};
+const canDo = (e, redo) => !!UNDO_OPS[e.src]?.can(redo, e.kind);
+function undoAny(redo = false) {
+  const from = redo ? UNDO_BOOK.undone : UNDO_BOOK.done, to = redo ? UNDO_BOOK.done : UNDO_BOOK.undone;
+  let i = from.length - 1; while (i >= 0 && !canDo(from[i], redo)) i--;
+  let e = i >= 0 ? from.splice(i, 1)[0] : null;
+  if (!e) { // niets in het logboek (bijv. na het openen van een project): de bronnen van deze stap
+    const src = (STEP_SRC[S.step] ?? Object.keys(UNDO_OPS)).find(x => canDo({ src: x, kind: x === 'contour' ? S.step : null }, redo));
+    if (!src) { status(redo ? 'Er is niets om opnieuw te doen.' : 'Er is niets om terug te zetten.'); syncUndoButtons(); return; }
+    e = { src, kind: src === 'contour' ? S.step : null };
+  }
+  undoing = true;
+  try { UNDO_OPS[e.src].run(redo, e.kind); } finally { undoing = false; }
+  to.push(e);
+  const where = e.src === 'contour' || e.src === 'handle' ? (e.kind ?? S.step) : UNDO_STEP[e.src];
+  if (where && where !== S.step) toast(`${redo ? '↷' : '↶'} ${UNDO_NAME[e.src]} (stap ${STEPS.find(x => x[0] === where)?.[1] ?? where}) ${redo ? 'opnieuw gedaan' : 'teruggedraaid'}.`);
+  syncUndoButtons();
+}
+let undoing = false;
+function stepUndo(redo = false) { undoAny(redo); }
+function syncUndoButtons() {
+  if (!$('vUndo')) return;
+  try { UNDO_BOOK; } catch { return; } // nog niet klaar met opstarten
+  const any = list => list.some(e => canDo(e, list === UNDO_BOOK.undone));
+  const u = any(UNDO_BOOK.done) || (STEP_SRC[S.step] ?? []).some(x => canDo({ src: x, kind: x === 'contour' ? S.step : null }, false));
+  const r = any(UNDO_BOOK.undone);
+  for (const id of ['vUndo', 'hdrUndo']) $(id).disabled = !u;
+  for (const id of ['vRedo', 'hdrRedo']) $(id).disabled = !r;
+  $('vUndoBar').classList.toggle('hide', !S.scan);
+}
+// de eigen ↶/↷-knoppen van een paneel houden het logboek ook bij (niet als ↶ in de kop ze zelf aanroept)
+for (const [src, u, r] of [['scan', 'meshUndo', 'meshRedo'], ['mark', 'markUndo', 'markRedo'], ['wax', 'waxUndo', 'waxRedo'], ['teeth', 'teethUndo', 'teethRedo'], ['grind', 'grindUndo', null], ['sculpt', 'sculptUndo', 'sculptRedo']]) {
+  const move = (from, to) => { if (undoing) return; for (let i = from.length - 1; i >= 0; i--) if (from[i].src === src) { to.push(from.splice(i, 1)[0]); break; } setTimeout(syncUndoButtons, 0); };
+  $(u)?.addEventListener('click', () => move(UNDO_BOOK.done, UNDO_BOOK.undone), true);
+  if (r) $(r)?.addEventListener('click', () => move(UNDO_BOOK.undone, UNDO_BOOK.done), true);
+}
+for (const [u, r] of [['contourUndo', 'contourRedo']]) {
+  $(u).addEventListener('click', () => { if (undoing) return; const k = S.step; for (let i = UNDO_BOOK.done.length - 1; i >= 0; i--) if (UNDO_BOOK.done[i].src === 'contour' && UNDO_BOOK.done[i].kind === k) { UNDO_BOOK.undone.push(UNDO_BOOK.done.splice(i, 1)[0]); break; } setTimeout(syncUndoButtons, 0); }, true);
+  $(r).addEventListener('click', () => { if (undoing) return; const k = S.step; for (let i = UNDO_BOOK.undone.length - 1; i >= 0; i--) if (UNDO_BOOK.undone[i].src === 'contour' && UNDO_BOOK.undone[i].kind === k) { UNDO_BOOK.done.push(UNDO_BOOK.undone.splice(i, 1)[0]); break; } setTimeout(syncUndoButtons, 0); }, true);
+}
+$('vUndo').onclick = () => undoAny(false);
+$('vRedo').onclick = () => undoAny(true);
+$('scanEditUndo').onclick = () => $('meshUndo').click();
+$('scanEditRedo').onclick = () => $('meshRedo').click();
 $('hdrPrev').onclick = () => stepBy(-1);
 $('hdrNext').onclick = () => stepBy(1);
-$('hdrUndo').onclick = () => stepUndo(false);
-$('hdrRedo').onclick = () => stepUndo(true);
+$('hdrUndo').onclick = () => undoAny(false);
+$('hdrRedo').onclick = () => undoAny(true);
 function syncHeaderNav() {
   const v = workSteps(), i = v.indexOf(S.step);
   $('hdrPrev').disabled = i <= 0; $('hdrNext').disabled = i < 0 || i >= v.length - 1;
   const name = id => STEPS.find(s => s[0] === id)?.[1] ?? '';
   $('hdrPrev').title = i > 0 ? `Vorige stap: ${name(v[i - 1])}` : 'Eerste stap'; $('hdrNext').title = i >= 0 && i < v.length - 1 ? `Volgende stap: ${name(v[i + 1])}` : 'Laatste stap';
   $('hdrStep').replaceChildren(...(i >= 0 ? [document.createTextNode(`${i + 1}/${v.length} `)] : []), document.createTextNode(name(S.step))); // v71: naam als eigen tekst (vertaalbaar)
-  const can = !!UNDO_MAP[S.step]; $('hdrUndo').disabled = !can; $('hdrRedo').disabled = !can;
+  syncUndoButtons();
 }
 function syncWorkSteps() {
   const v = workSteps();
@@ -1367,7 +1557,7 @@ $('anaIdeal').onclick = () => busy('Scan aanpassen…', async () => {
     frame: S.frame, doSmooth: $('anaSmooth').checked, doRelief: $('anaRelief').checked, doPostDam: $('anaPostDam').checked && S.frame.jaw === 'upper',
     reliefPapilla: num('anaReliefPap'), relief: num('anaReliefOther'), postDam: num('anaPostDamMm'),
   });
-  S.history.push({ soup: S.scan, aux: snapshotAux() }); if (S.history.length > 8) S.history.shift(); S.future = [];
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); noteAction('scan'); if (S.history.length > 8) S.history.shift(); S.future = [];
   const keep = keepDesign();
   setScan(soup, S.scanName.replace(/(_ideaal)?\.stl$/i, '') + '_ideaal.stl', { reset: false });
   runAnatomy();
@@ -1407,9 +1597,12 @@ function autoContour(kind) {
   if (!CONTOUR_KINDS.includes(kind)) return;
   if (edgeWanted(kind)) return edgeContour(kind);
   if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
-  const ol = proposeOutline(S.anatomy.cast, S.anatomy.an, kind);
+  const ol = proposeOutline(S.anatomy.cast, S.anatomy.an, kind), axis = contourAxis();
   // licht gladstrijken (2,5 mm): geen zaagtand in de rand, frenulum-uitsparingen blijven (afgerond) bestaan
-  S.contours.setPoints(kind, smoothOutline(ol.points, 2.5), contourAxis());
+  let pts = smoothOutline(ol.points, 2.5);
+  // v72: over een steg heen: de plaat omsluit de steg met minstens 3 mm
+  const inc = includedParts(); if (inc.length) pts = smoothOutline(keepOutlineClear(pts, inc.map(p => p.soup), axis, 3), 1.5);
+  S.contours.setPoints(kind, untangle(pts, axisBasis(axis)), axis); // v72: nooit een zelfkruisende automatische omtrek
   if (S.mode === 'contour') setMode('orbit');
   delete S.plates[kind];
   updateContourUI(); refreshScanColors(); refreshOverlay();
@@ -1501,7 +1694,7 @@ function sculptDown(e) {
   viewer.controls.enabled = false;
   const s = S.sculpt, P = sculptParams(), invert = e.shiftKey && ['add', 'remove'].includes(sculptTool);
   const tool = invert ? (sculptTool === 'add' ? 'remove' : 'add') : sculptTool;
-  s.sc.begin();
+  s.sc.begin(); noteAction('sculpt');
   const p = hit.point.toArray(), n = hit.normal ? hit.normal.toArray() : [0, 0, 1];
   sculptStroke = { tool, last: p, P };
   if (tool === 'drag') {
@@ -1618,7 +1811,7 @@ $('rimOn').addEventListener('change', syncRimFields);
 // ---------- start ----------
 // Eén ingang voor elke scanbewerking: geschiedenis, scan vervangen, ontwerp behouden/opnieuw maken.
 function applyScanEdit(soup, label) {
-  S.history.push({ soup: S.scan, aux: snapshotAux() }); if (S.history.length > 8) S.history.shift(); S.future = [];
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); noteAction('scan'); if (S.history.length > 8) S.history.shift(); S.future = [];
   const keep = keepDesign();
   setScan(soup, S.scanName, { reset: false });
   status(label + ' ↶ Terug zet het terug.');
@@ -1632,8 +1825,42 @@ function cutFrame() {
 }
 contourTools = initContourTools({ S, viewer, $, num, status, CONTOUR_KINDS, snapToScan, contourAxis, finishContourEdit, dropPlate, setMode, updateContourUI, contourError, refreshOverlay, refreshScanColors, closeContourFromAbove });
 scanTools = initScanTools({ S, viewer, $, num, status, busy, setMode, apply: applyScanEdit, cutFrame, refreshColors: () => refreshScanColors() });
+// v72: vormbaar handvat (lepel en beetplaat): parameters in de invulvelden (onthouden), vormen met de vinger
+function handleParams() {
+  const v = (id, d) => { const x = num(id); return Number.isFinite(x) ? x : d; };
+  return { height: v('handleHeight', HANDLE_DEFAULT.height), width: v('handleWidth', HANDLE_DEFAULT.width), reach: v('handleReach', HANDLE_DEFAULT.reach), thickness: v('handleThick', HANDLE_DEFAULT.thickness), yaw: v('handleYaw', 0), bend: v('handleBend', 60) / 100 };
+}
+function writeHandleParams(p, final) {
+  const set = (id, x, step) => { const e = $(id); if (!e || !Number.isFinite(x)) return; e.value = String(Math.round(x / step) * step).replace(/\.0+$/, ''); };
+  set('handleHeight', p.height, 0.5); set('handleWidth', p.width, 0.5); set('handleReach', p.reach, 0.5); set('handleThick', p.thickness, 0.25); set('handleYaw', p.yaw, 1); set('handleBend', p.bend * 100, 5);
+  if (final) persist();
+}
+function handleOpts(kind) {
+  const gap = num(kind === 'lepel' ? 'lepelGap' : 'beetGap'), wall = num(kind === 'lepel' ? 'lepelWall' : 'beetWall');
+  return kind === 'lepel' ? { base: gap, labial: 2, sink: gap + wall * 0.5, conform: conformTo(gap + wall * 0.5) } : { base: gap + wall, labial: 6, sink: gap + wall * 0.5, conform: conformTo(gap + wall * 0.5) };
+}
+handleTools = initHandleTools({
+  S, viewer, $, status, setMode, readParams: handleParams, writeParams: writeHandleParams, pathOpts: handleOpts,
+  kindNow: () => (S.step === 'beetplaat' ? 'beetplaat' : 'lepel'),
+  note: () => noteAction('handle'),
+  rebuild: kind => busy(kind === 'lepel' ? 'Lepel berekenen…' : 'Beetplaat berekenen…', async () => { if (kind === 'lepel') await buildLepel(); else await buildBeet(); }),
+});
+const HANDLE_PRESETS = { recht: { reach: 0, yaw: 0, bend: 0.6 }, schuin: { reach: 8, yaw: 0, bend: 0.45 }, l: { reach: 14, yaw: 0, bend: 0.85, height: 10 } };
+for (const b of document.querySelectorAll('[data-hpreset]')) b.onclick = () => {
+  const kind = S.step === 'beetplaat' ? 'beetplaat' : 'lepel';
+  if (!$(kind === 'lepel' ? 'lepelHandle' : 'beetHandle').checked) { $(kind === 'lepel' ? 'lepelHandle' : 'beetHandle').checked = true; persist(); }
+  handleTools.changed({ ...handleParams(), ...HANDLE_PRESETS[b.dataset.hpreset] });
+};
+for (const id of ['handleEdit', 'beetHandleEdit']) $(id).onclick = () => {
+  const kind = id === 'handleEdit' ? 'lepel' : 'beetplaat';
+  if (handleTools.active()) { setMode('orbit'); return; }
+  const box = $(kind === 'lepel' ? 'lepelHandle' : 'beetHandle');
+  if (!box.checked) { box.checked = true; persist(); }
+  if (handleTools.start(kind) && !S.plates[kind]) handleTools.changed(handleParams());
+};
+for (const id of ['handleHeight', 'handleWidth', 'handleReach', 'handleThick', 'handleYaw']) $(id).addEventListener('change', () => { if (handleTools.active()) handleTools.changed(handleParams()); });
 tools = initSetupTools({
-  S, viewer, $, num, fmt, status, toast, busy, jaw, currentArchFn, setPrimary, toothMaterial, setMode,
+  note: src => noteAction(src), S, viewer, $, num, fmt, status, toast, busy, jaw, currentArchFn, setPrimary, toothMaterial, setMode,
   pushHistory: pushTeethHistory, dropHistory: () => { S.teethHistory.pop(); }, invalidate: invalidateTeethDependents,
   layers: () => applyLayers(), afterTeethChange: () => { renderToothList(); updateDone(); },
 });
@@ -1712,7 +1939,7 @@ async function prepareScan({ forKind = null } = {}) {
   const t0 = performance.now(), name = S.scanName.replace(/(_voorbereid)?\.stl$/i, '') + '_voorbereid.stl', lines = [];
   await tick('Scan analyseren…');
   const before = analyzeScan(S.scan);
-  S.history.push({ soup: S.scan, aux: snapshotAux() }); if (S.history.length > 8) S.history.shift(); S.future = [];
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); noteAction('scan'); if (S.history.length > 8) S.history.shift(); S.future = [];
   const keep = keepDesign(); S.pendingKeep = keep;
   lines.push(`<b>Analyse</b>: ${int(before.faces)} facetten · ${before.components} deel/delen${before.smallComponents ? ` (${before.smallComponents} losse vlekjes)` : ''} · ${before.spikes} spikes · ${before.nonManifold} niet-manifold randen · ${before.holes} randen/gaten · ${before.closed ? 'gesloten (model met sokkel?)' : 'open scan'}`);
   await tick('Scan repareren…');
@@ -1725,7 +1952,9 @@ async function prepareScan({ forKind = null } = {}) {
     await tick('Scan bijsnijden…');
     const ol = proposeOutline(a.cast, a.an, 'basis');
     // vloeiende bijsnijlijn (geen inkepingen bij de lipbandjes): de scan wordt ruim bijgesneden, het werkstuk krijgt later zijn eigen rand
-    const t = trimByOutline(S.scan, smoothOutline(ol.points, 4), S.frame.N, { margin: num('prepMargin') + 1, splitAt: S.designedFrom }); // +1 mm: gladstrijken trekt bolle delen iets naar binnen
+    // v72: rond een steg ruim blijven (de plaat moet er later overheen tot op het tandvlees kunnen)
+    const trimLine = S.parts.length ? keepOutlineClear(ol.points, S.parts.map(p => p.soup), S.frame.N, 4) : ol.points;
+    const t = trimByOutline(S.scan, untangle(smoothOutline(trimLine, 4), axisBasis(S.frame.N)), S.frame.N, { margin: num('prepMargin') + 1, splitAt: S.designedFrom }); // +1 mm: gladstrijken trekt bolle delen iets naar binnen
     const df = S.designedFrom != null && t.splitIndex < t.soup.length / 9 ? t.splitIndex : null;
     // binnen de marge kan nog een los stuk sokkel of tafel liggen: alleen de kaak (grootste deel) houden
     const only = keepComponentNear(t.soup, S.landmarks.M ?? S.frame.O);
@@ -1734,6 +1963,15 @@ async function prepareScan({ forKind = null } = {}) {
     setScan(rim.soup, name, { reset: false, designedFrom: null, keepWax: true });
     lines.push(`<b>Bijsnijden</b>: prothesegebied + ${fmt(num('prepMargin'))} mm · ${int(t.report.removed)} facetten verwijderd (sokkel, wang/tong, artefacten) · ${int(t.report.clipped)} randfacetten exact gesneden`);
     await tick('Anatomie bijwerken…');
+    a = runAnatomy();
+  }
+  // v72: rand strak: franjes (scanruis, wang/tong) weg en smalle inhammen (gat in het front) dicht
+  const to = tidyOptions();
+  if (to.fringe > 0 || to.notchWidth > 0) {
+    await tick('Rand strak maken…');
+    const r = tidyBorder(S.scan, { designedFrom: S.designedFrom ?? null, ...to, protect: partProtect() });
+    setScan(r.soup, name, { reset: false, designedFrom: r.designedFrom, keepWax: true });
+    lines.push(tidyLine(r.report));
     a = runAnatomy();
   }
   const edgeRule = !!EDGE_IDS[forKind] && edgeMode(forKind) !== 'anatomy';
@@ -1756,6 +1994,26 @@ async function prepareScan({ forKind = null } = {}) {
   restoreDesign(S.pendingKeep); S.pendingKeep = null;
   return after;
 }
+// Direct onder een steg geen franjes weghalen (smalle strook van 1 mm rond de voetafdruk). Een bredere zone hield
+// ook de losse flarden scan naast de steg (tong) over, en daarop mislukte de plaat.
+function partProtect() { return S.parts.length ? partZone(S.parts.map(p => p.soup), contourAxis(), 1) : null; }
+function tidyOptions() { return { fringe: Math.max(0, num('prepFringe') || 0) / 2, notchWidth: Math.max(0, num('prepNotch') || 0) }; }
+function tidyLine(rep) {
+  const n = rep.notches.length;
+  return `<b>Rand strak</b>: ${rep.fringeFaces ? `franjes weg (${int(rep.fringeFaces)} facetten)` : 'geen franjes'} · ${n ? `${n} inham${n === 1 ? '' : 'men'} dicht (${rep.notches.map(x => fmt(x.width, 1)).join(', ')} mm breed)` : 'geen inhammen'}${rep.holes ? ` · ${rep.holes} ga${rep.holes === 1 ? 't' : 'ten'} gedicht` : ''}`;
+}
+$('scanTidy').onclick = () => busy('Rand strak maken…', async () => {
+  if (!S.scan) throw Error('Laad eerst een scan.');
+  const to = tidyOptions();
+  if (!(to.fringe > 0 || to.notchWidth > 0)) throw Error('Zet bij Scan voorbereiden de franjes of de inhammen op meer dan 0 mm.');
+  const r = tidyBorder(S.scan, { designedFrom: S.designedFrom ?? null, ...to, protect: partProtect() });
+  if (!r.report.fringeFaces && !r.report.notches.length && !r.report.holes) return status('De rand is al strak: geen franjes of inhammen gevonden.');
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); noteAction('scan'); if (S.history.length > 8) S.history.shift(); S.future = [];
+  const keep = keepDesign();
+  setScan(r.soup, S.scanName, { reset: false, designedFrom: r.designedFrom, keepWax: true });
+  status(tidyLine(r.report).replace(/<[^>]+>/g, '') + '. ↶ Terug zet het terug.');
+  restoreDesign(keep);
+});
 $('prepRun').onclick = () => busy('Scan voorbereiden…', async () => { await prepareScan(); status('Scan voorbereid. Controleer het paarse (aangevulde) deel en ga verder met de omtrek.'); });
 
 // ---------- 🕯 was (ondersnijdingen opvullen, bewerkbaar) ----------
@@ -1779,18 +2037,18 @@ function waxChanged(final = false) {
     refreshScanColors(); updateDone();
   }
 }
-function waxBlockout() { const w = ensureWax(); const r = w.blockout(num('waxAngle')); waxChanged(true); return r; }
+function waxBlockout() { const w = ensureWax(); const r = w.blockout(num('waxAngle')); noteAction('wax'); waxChanged(true); return r; }
 $('waxRun').onclick = () => busy('Ondersnijdingen opvullen…', async () => { const r = waxBlockout(); status(r.changed ? `Was aangebracht op ${int(r.changed)} punten (max ${fmt(r.max, 2)} mm, uitblokhoek ${fmt(num('waxAngle'))}°). Bewerk met ✋ Was bewerken.` : 'Geen ondersnijdingen gevonden langs de insteekas.'); });
-$('waxClear').onclick = () => { if (!S.wax) return; S.wax.clear(); waxChanged(true); };
-$('waxUndo').onclick = () => { if (S.wax?.undo()) waxChanged(true); };
-$('waxRedo').onclick = () => { if (S.wax?.redo()) waxChanged(true); };
+$('waxClear').onclick = () => { if (!S.wax) return; S.wax.clear(); noteAction('wax'); waxChanged(true); };
+$('waxUndo').onclick = () => { if (S.wax?.undo()) { waxChanged(true); status('Was teruggedraaid.'); } else status('Niets om terug te zetten in de was.'); };
+$('waxRedo').onclick = () => { if (S.wax?.redo()) { waxChanged(true); status('Was hersteld.'); } else status('Niets om opnieuw te doen in de was.'); };
 $('waxEdit').onclick = () => { try { ensureWax(); } catch (e) { return status(e.message, true); } setMode(S.mode === 'wax' ? 'orbit' : 'wax'); };
 for (const b of document.querySelectorAll('[data-wax]')) b.onclick = () => { waxTool = b.dataset.wax; for (const x of document.querySelectorAll('[data-wax]')) x.setAttribute('aria-pressed', String(x === b)); if (S.mode !== 'wax') $('waxEdit').click(); };
 function waxHit(e) { const objs = [viewer.scanMesh, ...viewer.groups.wax.children].filter(Boolean); return viewer.pick(e.clientX, e.clientY, objs); }
 function waxDab(p) { S.wax.brush(waxStroke.tool, p, { radius: num('waxRadius'), strength: num('waxStrength') }); waxStroke.last = p; waxChanged(false); }
 function waxDown(e) {
   const hit = waxHit(e); if (!hit || !S.wax) return;
-  viewer.controls.enabled = false; S.wax.snap();
+  viewer.controls.enabled = false; S.wax.snap(); noteAction('wax');
   const tool = e.shiftKey && waxTool !== 'smooth' ? (waxTool === 'add' ? 'remove' : 'add') : waxTool;
   waxStroke = { tool, last: null }; waxDab(hit.point.toArray());
 }

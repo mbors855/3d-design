@@ -156,6 +156,48 @@ export function trayHandle(frame, { base = 2, height = 14, width = 14, thickness
   return box(P, [frame.X, frame.Y, frame.N], [width, thickness, height + base], conform);
 }
 
+// v72: vormbaar handvat. Een afgeronde strip langs een kromme (kwadratische Bézier) in het vlak door N en de
+// gekozen voorwaartse richting: vanaf de kam omhoog (raakt N) en dan naar de punt. Met de vinger te verslepen:
+// de punt bepaalt hoogte, uitsteek naar voren en zijwaartse richting; knijpen = breedte.
+// p: { height, reach, yaw (graden, + = naar links/rechts langs X), width, thickness, bend (0,2–1) }
+export const HANDLE_DEFAULT = { height: 14, reach: 4, yaw: 0, width: 14, thickness: 3, bend: 0.6 };
+export function handlePath(frame, p, { base = 2, conform = null, labial = 2 } = {}) {
+  const { X, Y, N } = frame, P = { ...HANDLE_DEFAULT, ...p };
+  const yaw = (P.yaw || 0) * Math.PI / 180, fwd = [0, 1, 2].map(i => Y[i] * Math.cos(yaw) + X[i] * Math.sin(yaw));
+  const side = vec.norm(vec.cross(fwd, N));
+  // voetpunt: midden voor op de kam; zo nodig naar achteren tot de hele voet boven de scan staat
+  let foot = null;
+  for (let l = labial; l >= -12 && !foot; l -= 1) {
+    const c = framePoint(frame, 0, frame.depth + l, 0);
+    if (!conform) { foot = framePoint(frame, 0, frame.depth + l, base); break; }
+    const hs = [-1, 1].flatMap(i => [-1, 1].map(j => conform([0, 1, 2].map(k => c[k] + side[k] * i * P.width / 2 + fwd[k] * j * P.thickness / 2), N)));
+    if (hs.every(Boolean)) { const d = hs.map(h => vec.dot(vec.sub(h, c), N)); foot = [0, 1, 2].map(k => c[k] + N[k] * Math.min(...d)); }
+  }
+  foot ??= framePoint(frame, 0, frame.depth + labial, base);
+  const tip = [0, 1, 2].map(k => foot[k] + N[k] * P.height + fwd[k] * P.reach);
+  const ctrl = [0, 1, 2].map(k => foot[k] + N[k] * P.height * Math.min(1, Math.max(0.15, P.bend)));
+  return { foot, tip, ctrl, fwd, side, N, P };
+}
+export function handleGeometry(frame, p, opts = {}) {
+  const { foot, tip, ctrl, side, N, P } = handlePath(frame, p, opts);
+  const embed = Math.min(1.2, (opts.sink ?? 1.5) * 0.8), m = 28, K = 28, e = 4;
+  const bez = t => [0, 1, 2].map(k => (1 - t) ** 2 * foot[k] + 2 * (1 - t) * t * ctrl[k] + t * t * tip[k]);
+  const der = t => vec.norm([0, 1, 2].map(k => 2 * (1 - t) * (ctrl[k] - foot[k]) + 2 * t * (tip[k] - ctrl[k])));
+  const prof = [];
+  for (let k = 0; k < K; k++) { const a = 2 * Math.PI * k / K, c = Math.cos(a), s = Math.sin(a); prof.push([Math.sign(c) * Math.abs(c) ** (2 / e) * P.width / 2, Math.sign(s) * Math.abs(s) ** (2 / e) * P.thickness / 2]); }
+  const rings = [], ring = (C, t, sc = 1) => { const n = vec.norm(vec.cross(side, t)); return prof.map(([u, v]) => [0, 1, 2].map(k => C[k] + side[k] * u * sc + n[k] * v * sc)); };
+  rings.push(ring(foot.map((v, k) => v - N[k] * embed), N));
+  for (let i = 0; i <= m; i++) { const t = i / m; rings.push(ring(bez(t), der(t))); }
+  // afgeronde kop: kwartcirkel over de dikte
+  const tEnd = der(1), r = P.thickness / 2;
+  for (const ph of [0.35, 0.7, 1.05, 1.35]) rings.push(ring(tip.map((v, k) => v + tEnd[k] * r * Math.sin(ph)), tEnd, Math.max(0.08, Math.cos(ph))));
+  const out = [], tri = (a, b, c) => out.push(...a, ...b, ...c);
+  for (let j = 0; j + 1 < rings.length; j++) for (let k = 0; k < K; k++) { const a = rings[j][k], b = rings[j][(k + 1) % K], c = rings[j + 1][(k + 1) % K], d = rings[j + 1][k]; tri(a, b, c); tri(a, c, d); }
+  const cap = (R, flip) => { const c = [0, 1, 2].map(k => R.reduce((s, q) => s + q[k], 0) / R.length); for (let k = 0; k < K; k++) flip ? tri(c, R[(k + 1) % K], R[k]) : tri(c, R[k], R[(k + 1) % K]); };
+  cap(rings[0], true); cap(rings[rings.length - 1], false);
+  return outward(Float32Array.from(out));
+}
+
 // Perforaties: cilinders langs N op en naast de kamlijn.
 export function perforations(frame, { spacing = 6, radius = 1, rows = [-4, 0, 4], form = 'oval', length = 40 } = {}) {
   const cutters = [];

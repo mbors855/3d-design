@@ -840,4 +840,126 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     assert.ok(!bad.length, 'zonder vertaling:\n' + bad.slice(0, 20).join('\n'));
   });
 }
+
+// ---------- v72 ----------
+{
+  const { splitParts, barBlocks, partZone, keepOutlineClear } = await import(J + 'parts.js');
+  const { tidyBorder } = await import(J + 'border.js');
+  const { untangle } = await import(J + 'contour.js');
+  const { axisBasis } = await import(J + 'trim.js');
+  const { handleGeometry, HANDLE_DEFAULT } = await import(J + 'construct.js');
+  const { tr } = await import(J + 'i18n.js');
+  // vlak scanoppervlak (z = f(x, y)) binnen een vorm, als raster van driehoeken
+  const sheet = (inside, { step = 0.4, x0 = -25, x1 = 25, y0 = -25, y1 = 25, z = () => 0 } = {}) => {
+    const out = [];
+    for (let x = x0; x < x1; x += step) for (let y = y0; y < y1; y += step) {
+      const q = [[x, y], [x + step, y], [x + step, y + step], [x, y + step]];
+      if (!q.every(([a, b]) => inside(a, b))) continue;
+      const P = q.map(([a, b]) => [a, b, z(a, b)]);
+      out.push(...P[0], ...P[1], ...P[2], ...P[0], ...P[2], ...P[3]);
+    }
+    return Float32Array.from(out);
+  };
+  // gesloten balk (steg), elke zijde in n × n vakjes (een echte steg heeft duizenden facetten)
+  const box = (x0, x1, y0, y1, z0, z1, n = 8) => {
+    const out = [], L = [x0, y0, z0], H = [x1, y1, z1];
+    for (let ax = 0; ax < 3; ax++) for (const side of [0, 1]) {
+      const u = (ax + 1) % 3, v = (ax + 2) % 3, P = (i, j) => { const p = [0, 0, 0]; p[ax] = side ? H[ax] : L[ax]; p[u] = L[u] + (H[u] - L[u]) * i / n; p[v] = L[v] + (H[v] - L[v]) * j / n; return p; };
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        const a = P(i, j), b = P(i + 1, j), c = P(i + 1, j + 1), d = P(i, j + 1);
+        if (side) out.push(...a, ...b, ...c, ...a, ...c, ...d); else out.push(...a, ...c, ...b, ...a, ...d, ...c);
+      }
+    }
+    return Float32Array.from(out);
+  };
+  const concat = (...a) => { const o = new Float32Array(a.reduce((n, x) => n + x.length, 0)); let k = 0; for (const x of a) { o.set(x, k); k += x.length; } return o; };
+  const ridge = (x, y) => 4 * Math.exp(-(y * y) / 60); // kam langs x
+
+  await test('v72 steg: gesloten deel naast de kaak wordt apart gezet (scan blijft open oppervlak)', () => {
+    const jaw = sheet((x, y) => x * x + y * y < 400, { z: ridge }), bar = box(-12, 12, -1.5, 1.5, 5, 8);
+    const { scan, parts } = splitParts(concat(jaw, bar));
+    assert.equal(parts.length, 1); assert.equal(parts[0].kind, 'steg');
+    assert.equal(scan.length, jaw.length);
+    assert.ok(Math.abs(parts[0].volume - 24 * 3 * 3) < 1, `volume ${parts[0].volume}`);
+    const q = quality(weld(parts[0].soup, 1e-5)); assert.ok(q.watertight && q.signedVolume > 0, 'onderdeel gesloten, normalen naar buiten');
+    const solo = splitParts(jaw); assert.equal(solo.parts.length, 0); assert.equal(solo.scan, jaw);
+  });
+
+  await test('v72 kap en uitsparing: gesloten en manifold; uitsparing = steg met alles eronder, kap 2 mm erover', () => {
+    const jaw = sheet((x, y) => Math.abs(x) < 20 && Math.abs(y) < 12, { z: ridge }), bar = box(-12, 12, -1.5, 1.5, 5, 8);
+    const r = barBlocks([bar], [0, 0, 1], { gap: 0, wall: 2, scan: jaw });
+    for (const k of ['cap', 'relief']) { const q = quality(weld(r[k], 1e-5)); assert.ok(q.watertight && q.nonManifold === 0 && q.components === 1, `${k}: ${JSON.stringify(q)}`); }
+    const zr = Array.from({ length: r.relief.length / 3 }, (_, i) => r.relief[i * 3 + 2]), zc = Array.from({ length: r.cap.length / 3 }, (_, i) => r.cap[i * 3 + 2]);
+    assert.ok(Math.max(...zr) <= 8.01 && Math.min(...zr) < 0, 'uitsparing van de bovenkant tot onder het tandvlees');
+    assert.ok(Math.abs(Math.max(...zc) - 10) < 0.05, `kap 2 mm boven de steg (${Math.max(...zc)})`);
+    assert.ok(Math.min(...zc) > 0.5, 'kap begint boven het pasvlak (geen samenvallende vlakken)');
+    const zone = partZone([bar], [0, 0, 1], 1); assert.ok(zone([0, 2.2, 0]) && !zone([0, 3, 0]));
+  });
+
+  await test('v72 omtrek om de steg: punten op of vlak bij de steg schuiven naar buiten', () => {
+    const bar = box(-12, 12, -1.5, 1.5, 5, 8), pts = [];
+    for (let k = 0; k < 64; k++) { const a = k / 64 * Math.PI * 2; pts.push([16 * Math.cos(a), 3 * Math.sin(a), 0]); } // smalle ellips: loopt over de steg
+    const out = keepOutlineClear(pts, [bar], [0, 0, 1], 3);
+    for (const p of out) { const dx = Math.max(0, Math.abs(p[0]) - 12), dy = Math.max(0, Math.abs(p[1]) - 1.5); assert.ok(Math.hypot(dx, dy) > 2.6, `punt ${p.map(v => v.toFixed(1))} te dicht bij de steg`); }
+  });
+
+  await test('v72 rand strak: franjes weg, inham dicht, uitstekende tong blijft (geen vlies onder de kam)', () => {
+    let seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const spikes = Array.from({ length: 14 }, () => rnd() * Math.PI * 2);
+    const inside = (x, y) => {
+      const r = Math.hypot(x, y), a = Math.atan2(y, x);
+      if (x > -3 && x < 3 && y > 11 && y < 20.5) return false;                  // inham 6 mm breed, 9 mm diep
+      if (r < 20) return true;
+      if (Math.abs(y) < 3.5 && x < -19 && x > -31) return true;                 // tong (7 mm breed): blijft
+      return spikes.some(s => { let d = Math.abs(a - s); d = Math.min(d, 2 * Math.PI - d); return d * r < 0.45 && r < 23; }); // franjes
+    };
+    const raw = sheet(inside, { x0: -32, x1: 26, y0: -26, y1: 26, z: ridge });
+    const r = tidyBorder(raw, { fringe: 1.5, notchWidth: 10 });
+    const m = weld(r.soup, 1e-5), L = boundaryLoops(m).loops;
+    assert.equal(L.length, 1, 'één gladde rand');
+    assert.ok(r.report.fringeFaces > 0, 'franjes weg');
+    assert.ok(r.report.notches.some(n => n.depth > 6 && n.width < 10.01), 'de inham in het front is dicht: ' + JSON.stringify(r.report.notches));
+    const P = m.positions; let tongue = 0; for (let i = 0; i < P.length; i += 3) if (P[i] < -27) tongue++;
+    assert.ok(tongue > 50, 'de tong is er nog');
+    const q = quality(m); assert.equal(q.nonManifold, 0);
+  });
+
+  await test('v72 automatische omtrek: zelfkruisende lusjes eruit, de grote omtrek blijft', () => {
+    const b = axisBasis([0, 0, 1]), pts = [];
+    for (let k = 0; k < 80; k++) { const a = k / 80 * Math.PI * 2; pts.push([20 * Math.cos(a), 12 * Math.sin(a), 0]); }
+    pts.splice(20, 0, [10, 16, 0], [6, 9, 0], [12, 9, 0], [9, 16, 0]); // lusje dat de omtrek kruist
+    const u = untangle(pts, b), poly = u.map(p => b.project(p));
+    assert.ok(!validContour(pts.map(p => b.project(p)).map(q => [q[0] * 10, q[1] * 10])), 'vooraf: kruist zichzelf');
+    assert.ok(validContour(poly.map(q => [q[0] * 10, q[1] * 10])), 'daarna geldig');
+    let area = 0; for (let i = 0; i < poly.length; i++) { const p = poly[i], q = poly[(i + 1) % poly.length]; area += p[0] * q[1] - q[0] * p[1]; }
+    assert.ok(Math.abs(area / 2) > 0.85 * Math.PI * 20 * 12, `de grote omtrek blijft (${(Math.abs(area) / 2).toFixed(0)} mm²)`);
+  });
+
+  await test('v72 handvat: gebogen handvat is gesloten en manifold', () => {
+    const frame = { O: [0, 0, 0], X: [1, 0, 0], Y: [0, 1, 0], N: [0, 0, 1], depth: 20 };
+    const soup = handleGeometry(frame, HANDLE_DEFAULT, { base: 2, labial: 2, sink: 2, conform: null });
+    const q = quality(weld(soup, 1e-4)); assert.ok(q.watertight && q.nonManifold === 0 && q.components === 1, JSON.stringify(q));
+  });
+
+  await test('v72 middellijn: M ligt op de middelloodlijn van R-L, ook bij een scheve, ongelijke boog', () => {
+    const base = anatomicJaw({ jaw: 'lower', step: 0.5 }), src = base.soup ?? base;
+    const c = Math.cos(0.35), s = Math.sin(0.35), out = [];
+    for (let i = 0; i < src.length; i += 9) { // 20° gedraaid en de linker kant 10 mm korter
+      const t = [0, 1, 2].map(k => [src[i + k * 3], src[i + k * 3 + 1], src[i + k * 3 + 2]]);
+      if (t.some(p => p[0] < -15 && p[1] < -2)) continue;
+      for (const p of t) out.push(c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]);
+    }
+    const soup = Float32Array.from(out), ax = occlusalAxis(soup), lm = autoLandmarks(soup, ax), b = axisBasis(ax.axis);
+    const [R, M, L] = [lm.R, lm.M, lm.L].map(p => b.project(p)), O = [(R[0] + L[0]) / 2, (R[1] + L[1]) / 2];
+    const d = [L[0] - R[0], L[1] - R[1]], n = Math.hypot(...d), across = Math.abs(((M[0] - O[0]) * d[0] + (M[1] - O[1]) * d[1]) / n);
+    assert.ok(across < 3.2, `M ${across.toFixed(1)} mm naast de middellijn`);
+  });
+
+  await test('v72 taal: meldingen met dubbele punt en meerdere zinnen helemaal vertaald', () => {
+    assert.equal(tr('Zonder steg: lepel, beetplaat en basis liggen alleen op de kaak. De steg blijft doorzichtig zichtbaar.', 'en'), 'Without bar: tray, bite plate and base rest on the jaw only. The bar stays visible, transparent.');
+    const msg = 'De omtrek kruist zichzelf of is te klein. Versleep of verwijder het punt waar de lijn kruist. De wijziging is teruggedraaid.';
+    assert.ok(!/omtrek|verwijder|teruggedraaid/.test(tr(msg, 'de')), tr(msg, 'de'));
+    assert.equal(tr('Rand strak: franjes weg (47.325 facetten) · 1 inham dicht (7,0 mm breed) · 2 gaten gedicht. ↶ Terug zet het terug.', 'en'), 'Edge tidied: fringes removed (47,325 faces) · 1 notch closed (7.0 mm wide) · 2 holes closed. ↶ Back restores it.');
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

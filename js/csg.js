@@ -115,6 +115,25 @@ export async function clipToOutline(soup, outline, N, { inset = 0.4, step = 0.5 
   return out;
 }
 
+// v72: samenvoegen en daarna aftrekken in één keer (zonder tussentijdse STL): de tussenstap na float32-export kon
+// net niet-manifold zijn (twee delen die elkaar raken), waarna het aftrekken weigerde.
+export async function unionSubtract(soups, cutters, report = {}) {
+  const w = await loadManifold();
+  const parts = [], loose = [];
+  for (const s of soups) { if (!s?.length) continue; try { parts.push(await toManifold(s)); } catch { try { parts.push(await toManifold(heal(s))); report.healed = (report.healed || 0) + 1; } catch { loose.push(s); } } }
+  report.loose = loose.length;
+  if (!parts.length) return concat(loose);
+  const cs = []; report.skipped = 0;
+  for (const s of cutters) { if (!s?.length) continue; try { cs.push(await toManifold(s)); } catch { report.skipped++; } }
+  const u = parts.length === 1 ? parts[0] : w.Manifold.union(parts);
+  let r = u;
+  if (cs.length) { const c = cs.length === 1 ? cs[0] : w.Manifold.union(cs); r = u.subtract(c); if (c !== cs[0]) c.delete(); }
+  const out = fromManifold(r);
+  if (r !== u) r.delete(); if (u !== parts[0]) u.delete();
+  for (const x of [...parts, ...cs]) x.delete();
+  return loose.length ? concat([out, ...loose]) : out;
+}
+
 export async function subtractSoups(base, cutters, report = {}) {
   const w = await loadManifold();
   const b = await toManifold(base), cs = [];

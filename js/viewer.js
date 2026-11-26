@@ -13,7 +13,7 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 export const COLORS = {
   scan: [0.88, 0.86, 0.82], lepel: [1.0, 0.71, 0.36], beetplaat: [0.22, 0.77, 1.0], basis: [0.65, 0.91, 0.51],
-  undercut: [0.95, 0.25, 0.3], tooth: 0xf4f0e6, antagonist: 0x8fb5d6, plate: { lepel: 0xffb45c, beetplaat: 0x39c5ff, basis: 0xe79aa5, rim: 0xf0c27a },
+  undercut: [0.95, 0.25, 0.3], tooth: 0xf4f0e6, antagonist: 0x8fb5d6, part: 0xb7c2cc, plate: { lepel: 0xffb45c, beetplaat: 0x39c5ff, basis: 0xe79aa5, rim: 0xf0c27a },
 };
 
 export class Viewer extends EventTarget {
@@ -49,15 +49,22 @@ export class Viewer extends EventTarget {
     this.gizmoHelper = this.gizmo.getHelper();
     this.scene.add(this.gizmoHelper);
     this.groups = {};
-    for (const name of ['scan', 'ghost', 'wax', 'antagonist', 'plates', 'teeth', 'overlay']) { this.groups[name] = new THREE.Group(); this.groups[name].name = name; this.scene.add(this.groups[name]); }
+    for (const name of ['scan', 'parts', 'ghost', 'wax', 'antagonist', 'plates', 'teeth', 'overlay']) { this.groups[name] = new THREE.Group(); this.groups[name].name = name; this.scene.add(this.groups[name]); }
     this.scanMesh = null;
     this.antagonistMesh = null;
     this.bounds = null;
     this.raycaster = new THREE.Raycaster();
     this.raycaster.firstHitOnly = true;
     this._queued = false;
-    new ResizeObserver(() => this.resize()).observe(container);
+    this._ro = new ResizeObserver(() => this.resize()); this._ro.observe(container);
     this.resize();
+  }
+
+  // v72: tweede weergave (3D-voorbeeld) netjes opruimen: WebGL-context vrijgeven
+  dispose() {
+    this._ro?.disconnect(); this.controls.dispose(); this.gizmo.dispose?.();
+    this.scene.traverse(o => { o.geometry?.dispose?.(); if (o.material) for (const m of [].concat(o.material)) m.dispose?.(); });
+    this.renderer.dispose(); this.renderer.forceContextLoss?.(); this.canvas.remove();
   }
 
   resize() {
@@ -190,6 +197,20 @@ export class Viewer extends EventTarget {
       for (let k = 0; k < 3; k++) { const o = f * 9 + k * 3; c[o] = col[0]; c[o + 1] = col[1]; c[o + 2] = col[2]; }
     }
     attr.needsUpdate = true;
+    this.render();
+  }
+
+  // v72: losse onderdelen (steg): metaalkleurig; 'apart' = doorschijnend (de plaat houdt er geen rekening mee)
+  setParts(parts = []) {
+    const g = this.groups.parts;
+    for (const o of [...g.children]) { o.geometry.dispose(); o.material.dispose(); g.remove(o); }
+    parts.forEach((p, i) => {
+      const geo = Viewer.geometryFromSoup(p.soup);
+      const apart = p.mode === 'apart';
+      const mat = new THREE.MeshStandardMaterial({ color: COLORS.part ?? 0xb7c2cc, metalness: 0.45, roughness: 0.35, side: THREE.DoubleSide, transparent: apart, opacity: apart ? 0.35 : 1, depthWrite: !apart });
+      const m = new THREE.Mesh(geo, mat); m.name = 'part' + i; m.raycast = () => {};
+      g.add(m);
+    });
     this.render();
   }
 

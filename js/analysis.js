@@ -86,9 +86,16 @@ export function autoLandmarks(soup, axisInfo = occlusalAxis(soup)) {
   const A = left.reduce((b, q) => (q.u < b.u ? q : b), left[0]), B = right.reduce((b, q) => (q.u > b.u ? q : b), right[0]);
   // Verfijnen: de kam is altijd hoger dan een omslag van lip/wang of een frenulum in het vestibulum.
   //  M = hoogste punt op de middellijn (van het midden tussen R/L tot iets voorbij M), R/L = hoogste punt binnen 8 mm.
-  const O = { u: (A.u + B.u) / 2, v: (A.v + B.v) / 2 }, axis = [M.u - O.u, M.v - O.v], len = Math.hypot(...axis) || 1, ax = [axis[0] / len, axis[1] / len];
-  let M2 = M;
-  for (const q of pts) { const du = q.u - O.u, dv = q.v - O.v, along = du * ax[0] + dv * ax[1], across = Math.abs(du * ax[1] - dv * ax[0]); if (across < 3 && along > len * 0.4 && along < len + 6 && q.h > M2.h) M2 = q; }
+  const O = { u: (A.u + B.u) / 2, v: (A.v + B.v) / 2 };
+  let ax = [M.u - O.u, M.v - O.v], len = Math.hypot(...ax) || 1; ax = [ax[0] / len, ax[1] / len];
+  // v72: de middellijn is de middelloodlijn van R-L. Bij een scheve of ongelijke boog (één kant langer gescand) lag
+  // het midden van de kambreedte naast het front: M kwam dan 10–15 mm opzij te liggen en de hele omtrek liep scheef.
+  { let b = [-(B.v - A.v), B.u - A.u]; const l = Math.hypot(...b) || 1; b = [b[0] / l, b[1] / l]; if (b[0] * ax[0] + b[1] * ax[1] < 0) b = [-b[0], -b[1]];
+    let far = 0; for (const q of crest) { const du = q.u - O.u, dv = q.v - O.v, along = du * b[0] + dv * b[1], across = Math.abs(du * b[1] - dv * b[0]); if (across < 4 && along > far) far = along; }
+    if (far > len * 0.5 && b[0] * ax[0] + b[1] * ax[1] > Math.cos(40 * Math.PI / 180)) { ax = b; len = far; } }
+  let M2 = null;
+  for (const q of pts) { const du = q.u - O.u, dv = q.v - O.v, along = du * ax[0] + dv * ax[1], across = Math.abs(du * ax[1] - dv * ax[0]); if (across < 3 && along > len * 0.4 && along < len + 6 && (!M2 || q.h > M2.h)) M2 = q; }
+  M2 ??= M;
   const refine = P => { let b = P; for (const q of pts) if (Math.hypot(q.u - P.u, q.v - P.v) < 8 && q.h > b.h) b = q; return b; };
   // Rechts/links volgens de rechtshandige conventie met de occlusale as (zie setup.js).
   return { R: refine(A).p, M: M2.p, L: refine(B).p, axis: N };

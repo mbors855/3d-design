@@ -32,7 +32,28 @@ export function editableOutline(points, axis, { push = 0.25 } = {}) {
     const cand = pushOutline(pts, axis, push + round * 0.05);
     if (ok(cand)) return cand;
   }
-  return pushOutline(pts, axis, push);
+  // v72: nog steeds zelfkruisend (rafelige scanrand): de lusjes eruit, de grootste enkelvoudige omtrek blijft over
+  const u = untangle(pushOutline(pts, axis, push), basis);
+  return ok(u) ? u : pushOutline(pts, axis, push);
+}
+
+// Zelfkruisingen in de projectie langs de as wegnemen: bij elke kruising valt het kleinste van de twee lusjes weg.
+export function untangle(points, basis) {
+  const cr = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const x = (a, b, c, d) => { const d1 = cr(c, d, a), d2 = cr(c, d, b), d3 = cr(a, b, c), d4 = cr(a, b, d); return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0)) && d1 !== 0 && d2 !== 0 && d3 !== 0 && d4 !== 0; };
+  const area = arr => { const Q = arr.map(basis.project); let a = 0; for (let k = 0; k < Q.length; k++) { const p = Q[k], q = Q[(k + 1) % Q.length]; a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a / 2); };
+  let pts = points.slice();
+  for (let guard = 0; guard < 400 && pts.length > 3; guard++) {
+    const P = pts.map(basis.project), n = P.length; let hit = null;
+    outer: for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      if (x(P[i], P[i + 1], P[j], P[(j + 1) % n])) { hit = [i, j]; break outer; }
+    }
+    if (!hit) return pts;
+    const [i, j] = hit, inner = pts.slice(i + 1, j + 1), rest = [...pts.slice(j + 1), ...pts.slice(0, i + 1)];
+    pts = inner.length >= 3 && area(inner) > area(rest) ? inner : rest;
+  }
+  return pts;
 }
 
 function weights(x, y, a, b, c) {
