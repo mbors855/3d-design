@@ -5,7 +5,7 @@ import { initHandleTools } from './steps/handle-tools.js';
 import * as THREE from 'three';
 import { Viewer, makePolyline, makeDots, makeMesh, COLORS } from './viewer.js';
 import { parseSTL, writeSTL, soupBounds, toBase64, fromBase64, concatSoups } from './stl.js';
-import { fitReport, weld, quality, repair, toSoup, flipSoup, applyMatrixToSoup, boundaryLoops } from './mesh.js';
+import { fitReport, weld, quality, repair, toSoup, flipSoup, applyMatrixToSoup, boundaryLoops, loopLength } from './mesh.js';
 import { shell, shellAsync } from './shell.js';
 import { selfIntersections } from './meshcheck.js';
 import { ContourSet, editableOutline, untangle } from './contour.js';
@@ -13,8 +13,8 @@ import { simplifySoup, simplifyText, SCAN_LIMIT } from './decimate.js';
 import { occlusalAxis, autoLandmarks, undercutMarks, vec } from './analysis.js';
 import { archFrame, defaultFrame, placeTeeth, autoOcclude, contactMap, clearContactMap, framePoint, archPoint } from './setup.js';
 import { FDI_UPPER, FDI_LOWER, formArch } from './teeth.js';
-import { biteRim, gingivaBand, trayHandle, handleGeometry, HANDLE_DEFAULT, perforations, tissueStops } from './construct.js';
-import { unionSoups, subtractSoups, subtractFirst, loadManifold, unionSubtract, clipToOutline } from './csg.js';
+import { biteRim, capUnderRim, gingivaBand, trayHandle, handleGeometry, HANDLE_DEFAULT, perforations, tissueStops } from './construct.js';
+import { unionSoups, subtractSoups, loadManifold, unionSubtract, unionSubtractClip, clipToOutline } from './csg.js';
 import { demoJaw, demoAntagonist, anatomicJaw } from './demo.js';
 import { makeZip } from './zip.js';
 import { extractIntaglio } from './intaglio.js';
@@ -23,7 +23,7 @@ import { Sculpt, TOOLS } from './sculpt.js';
 import { analyzeScan, repairScan, extendBorder, keepComponentNear } from './prep.js';
 import { trimByOutline, trimByEdge, axisBasis } from './trim.js';
 import { WaxLayer } from './wax.js';
-import { splitParts, partZone, keepOutlineClear, barBlocks } from './parts.js';
+import { splitParts, partZone, keepOutlineClear, barBlocks, footprintField, wallAroundRelief } from './parts.js';
 import { tidyBorder } from './border.js';
 import { initSetupTools, geometrySoup } from './setup-tools.js';
 import { VERSION } from './version.js';
@@ -741,8 +741,117 @@ function partSuffix() { if (!S.parts.length) return ''; const w = partWord(S.par
 function partNote(wall = null) {
   if (!S.parts.length) return '';
   const inc = includedParts(), w = partWord(S.parts[0]), de = partDe(S.parts[0]);
-  return inc.length ? ` · over ${de}${wall ? `: kap van ${fmt(wall, 1)} mm, de ruimte onder ${de} uitgespaard (geen ondersnijding)` : ''}` : ` · zonder ${w} (alleen op de kaak)`;
+  const fail = inc.length && S.surroundFail && S.surroundFail === S.scan ? ` · <span class="warn">de scan houdt vlak naast ${de} op en kon daar niet worden aangevuld: controleer de plaat rond ${de}</span>` : ''; // v73
+  return inc.length ? ` · over ${de}${wall ? `: kap van ${fmt(wall, 1)} mm, de ruimte onder ${de} uitgespaard (geen ondersnijding)` : ''}${fail}` : ` · zonder ${w} (alleen op de kaak)`;
 }
+// v73: wanddikte rond de holte voor de steg (prothese): zitten de tanden te dicht op de steg, dan worden ze uitgehold
+// tot een dun schaaltje. Melden met de dunste plek en het element daar.
+function wallNote(soup, relief, surface) {
+  const w = wallAroundRelief(soup, relief, surface, contourAxis()); if (!w || (!w.top && !w.side)) return '';
+  const de = partDe(S.parts[0]), topMin = w.top?.p5 ?? Infinity, sideMin = w.side?.p5 ?? Infinity; // 5%-waarde: een snijrand loopt altijd naar 0
+  const at = topMin < 1.5 ? w.top.at : sideMin < 1 ? w.side.at : null;
+  let tooth = ''; if (at && S.teeth.length) { let best = Infinity; for (const t of S.teeth) { const d = t.position.distanceTo(new THREE.Vector3(...at)); if (d < best) { best = d; tooth = t.userData.fdi; } } }
+  const nums = `${w.top ? `${fmt(topMin, 1)} mm boven ${de}` : ''}${w.top && w.side ? ', ' : ''}${w.side ? `${fmt(sideMin, 1)} mm opzij` : ''}`;
+  if (!at) return ` · materiaal rond ${de}: ${nums} (95% van de wand)`;
+  return ` · <span class="warn">te weinig materiaal rond ${de}: ${nums}${tooth ? ` (bij element ${tooth})` : ''}. Daar wordt de prothese uitgehold. Zet het occlusievlak hoger, stel de elementen meer naar buiten op of kies ${S.parts[0].kind === 'steg' ? 'een lagere steg' : 'een lager onderdeel'}.</span>`;
+}
+// v73: losse elementen (sockets of export 'Elementen') mogen niet in de ruimte van de steg steken: daar inkorten
+async function teethClearOfParts(teeth, relief, { measure = false } = {}) {
+  let cut = 0, thin = null; const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < relief.length; i += 3) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], relief[i + k]); hi[k] = Math.max(hi[k], relief[i + k]); }
+  const out = [];
+  for (const t of teeth) {
+    let hit = false; for (let i = 0; i < t.soup.length && !hit; i += 3) hit = t.soup[i] >= lo[0] && t.soup[i] <= hi[0] && t.soup[i + 1] >= lo[1] && t.soup[i + 1] <= hi[1] && t.soup[i + 2] >= lo[2] && t.soup[i + 2] <= hi[2];
+    if (!hit) { out.push(t); continue; }
+    try {
+      const r = await subtractSoups(t.soup, [relief]);
+      if (r?.length && Math.abs(quality(weld(r, 1e-6)).volume - quality(weld(t.soup, 1e-6)).volume) > 0.05) {
+        out.push({ ...t, soup: r }); cut++;
+        if (measure) { const w = wallAroundRelief(r, relief, null, contourAxis()), m = Math.min(w?.top?.p5 ?? Infinity, w?.side?.p5 ?? Infinity); if (m < (thin?.d ?? Infinity)) thin = { d: m, fdi: t.fdi }; }
+        continue;
+      }
+    } catch (e) { console.warn('element inkorten', e); }
+    out.push(t);
+  }
+  return { teeth: out, cut, thin };
+}
+// v73: de beetwal blijft minstens 'Wal boven de kap' mm boven de kap over de steg. Ligt de kap hoger dan de gekozen of
+// berekende walhoogte min die marge, dan gaat de hele wal evenveel omhoog (het occlusievlak blijft evenwijdig, geen bult
+// in de wal). Geeft { height, lift, text }.
+function rimOverCap(height, capSoup, opts) {
+  const over = Math.max(0, num('rimOverCap') || 0), hAt = typeof height === 'function' ? height : () => height;
+  const cu = capUnderRim(S.frame, capSoup, opts), de = partDe(S.parts[0]);
+  let lift = 0, top = -Infinity, tight = Infinity;
+  cu.ts.forEach((t, i) => { const c = cu.top[i]; if (c === -Infinity) return; top = Math.max(top, c); tight = Math.min(tight, hAt(t) - c); lift = Math.max(lift, c + over - hAt(t)); });
+  lift = lift > 0.05 ? Math.ceil(lift * 10) / 10 : 0;
+  const h = !lift ? height : typeof height === 'function' ? t => height(t) + lift : height + lift;
+  const parts = [];
+  if (top > -Infinity) parts.push(lift ? `${lift > 3 ? '<span class="warn">' : ''}wal ${fmt(lift, 1)} mm hoger gezet: de kap over ${de} komt tot ${fmt(top, 1)} mm boven de kam, de wal blijft ${fmt(over, 1)} mm erboven${lift > 3 ? '. Weinig ruimte boven de steg: controleer de beethoogte bij het passen</span>' : ''}` : `wal minstens ${fmt(tight, 1)} mm boven de kap over ${de}`);
+  // een kap naast de wal (steg linguaal of buccaal van de wal) die tot in de marge boven de wal komt: alleen melden
+  let side = -Infinity; cu.ts.forEach((t, i) => { if (cu.beside[i] > hAt(t) + lift - over) side = Math.max(side, cu.beside[i]); });
+  if (side > -Infinity) parts.push(`<span class="warn">let op: de kap over ${de} ligt deels naast de wal en komt daar tot ${fmt(side, 1)} mm boven de kam</span>`);
+  return parts.length ? { height: h, lift, text: parts.join(' · ') } : null;
+}
+// v73: zo ver blijft de omtrek van een steg af. De kap (ruimte + 0,3 mm speling + wand) moet na het bijsnijden (0,4 mm
+// binnen de omtrek, bij afdrukruimte 1,2 mm) nog helemaal binnen de plaat liggen, met 0,5 mm over. Lepel 2 + 0,3 + 2,5 +
+// 1,2 + 0,5 = 6,5 mm; beetplaat 0 + 0,3 + 2 + 0,4 + 0,5 = 3,2 mm. Was 3 mm voor alles: bij een lepel lag de kap dan
+// net te smal en sneed de uitsparing door de zijkant (niet-manifold randen).
+function partClear(kind, min = false) {
+  const [gap, wall] = kind === 'lepel' ? [num('lepelGap'), num('lepelWall')] : kind === 'beetplaat' ? [num('beetGap'), num('beetWall')] : [num('basisGap'), num('basisWall')];
+  // min: wat er minstens moet zijn (kap met 1,5 mm wand), ook als de omtrek daarvoor voorbij de plooi moet
+  return min ? (gap || 0) + 0.3 + Math.min(1.5, wall || 2) + (gap > 0.05 ? 1.2 : 0.4) : Math.max(3, (gap || 0) + 0.3 + (wall || 2) + (gap > 0.05 ? 1.2 : 0.4) + 0.5);
+}
+// Diepte langs de as van het hoogste scanpunt boven (u, w) (voor nieuwe omtrekpunten rond een steg), of null.
+function scanDepthAt(axis) {
+  const tree = viewer.scanMesh?.geometry.boundsTree; if (!tree) return null;
+  const b = axisBasis(axis), N = new THREE.Vector3(...b.N), ray = new THREE.Ray();
+  return (u, w) => { ray.origin.set(...[0, 1, 2].map(k => b.U[k] * u + b.V[k] * w + b.N[k] * 500)); ray.direction.copy(N).negate(); const hit = tree.raycastFirst(ray, THREE.DoubleSide); return hit ? hit.point.dot(N) : null; };
+}
+// v73: houdt de scan vlak naast de steg op (minder dan de benodigde afstand), dan is er rond de steg geen tandvlees
+// om de plaat op te bouwen: de omtrek kwam dan buiten de scan en de lepel kreeg niet-manifold randen of zelfs een
+// vlies over de tongruimte. De scanrand wordt daar vloeiend verlengd (zoals 'aanvullen'; paars = ontworpen), met een
+// zachte overgang naar de rest van de rand. Geeft { gapBefore, length, faces } of null (niet nodig).
+const SURROUND_DONE = new WeakMap();
+function surroundParts(kinds = CONTOUR_KINDS) {
+  const inc = includedParts(); if (!inc.length || !S.scan) return null;
+  const clear = Math.max(...kinds.map(partClear)), key = clear.toFixed(2) + '|' + inc.map(p => p.id).join(',');
+  if (SURROUND_DONE.get(S.scan) === key) return null;
+  const axis = contourAxis(), F = footprintField(inc.map(p => p.soup), axis, clear + 8), b = F.basis;
+  const m = weld(S.scan, 1e-6), { loops } = boundaryLoops(m);
+  if (!loops.length) return null;
+  const P = m.positions, lens = loops.map(l => loopLength(m, l)), loop = loops[lens.indexOf(Math.max(...lens))]; // zoals extendBorder: de langste rand
+  let minD = Infinity; for (const v of loop) { const d = F.at(...b.project([P[v * 3], P[v * 3 + 1], P[v * 3 + 2]])).d; if (d < minD) minD = d; }
+  SURROUND_DONE.set(S.scan, key);
+  if (!(minD < clear + 0.5)) return null;
+  const full = clear + 2 - Math.max(0, minD), lo = clear + 0.5, hi = clear + 4;
+  const weight = p => { const d = F.at(...b.project(p)).d; if (d <= lo) return 1; if (d >= hi) return 0; const t = (hi - d) / (hi - lo); return t * t * (3 - 2 * t); };
+  // De aanvulling mag zichzelf en de scan niet snijden. Loopt de scanrand onder de steg door (daar is niets gescand),
+  // dan kan een lange aanvulling omklappen: dan korter proberen. Lukt het niet, dan eerst losse flarden scan vlak naast
+  // de steg (smaller dan 3 mm) weghalen en gaten onder de steg dichten (vanaf zo'n flard klapte de aanvulling terug
+  // over de scan) en opnieuw. Lukt het dan nog niet: niet aanvullen, maar het melden.
+  const tryExtend = src => { for (const f of [1, 0.65, 0.4]) {
+    const e = extendBorder(src, { length: full * f, step: 0.5, weight });
+    if (!e.report.added) return null;
+    const si = selfIntersections(weld(e.soup, 1e-6), { maxPairs: 5e6 });
+    let bad = 0; for (let t = e.report.designedFrom; t < si.faces.length; t++) bad += si.faces[t];
+    if (!bad) return { e, length: full * f };
+  } return null; };
+  let src = S.scan, srcDesigned = S.designedFrom ?? null, tidy = null, got = tryExtend(src);
+  if (!got) {
+    const near = partZone(inc.map(p => p.soup), axis, 2);
+    tidy = tidyBorder(S.scan, { designedFrom: srcDesigned, fringe: 1.5, notchWidth: 0, protect: p => !near(p), holeSize: 0, holeNear: near });
+    if (tidy.report.fringeFaces || tidy.report.holes) { src = tidy.soup; srcDesigned = tidy.designedFrom; got = tryExtend(src); }
+  }
+  if (!got) { S.surroundFail = S.scan; return { failed: true, gapBefore: Math.max(0, minD), clear }; }
+  const ext = got.e, length = got.length;
+  S.history.push({ soup: S.scan, aux: snapshotAux() }); noteAction('scan'); if (S.history.length > 8) S.history.shift(); S.future = [];
+  setScan(ext.soup, S.scanName, { reset: false, designedFrom: Math.min(srcDesigned ?? Infinity, ext.report.designedFrom), keepWax: true });
+  SURROUND_DONE.set(S.scan, key);
+  return { gapBefore: Math.max(0, minD), length, clear, faces: ext.report.added, shorter: length < full - 0.05, flaps: tidy?.report.fringeFaces ?? 0, holes: tidy?.report.holes ?? 0 };
+}
+const surroundText = r => { const de = partDe(S.parts[0]); return r.failed
+  ? `<span class="warn">de scan houdt ${fmt(r.gapBefore, 1)} mm naast ${de} op (nodig is ${fmt(r.clear, 1)} mm) en de rand kon daar niet zonder kruisen worden aangevuld: scan het tandvlees rond ${de} mee, of teken de omtrek zelf</span>`
+  : `scanrand rond ${de} aangevuld (paars = ontworpen, niet gescand): de scan hield ${fmt(r.gapBefore, 1)} mm naast ${de} op, nodig is ${fmt(r.clear, 1)} mm${r.shorter ? ` · ${fmt(r.length, 1)} mm verlengd, verder klapte de aanvulling om` : ''}${r.flaps ? ` · eerst ${int(r.flaps)} facetten losse flarden naast ${de} weggehaald` : ''}${r.holes ? ` · ${r.holes === 1 ? '1 gat' : `${r.holes} gaten`} onder ${de} gedicht` : ''}`; };
 function updatePartsUI() {
   const has = S.parts.length > 0;
   $('partsBox').classList.toggle('hide', !has);
@@ -777,27 +886,24 @@ document.addEventListener('click', e => {
 for (const id of ['lepelPart', 'beetPart', 'basisPart']) $(id).addEventListener('change', e => setPartMode(null, e.target.value));
 // Alles wat door het pasvlak heen steekt (wortels van tanden, onderkant van wal/gingivaband/handvat) wegsnijden met
 // een 'weefselblok' waarvan één zijde exact het scanoppervlak is (iets ruimer dan de omtrek). Zo blijft het pasvlak gelijk aan de scan.
-async function clipToTissue(kind, soup, reverse, { deep = false } = {}) {
-  const s = S.contours.get(kind); if (!s?.closed) return soup;
-  await loadManifold();
-  const src = scanForPlates();
-  // v68: de plaat wordt één keer omgezet; een weefselblok wordt pas gemaakt als de vorige poging mislukte
-  // v70: dun weefselblok (2,5 mm) via het iso-oppervlak. Het oude blok (normaal-offset, 8 mm) sneed zichzelf aan de
-  // weefselkant van een smalle kam of tussen tanden duizenden keren; aftrekken gaf dan een kapotte plaat (betande scan
-  // met handvat: 8.602 niet-manifold randen). Beetwal en handvat liggen op de scan (conform): 2,5 mm is ruim genoeg.
-  // deep: het oude, diepe blok, voor de prothese (de gingivaband steekt daar nog tot 9 mm onder de scan)
+// Weefselblok: wat door het pasvlak steekt (onderkant van beetwal, handvat, gingivaband) wordt weggesneden.
+// v68: een blok wordt pas gemaakt als de vorige poging mislukte. v70: dun blok (2,5 mm) via het iso-oppervlak; het oude
+// blok (normaal-offset, 8 mm) sneed zichzelf aan de weefselkant van een smalle kam of tussen tanden duizenden keren.
+// deep: het oude, diepe blok, voor de prothese (de gingivaband steekt daar nog tot 9 mm onder de scan).
+// v73: alleen de makers; samenvoegen + aftrekken + wegsnijden gebeurt in één keer (unionSubtractClip) en elk blok wordt
+// hooguit één keer gemaakt (de prothese bouwt bij een terugval van de gingiva opnieuw).
+function tissueMakers(kind, reverse, { deep = false } = {}) {
+  const s = S.contours.get(kind); if (!s?.closed) return [];
+  const src = scanForPlates(), memo = [];
   const makers = (deep ? [[1.5, 8, 'normal'], [1, 4, 'normal'], [0.6, 2.5, 'normal']] : [[1.5, 2.5, 'iso'], [1, 1.5, 'iso'], [0.6, 2.5, 'normal']]).map(([margin, wall, method], i) => async () => {
+    if (memo[i]) return memo[i];
     if (i) await tick('Weefselblok opnieuw proberen…');
     const wide = s.edge ? trimByEdge(src, { inset: 0, splitAt: S.designedFrom ?? null }).soup : trimByOutline(src, s.points, s.axis, { margin }).soup;
-    // 0,005 mm in het weefsel: geen samenvallende vlakken
-    return shellAsync(wide, { gap: 0.005, wall, reverse: !reverse, method, quick: method === 'iso' }, {}, () => tick());
+    return (memo[i] = await shellAsync(wide, { gap: 0.005, wall, reverse: !reverse, method, quick: method === 'iso' }, {}, () => tick()));
   });
-  const r = await subtractFirst(soup, makers);
-  if (r.used >= 0) return r.soup;
-  console.warn('weefselblok', r.error);
-  toast('Let op: delen die door het pasvlak steken konden niet automatisch worden weggesneden. Controleer het pasvlak.', true);
-  return soup;
+  return makers;
 }
+const clipWarn = () => toast('Let op: delen die door het pasvlak steken konden niet automatisch worden weggesneden. Controleer het pasvlak.', true);
 // v69: zelfdoorsnijding van de scan zelf (één keer per scan)
 const SCAN_SI = new WeakMap();
 function scanSelfIntersections() { if (!S.scan) return 0; let v = SCAN_SI.get(S.scan); if (v === undefined) { v = selfIntersections(weld(S.scan, 1e-6), { maxPairs: 5e6 }).pairs; SCAN_SI.set(S.scan, v); } return v; }
@@ -925,7 +1031,8 @@ async function buildBeet() {
   await tick(gap > 0 ? `Plaat opbouwen (${fmt(gap, 2)} mm afstand tot de scan)…` : 'Plaat opbouwen…');
   // langs de scanrand: dunne punten die het bijsnijden liet staan niet meenemen (breekbaar, en ze geven overlapjes)
   let soup = await shellAsync(surf2, { gap, wall, reverse, rimSeal: seal, checkThin: true, trimSpikes: !!S.contours.get('beetplaat')?.edge }, rep, () => tick());
-  const extras = [], notes = [];
+  const extras = [], notes = []; let capTxt = '';
+  const pb = await partBlocks('beetplaat', surf2, gap, wall); // v72: over de steg (v73: vóór de wal, die moet erboven blijven)
   if ($('rimOn').checked && needFrame('Beetwal')) {
     const rs = $('rimRule').checked ? ruleSetup({ forceCrest: true, extend: 0 }) : null;
     const height = rs?.rule ? t => rs.rule.at(Math.abs(t), 1) : num('rimHeight');
@@ -936,19 +1043,24 @@ async function buildBeet() {
     if (buried || noFold) notes.push(`<span class="warn">beetwal overgeslagen: ${noFold ? 'de plooi is niet gescand, dus de plooiregel (occlusievlak) is niet te bepalen' : `volgens de plooiregel ligt het occlusievlak hier niet boven de kam (${fmt(rs.rule.front)} / ${fmt(rs.rule.back)} mm; betande scan?)`}. Zet "Volgens de regels" uit en kies een walhoogte als je toch een wal wilt</span>`);
     else {
       if (rs && S.anatomy) S.anatomy.arch = rs.arch;
-      extras.push(biteRim(S.frame, { width: num('rimWidth'), anteriorWidth: num('rimFrontWidth'), height, embed: 3, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: rs?.arch ?? null, conform: conformTo(gap + wall * 0.5) }));
-      notes.push(rs?.rule ? `beetwal volgens regels (kamlijn; hoogte voor ${fmt(rs.rule.front)} / achter ${fmt(rs.rule.back)} mm boven de kam${rs.rule.notes.length ? '; ' + rs.rule.notes.join('; ') : ''})` : `beetwal ${fmt(num('rimHeight'))} mm`);
+      const form = $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch = rs?.arch ?? null, rimW = { width: num('rimWidth'), anteriorWidth: num('rimFrontWidth') };
+      const cap = pb ? rimOverCap(height, pb.cap, { ...rimW, form, arch }) : null; // v73: wal blijft boven de kap over de steg
+      extras.push(biteRim(S.frame, { ...rimW, height: cap ? cap.height : height, embed: 3, form, arch, conform: conformTo(gap + wall * 0.5) }));
+      notes.push(rs?.rule ? `beetwal volgens regels (kamlijn; hoogte voor ${fmt(rs.rule.front + (cap?.lift ?? 0))} / achter ${fmt(rs.rule.back + (cap?.lift ?? 0))} mm boven de kam${rs.rule.notes.length ? '; ' + rs.rule.notes.join('; ') : ''})` : `beetwal ${fmt(num('rimHeight') + (cap?.lift ?? 0))} mm`);
+      if (cap) capTxt = ' · ' + cap.text;
     }
   }
   if ($('beetHandle').checked && needFrame('Handvat')) { extras.push(handleGeometry(S.frame, handleParams(), handleOpts('beetplaat'))); notes.push('handvat'); }
   const clip = extras.length > 0; // beetwal of handvat: wat door het pasvlak steekt wegsnijden (de kap raakt het pasvlak niet)
-  const pb = await partBlocks('beetplaat', surf2, gap, wall); // v72: over de steg
   if (pb) extras.push(pb.cap);
   if (extras.length) {
     await tick(`${notes.some(n => n.startsWith('beetwal')) ? 'Beetwal' : notes.includes('handvat') ? 'Handvat' : 'Kap'} samenvoegen met de plaat…`);
     await loadManifold();
-    soup = await unionSubtract([soup, ...extras], pb ? [pb.relief] : []);
-    if (clip && !draft) { await tick('Wat door het pasvlak steekt wegsnijden…'); soup = await clipToTissue('beetplaat', soup, reverse); }
+    // v73: samenvoegen, steg uitsparen en wat door het pasvlak steekt wegsnijden in één keer
+    const rr = {}, makers = clip && !draft ? tissueMakers('beetplaat', reverse) : [];
+    if (makers.length) await tick('Samenvoegen en wat door het pasvlak steekt wegsnijden…');
+    soup = await unionSubtractClip([soup, ...extras], pb ? [pb.relief] : [], makers, rr);
+    if (makers.length && rr.clip < 0) { console.warn('weefselblok', rr.clipError); clipWarn(); }
   }
   await tick('Pasvlak controleren…');
   const edge = S.contours.get('beetplaat')?.edge;
@@ -958,7 +1070,7 @@ async function buildBeet() {
   const edgeTxt = edge ? ` · rand langs de scanrand${edge.inset ? ` (${fmt(edge.inset)} mm erbinnen)` : ' (plaatrand = scanrand)'}${rep.openedFaces ? ` · ${int(rep.openedFaces)} facetten van dunne punten aan de scanrand weggelaten` : ''}` : '';
   const sealTxt = seal ? ` · rand ligt op de scan (afstand loopt in de laatste ${fmt(seal)} mm naar 0)` : '';
   const tip = gap > 0 && S.fit.beetplaat && S.fit.beetplaat.within < 0.5 ? ' · tip: een beetplaat heeft normaal 0 mm afstand tot de scan' : '';
-  result('beetResult', `Beetplaat klaar: ${text}${edgeTxt}${sealTxt}${fitTxt}${thinNote(rep)}${tip}${reducedNote(rep)}${draft ? ` · uitblokken ${draft}° (${rep.changed} punten, max ${fmt(rep.maxLift, 2)} mm)` : ''}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('beetplaat', 'Beetplaat-STL')}`);
+  result('beetResult', `Beetplaat klaar: ${text}${edgeTxt}${sealTxt}${fitTxt}${thinNote(rep)}${tip}${reducedNote(rep)}${draft ? ` · uitblokken ${draft}° (${rep.changed} punten, max ${fmt(rep.maxLift, 2)} mm)` : ''}${capTxt}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('beetplaat', 'Beetplaat-STL')}`);
   status('Beetplaat gegenereerd.'); updateDone();
 }
 $('beetBuild').onclick = () => busy('Beetplaat berekenen…', buildBeet);
@@ -1145,25 +1257,28 @@ async function buildBasis() {
     gingivaFallback = { index: parts.length - 1, steps: [() => band({ embed: 3, simple: true })] };
     notes.push(`gingiva met festoenen, papillen${jf > 0 ? ' en wortelreliëf' : ''} (rand ${fmt(over)} mm boven de halslijn)`);
   } else if (!teeth.length) notes.push('zonder tanden (alleen basis)');
-  const teethTrimmed = teeth;
+  let teethTrimmed = teeth;
   if ($('coupling').value === 'monoblock' || !teeth.length) {
     // Samenvoegen en controleren; sluit het resultaat niet (delen raken elkaar), dan stapsgewijs een eenvoudiger
     // gingivaprofiel (minder flens, zonder wortelreliëf) tot het wel sluit.
     // v70: ook losse delen tellen als 'niet goed' (eerst alleen niet-manifold randen). De gingivaband steekt hier nog diep
     // onder de scan (embed); daarom bij de prothese het diepe weefselblok van v69.
-    const build = async () => { const r = {}; const u = { soup: await unionSubtract([...parts, ...teeth.map(t => t.soup)], cut, r) }; const m = await clipToTissue('basis', u.soup, reverse, { deep: true }); const q = quality(weld(m, 1e-6)); return { m, ok: !r.loose && q.nonManifold === 0 && q.components === 1 }; };
+    const makers = tissueMakers('basis', reverse, { deep: true }); // v73: één Manifold-sessie (zie unionSubtractClip)
+    const build = async () => { const r = {}; const m = await unionSubtractClip([...parts, ...teeth.map(t => t.soup)], cut, makers, r); if (makers.length && r.clip < 0) console.warn('weefselblok', r.clipError); const q = quality(weld(m, 1e-6)); return { m, ok: !r.loose && q.nonManifold === 0 && q.components === 1 && (r.clip >= 0 || !makers.length), clipped: r.clip >= 0 || !makers.length }; };
     let res = await build(), simpler = 0;
     while (!res.ok && gingivaFallback && simpler < gingivaFallback.steps.length) { parts[gingivaFallback.index] = gingivaFallback.steps[simpler++](); res = await build(); }
     if (simpler) { const gi = notes.findIndex(n => n.startsWith('gingiva')); if (gi >= 0) notes[gi] = `gingiva met festoenen en papillen (eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling)`; if (!res.ok) notes.push('let op: delen raken elkaar; controleer in de slicer'); }
+    if (!res.clipped) clipWarn();
     const mono = res.m;
     S.plates.monoblock = { soup: mono, name: 'Monoblock prothese', file: `MONOBLOCK_${safe($('caseName').value)}${partSuffix()}.stl` };
     delete S.plates.basis;
     // Weergave: basis in gingivakleur, tanden in tandkleur (export blijft één monoblock).
     // weergave: basis (zonder tanden) in gingivakleur, tanden apart in tandkleur — geen samenvallende vlakken
-    let display = mono; if (teeth.length) try { display = await clipToTissue('basis', await unionSubtract(parts, cut), reverse, { deep: true }); } catch { /* alleen weergave */ }
+    let display = mono; if (teeth.length) try { display = await unionSubtractClip(parts, cut, makers); } catch { /* alleen weergave */ }
     showPlate('basis', display, COLORS.plate.basis);
     showPlate('basisTeeth', teeth.length ? concatSoups(teeth.map(t => t.soup)) : null, COLORS.tooth);
-    const { text } = plateSummary(mono), fitTxt = fitCheck('basis', surface, mono, gap, 0, rimBandOf(rep)) + partNote(pb ? wall : null);
+    const { text } = plateSummary(mono), fitTxt = fitCheck('basis', surface, mono, gap, 0, rimBandOf(rep)) + partNote(pb ? wall : null) + (pb && teeth.length ? wallNote(mono, pb.relief, surface) : '');
+    if (pb && teeth.length) { const tc = await teethClearOfParts(teeth, pb.relief); if (tc.cut) teethTrimmed = tc.teeth; } // losse export 'Elementen' past dan ook over de steg
     result('basisResult', `Monoblock klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('monoblock', 'Monoblock-STL')}`);
   } else {
     const g = num('socketGap');
@@ -1172,14 +1287,25 @@ async function buildBasis() {
       const m = t.matrixWorld.clone().multiply(new THREE.Matrix4().makeScale(s, 1 + g / d.height, s));
       return applyMatrixToSoup(t.userData.soup, m.elements);
     });
-    const u = await unionSoups(parts);
-    const basis = await clipToTissue('basis', await subtractSoups(u.soup, pb ? [...expanded, pb.relief] : expanded), reverse, { deep: true });
+    const rs = {}, makers = tissueMakers('basis', reverse, { deep: true });
+    const basis = await unionSubtractClip(parts, pb ? [...expanded, pb.relief] : expanded, makers, rs);
+    if (makers.length && rs.clip < 0) { console.warn('weefselblok', rs.clipError); clipWarn(); }
     S.plates.basis = { soup: basis, name: 'Prothesebasis met sockets', file: `BASIS_${safe($('caseName').value)}${partSuffix()}.stl` };
     delete S.plates.monoblock;
     showPlate('basis', basis, COLORS.plate.basis);
     showPlate('basisTeeth', concatSoups(teeth.map(t => t.soup)), COLORS.tooth);
     const { text } = plateSummary(basis), fitTxt = fitCheck('basis', surface, basis, gap, 0, rimBandOf(rep)) + partNote(pb ? wall : null);
-    result('basisResult', `Basis met ${teeth.length} sockets klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)} · socketspeling ${fmt(g, 2)} mm${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('basis', 'Basis-STL')}`);
+    // sockets: de basis is boven de steg open (de elementen vullen dat); de losse elementen worden ingekort en per
+    // element wordt de dunste plek boven of naast de steg gemeten
+    let cutTxt = '';
+    if (pb) {
+      const tc = await teethClearOfParts(teeth, pb.relief, { measure: true });
+      if (tc.cut) {
+        teethTrimmed = tc.teeth; const th = tc.thin && Number.isFinite(tc.thin.d) ? tc.thin : null;
+        cutTxt = ` · ${tc.cut === 1 ? '1 element' : `${tc.cut} elementen`} ingekort waar ${partDe(S.parts[0])} zit${th ? (th.d < 1 ? ` · <span class="warn">dunste plek ${fmt(th.d, 1)} mm (element ${th.fdi}): te dun, zet het occlusievlak hoger of kies ${S.parts[0].kind === 'steg' ? 'een lagere steg' : 'een lager onderdeel'}</span>` : ` · dunste plek ${fmt(th.d, 1)} mm (element ${th.fdi})`) : ''}`;
+      }
+    }
+    result('basisResult', `Basis met ${teeth.length} sockets klaar: ${text}${fitTxt}${thinNote(rep)}${reducedNote(rep)} · socketspeling ${fmt(g, 2)} mm${cutTxt}${notes.length ? ' · ' + notes.join(', ') : ''}.<br>${plateLink('basis', 'Basis-STL')}`);
   }
   if (teethTrimmed.length) S.plates.elementen = { soup: concatSoups(teethTrimmed.map(t => t.soup)), name: 'Elementen', file: `ELEMENTEN_${safe($('caseName').value)}.stl`, parts: teethTrimmed };
   viewer.groups.teeth.visible = false;
@@ -1595,13 +1721,16 @@ function edgeContour(kind) {
 }
 function autoContour(kind) {
   if (!CONTOUR_KINDS.includes(kind)) return;
+  const sr = surroundParts([kind]); // v73: scan houdt vlak naast de steg op → eerst daar aanvullen
+  if (sr) toast(surroundText(sr).replace(/<[^>]+>/g, '').replace(/^./, c => c.toUpperCase()) + (sr.failed ? '.' : '. ↶ Terug zet het terug.'), !!sr.failed);
   if (edgeWanted(kind)) return edgeContour(kind);
   if (!S.anatomy || S.anatomy.soup !== S.scan) runAnatomy();
   const ol = proposeOutline(S.anatomy.cast, S.anatomy.an, kind), axis = contourAxis();
   // licht gladstrijken (2,5 mm): geen zaagtand in de rand, frenulum-uitsparingen blijven (afgerond) bestaan
   let pts = smoothOutline(ol.points, 2.5);
-  // v72: over een steg heen: de plaat omsluit de steg met minstens 3 mm
-  const inc = includedParts(); if (inc.length) pts = smoothOutline(keepOutlineClear(pts, inc.map(p => p.soup), axis, 3), 1.5);
+  // v72/v73: over een steg heen: de plaat omsluit de steg ruim (afstand per werkstuk, zie partClear); vereniging van
+  // plaatgebied en verbrede voetafdruk, dus nooit een zelfkruisende omtrek
+  const inc = includedParts(); if (inc.length) pts = keepOutlineClear(pts, inc.map(p => p.soup), axis, partClear(kind), { depthAt: scanDepthAt(axis), minClear: partClear(kind, true) });
   S.contours.setPoints(kind, untangle(pts, axisBasis(axis)), axis); // v72: nooit een zelfkruisende automatische omtrek
   if (S.mode === 'contour') setMode('orbit');
   delete S.plates[kind];
@@ -1953,7 +2082,7 @@ async function prepareScan({ forKind = null } = {}) {
     const ol = proposeOutline(a.cast, a.an, 'basis');
     // vloeiende bijsnijlijn (geen inkepingen bij de lipbandjes): de scan wordt ruim bijgesneden, het werkstuk krijgt later zijn eigen rand
     // v72: rond een steg ruim blijven (de plaat moet er later overheen tot op het tandvlees kunnen)
-    const trimLine = S.parts.length ? keepOutlineClear(ol.points, S.parts.map(p => p.soup), S.frame.N, 4) : ol.points;
+    const trimLine = S.parts.length ? keepOutlineClear(ol.points, S.parts.map(p => p.soup), S.frame.N, Math.max(4, ...CONTOUR_KINDS.map(partClear)) + 1) : ol.points;
     const t = trimByOutline(S.scan, untangle(smoothOutline(trimLine, 4), axisBasis(S.frame.N)), S.frame.N, { margin: num('prepMargin') + 1, splitAt: S.designedFrom }); // +1 mm: gladstrijken trekt bolle delen iets naar binnen
     const df = S.designedFrom != null && t.splitIndex < t.soup.length / 9 ? t.splitIndex : null;
     // binnen de marge kan nog een los stuk sokkel of tafel liggen: alleen de kaak (grootste deel) houden
@@ -1973,6 +2102,13 @@ async function prepareScan({ forKind = null } = {}) {
     setScan(r.soup, name, { reset: false, designedFrom: r.designedFrom, keepWax: true });
     lines.push(tidyLine(r.report));
     a = runAnatomy();
+  }
+  // v73: scan houdt vlak naast de steg op: daar aanvullen (ook als het werkstuk tot de echte scanrand loopt; zonder
+  // tandvlees rond de steg kan er geen plaat overheen)
+  if (includedParts().length && $('prepComplete').checked) {
+    await tick(`Rand rond ${partDe(S.parts[0])} controleren…`);
+    const sr = surroundParts(forKind ? [forKind] : CONTOUR_KINDS);
+    if (sr) { lines.push(`<b>${S.parts[0].kind === 'steg' ? 'Rond de steg' : 'Rond het onderdeel'}</b>: ${surroundText(sr)}`); if (!sr.failed) a = runAnatomy(); }
   }
   const edgeRule = !!EDGE_IDS[forKind] && edgeMode(forKind) !== 'anatomy';
   if ($('prepComplete').checked && num('prepExtend') > 0 && edgeRule) lines.push(`<b>Aanvullen</b>: niet gedaan, de ${KIND_NAME[forKind]} loopt tot de echte scanrand (${forKind === 'lepel' ? 'Lepel' : 'Beetplaat'} → Rand)`);

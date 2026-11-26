@@ -7,6 +7,7 @@
 //   'apart' = het werkstuk ligt alleen op de kaak (zonder steg); het onderdeel blijft zichtbaar en los te downloaden.
 import { weld, compact, toSoup } from './mesh.js';
 import { axisBasis } from './trim.js';
+import { TriBVH } from './bvh.js';
 
 const EDGE_KEY = (a, b) => (a < b ? a * 4294967296 + b : b * 4294967296 + a);
 
@@ -82,10 +83,16 @@ export function partZone(partSoups, axis, margin = 2.5) {
 /** Afstand (in de projectie langs de as) tot de voetafdruk van de onderdelen. Raster van 0,25 mm met
  *  afstandstransformatie; geeft (p) → { d, near: [u, w] } (near = dichtstbijzijnd punt van de voetafdruk). */
 export function partDistance(partSoups, axis, range = 15) {
+  const F = footprintField(partSoups, axis, range);
+  return p => { const [u, w] = F.basis.project(p), r = F.at(u, w); return r.near ? { ...r, uv: [u, w], basis: F.basis } : r; };
+}
+
+/** Zelfde afstandsveld, maar in vlakcoördinaten (u, w) van axisBasis(axis): { basis, at(u, w) → { d, near } }. */
+export function footprintField(partSoups, axis, range = 15) {
   const b = axisBasis(axis), g = 0.25;
   let u0 = Infinity, u1 = -Infinity, w0 = Infinity, w1 = -Infinity;
   const pr = []; for (const ps of partSoups) for (let i = 0; i < ps.length; i += 3) { const q = b.project([ps[i], ps[i + 1], ps[i + 2]]); pr.push(q); u0 = Math.min(u0, q[0]); u1 = Math.max(u1, q[0]); w0 = Math.min(w0, q[1]); w1 = Math.max(w1, q[1]); }
-  if (!pr.length) return () => ({ d: Infinity, near: null });
+  if (!pr.length) return { basis: b, at: () => ({ d: Infinity, near: null }) };
   const x0 = Math.floor((u0 - range) / g), y0 = Math.floor((w0 - range) / g), W = Math.ceil((u1 + range) / g) - x0 + 1, H = Math.ceil((w1 + range) / g) - y0 + 1;
   const nx = new Int32Array(W * H).fill(-1), ny = new Int32Array(W * H).fill(-1);
   const mark = (u, w) => { const x = Math.floor(u / g) - x0, y = Math.floor(w / g) - y0; if (x >= 0 && y >= 0 && x < W && y < H) { nx[y * W + x] = x; ny[y * W + x] = y; } };
@@ -110,39 +117,152 @@ export function partDistance(partSoups, axis, range = 15) {
     for (let x = W - 1; x >= 0; x--) { const i = y * W + x; if (x < W - 1) relax(i, i + 1, x, y); if (y < H - 1) { relax(i, i + W, x, y); if (x < W - 1) relax(i, i + W + 1, x, y); if (x > 0) relax(i, i + W - 1, x, y); } }
     for (let x = 1; x < W; x++) relax(y * W + x, y * W + x - 1, x, y);
   }
-  return p => {
-    const [u, w] = b.project(p), x = Math.floor(u / g) - x0, y = Math.floor(w / g) - y0;
+  const at = (u, w) => {
+    const x = Math.floor(u / g) - x0, y = Math.floor(w / g) - y0;
     if (x < 0 || y < 0 || x >= W || y >= H) return { d: Infinity, near: null };
     const i = y * W + x; if (nx[i] < 0) return { d: Infinity, near: null };
     const nu = (nx[i] + x0 + 0.5) * g, nw = (ny[i] + y0 + 0.5) * g;
-    return { d: nx[i] === x && ny[i] === y ? 0 : Math.hypot(nu - u, nw - w), near: [nu, nw], uv: [u, w], basis: b };
+    return { d: nx[i] === x && ny[i] === y ? 0 : Math.hypot(nu - u, nw - w), near: [nu, nw] };
   };
+  return { basis: b, at, box: [(x0 + 0.5) * g, (y0 + 0.5) * g, (x0 + W - 0.5) * g, (y0 + H - 0.5) * g] };
 }
 
-/** Omtrek (3D-punten, rond de as) minstens minDist mm van de voetafdruk van de onderdelen af houden: punten die te dicht
- *  bij (of op) een steg liggen schuiven naar buiten. Zo omsluit de plaat de steg ruim. Geeft nieuwe punten. */
-export function keepOutlineClear(points, partSoups, axis, minDist = 3) {
+/** v73: omtrek (3D-punten, rond de as) minstens minDist mm van de voetafdruk van de onderdelen af houden.
+ *  Het gebied binnen de omtrek wordt verenigd met de voetafdruk, minDist mm verbreed (raster van 0,25 mm). Alleen de
+ *  stukken van de omtrek die te dicht bij een onderdeel komen, worden vervangen door de rand van dat verenigde gebied;
+ *  de rest blijft punt voor punt gelijk. Zo kruist de nieuwe omtrek zichzelf nooit. (v72 schoof elk punt los opzij:
+ *  bij een frenulum-inkeping vlak naast een abutment raakte de volgorde van de punten dan door elkaar en kruiste de
+ *  lijn zichzelf, en de automatische omtrek mislukte.) De diepte langs de as van nieuwe punten wordt geïnterpoleerd;
+ *  depthAt(u, w) mag een betere waarde geven (bijv. de scanhoogte). Geeft nieuwe punten (of dezelfde array). */
+export function keepOutlineClear(points, partSoups, axis, minDist = 3, { depthAt = null, report = null, minClear = minDist } = {}) {
   if (!partSoups.length || points.length < 3) return points;
-  const pd = partDistance(partSoups, axis, minDist + 6), b = axisBasis(axis), n = points.length;
-  const P = points.map(p => b.project(p));
-  let area = 0; for (let i = 0; i < n; i++) area += P[i][0] * P[(i + 1) % n][1] - P[(i + 1) % n][0] * P[i][1];
-  const ccw = area > 0;
-  let moved = 0;
-  const out = points.map((p0, i) => {
-    let p = p0;
-    for (let it = 0; it < 4; it++) { // een paar keer: na een schuif kan een andere kant van de steg de dichtstbijzijnde zijn
-      const r = pd(p); if (!(r.d < minDist - 0.05)) break;
-      let dir;
-      if (r.d > 0.05) dir = [r.uv[0] - r.near[0], r.uv[1] - r.near[1]];
-      else { const a = P[(i - 1 + n) % n], c = P[(i + 1) % n], t = [c[0] - a[0], c[1] - a[1]]; dir = ccw ? [t[1], -t[0]] : [-t[1], t[0]]; } // op de steg: naar buiten (normaal van de omtrek)
-      const l = Math.hypot(dir[0], dir[1]) || 1, nu = r.near[0] + dir[0] / l * minDist, nw = r.near[1] + dir[1] / l * minDist;
-      const du = nu - r.uv[0], dw = nw - r.uv[1];
-      p = [p[0] + b.U[0] * du + b.V[0] * dw, p[1] + b.U[1] * du + b.V[1] * dw, p[2] + b.U[2] * du + b.V[2] * dw];
-    }
-    if (p !== p0) moved++;
-    return p;
-  });
-  return moved ? out : points;
+  const F = footprintField(partSoups, axis, minDist + 3), b = F.basis, n0 = points.length;
+  const dAt = (u, w) => F.at(u, w).d;
+  let pts = points, P = pts.map(b.project);
+  let area = 0; for (let i = 0; i < n0; i++) area += P[i][0] * P[(i + 1) % n0][1] - P[(i + 1) % n0][0] * P[i][1];
+  const flip = area < 0; if (flip) { pts = pts.slice().reverse(); P = P.slice().reverse(); }
+  const n = n0, D = pts.map(b.depth);
+  // per segment i → i+1: komt het binnen 'lim' mm van een onderdeel?
+  const segMin = i => { const a = P[i], c = P[(i + 1) % n], k = Math.max(1, Math.ceil(Math.hypot(c[0] - a[0], c[1] - a[1]) / 0.2)); let m = Infinity; for (let s = 0; s <= k; s++) m = Math.min(m, dAt(a[0] + (c[0] - a[0]) * s / k, a[1] + (c[1] - a[1]) * s / k)); return m; };
+  const sm = P.map((_, i) => segMin(i));
+  if (sm.every(m => m >= minDist - 0.05)) return points;
+  // masker: binnen de omtrek ∪ verbrede voetafdruk (iets ruimer, zodat gladstrijken nooit te dicht komt)
+  const g = 0.25, lim = minDist + 0.2;
+  let u0 = Math.min(F.box[0], ...P.map(p => p[0])), w0 = Math.min(F.box[1], ...P.map(p => p[1])), u1 = Math.max(F.box[2], ...P.map(p => p[0])), w1 = Math.max(F.box[3], ...P.map(p => p[1]));
+  const x0 = Math.floor(u0 / g) - 3, y0 = Math.floor(w0 / g) - 3, W = Math.ceil(u1 / g) + 3 - x0, H = Math.ceil(w1 / g) + 3 - y0;
+  const M = new Uint8Array(W * H), poly = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) { // even-oneven vullen per rij
+    const wc = (y0 + y + 0.5) * g, xs = [];
+    for (let i = 0; i < n; i++) { const a = P[i], c = P[(i + 1) % n]; if ((a[1] > wc) !== (c[1] > wc)) xs.push(a[0] + (wc - a[1]) / (c[1] - a[1]) * (c[0] - a[0])); }
+    xs.sort((p, q) => p - q);
+    for (let k = 0; k + 1 < xs.length; k += 2) for (let x = Math.max(0, Math.ceil(xs[k] / g - 0.5) - x0); x < W && (x0 + x + 0.5) * g <= xs[k + 1]; x++) poly[y * W + x] = 1;
+  }
+  const dc = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) dc[y * W + x] = dAt((x0 + x + 0.5) * g, (y0 + y + 0.5) * g);
+  // Tot minDist alleen binnen het plaatgebied met dichtgemaakte inkepingen (sluiten, straal rn): een inkeping (frenulum)
+  // vlak naast de steg wordt opgevuld, maar de plaat loopt niet verder naar buiten dan de omtrek al ging. Anders liep een
+  // lepel over de plooi heen (overextensie), kwam de rand onder in de plooi en kreeg de schaal flapjes. Alleen tot
+  // minClear (de kap moet de steg toch omsluiten) mag de omtrek ook daarbuiten komen.
+  const rn = 3, hull = closeMask(poly, W, H, rn / g), limMin = Math.min(minClear, minDist) + 0.2;
+  for (let i = 0; i < W * H; i++) M[i] = poly[i] || (dc[i] <= lim && hull[i]) || dc[i] <= limMin ? 1 : 0;
+  // holle hoeken waar de verbrede voetafdruk de omtrek raakt afronden (sluiten met straal rc), alleen vlak bij wat er
+  // werkelijk bij kwam (anders vulde het afronden ook rastertrapjes elders aan de omtrek)
+  const grown = new Uint8Array(W * H); let nGrown = 0; for (let i = 0; i < W * H; i++) if (M[i] && !poly[i]) { grown[i] = 1; nGrown++; }
+  if (!nGrown) return points; // niets te verbreden: omtrek ongewijzigd
+  const rc = 2, closed = closeMask(M, W, H, rc / g), dGrow = edt(grown, W, H);
+  for (let i = 0; i < W * H; i++) if (closed[i] && (hull[i] || dc[i] <= limMin + rc) && dGrow[i] * g <= rc + 0.5) M[i] = 1;
+  // alleen het deel met het plaatgebied (4-buren), gaten erin dicht, knijppunten (alleen diagonaal) opvullen
+  const lab = new Int32Array(W * H).fill(-1), sizes = [], q = new Int32Array(W * H);
+  for (let s = 0; s < W * H; s++) {
+    if (!M[s] || lab[s] >= 0) continue;
+    const id = sizes.length; let h = 0, t = 0, own = 0; q[t++] = s; lab[s] = id;
+    while (h < t) { const i = q[h++], x = i % W, y = (i - x) / W; own += poly[i]; for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1]) if (j >= 0 && M[j] && lab[j] < 0) { lab[j] = id; q[t++] = j; } }
+    sizes.push(own);
+  }
+  const best = sizes.indexOf(Math.max(...sizes));
+  for (let i = 0; i < W * H; i++) M[i] = lab[i] === best ? 1 : 0;
+  const out = new Uint8Array(W * H); { let h = 0, t = 0; for (let i = 0; i < W * H; i++) { const x = i % W, y = (i - x) / W; if ((x === 0 || y === 0 || x === W - 1 || y === H - 1) && !M[i]) { out[i] = 1; q[t++] = i; } }
+    while (h < t) { const i = q[h++], x = i % W, y = (i - x) / W; for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1]) if (j >= 0 && !M[j] && !out[j]) { out[j] = 1; q[t++] = j; } } }
+  for (let i = 0; i < W * H; i++) if (!out[i]) M[i] = 1;
+  for (let pass = 0, ch = 1; pass < 6 && ch; pass++) { ch = 0; for (let y = 0; y + 1 < H; y++) for (let x = 0; x + 1 < W; x++) { const a = y * W + x, c = a + 1, d = a + W, e = d + 1; if (M[a] && M[e] && !M[c] && !M[d]) { M[c] = 1; ch = 1; } else if (M[c] && M[d] && !M[a] && !M[e]) { M[a] = 1; ch = 1; } } }
+  const added = new Uint8Array(W * H); let nAdded = 0; for (let i = 0; i < W * H; i++) if (M[i] && !poly[i]) { added[i] = 1; nAdded++; }
+  if (!nAdded) return points; // het gebied werd niet groter: omtrek ongewijzigd
+  // buitenrand volgen (binnen links, dus tegen de klok in), hoekpunten van de cellen
+  const CW = W + 1, next = new Map();
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!M[y * W + x]) continue; const on = (xx, yy) => xx >= 0 && yy >= 0 && xx < W && yy < H && M[yy * W + xx];
+    if (!on(x, y - 1)) next.set(y * CW + x, y * CW + x + 1);
+    if (!on(x + 1, y)) next.set(y * CW + x + 1, (y + 1) * CW + x + 1);
+    if (!on(x, y + 1)) next.set((y + 1) * CW + x + 1, (y + 1) * CW + x);
+    if (!on(x - 1, y)) next.set((y + 1) * CW + x, y * CW + x);
+  }
+  if (!next.size) return points;
+  let B = [], s0 = next.keys().next().value, c = s0;
+  do { B.push([(c % CW + x0) * g, (Math.floor(c / CW) + y0) * g]); c = next.get(c); } while (c !== undefined && c !== s0 && B.length <= next.size);
+  // trapjes van het raster wegstrijken (rand blijft ~0,1 mm op zijn plek) en herbemonsteren op ± 0,6 mm
+  for (let it = 0; it < 6; it++) { const C = B.map(p => p.slice()), m = B.length; for (let i = 0; i < m; i++) for (let k = 0; k < 2; k++) B[i][k] = 0.25 * C[(i - 1 + m) % m][k] + 0.5 * C[i][k] + 0.25 * C[(i + 1) % m][k]; }
+  B = resample2(B, 0.6);
+  const m = B.length, cum = [0]; for (let i = 1; i <= m; i++) cum.push(cum[i - 1] + Math.hypot(B[i % m][0] - B[i - 1][0], B[i % m][1] - B[i - 1][1]));
+  const perim = cum[m], nearestB = p => { let bi = 0, bd = Infinity; for (let i = 0; i < m; i++) { const d = Math.hypot(B[i][0] - p[0], B[i][1] - p[1]); if (d < bd) { bd = d; bi = i; } } return bi; };
+  const to3 = (u, w, d) => { const z = depthAt ? depthAt(u, w) ?? d : d; return [b.U[0] * u + b.V[0] * w + b.N[0] * z, b.U[1] * u + b.V[1] * w + b.N[1] * z, b.U[2] * u + b.V[2] * w + b.N[2] * z]; };
+  // vrij = punt én beide aangrenzende stukken ver (≥ 0,75 mm) van wat er bij het gebied is gekomen: daar blijft de
+  // omtrek punt voor punt gelijk; alleen waar het gebied echt groter werd, komt de nieuwe rand
+  const dAdd = edt(added, W, H), cellD = (u, w) => { const x = Math.floor(u / g) - x0, y = Math.floor(w / g) - y0; return x < 0 || y < 0 || x >= W || y >= H ? Infinity : dAdd[y * W + x] * g; };
+  const segFree = i => { const a = P[i], c = P[(i + 1) % n], k = Math.max(1, Math.ceil(Math.hypot(c[0] - a[0], c[1] - a[1]) / 0.2)); for (let s2 = 0; s2 <= k; s2++) if (cellD(a[0] + (c[0] - a[0]) * s2 / k, a[1] + (c[1] - a[1]) * s2 / k) < 0.75) return false; return true; };
+  const sf = P.map((_, i) => segFree(i)), free = P.map((_, i) => sf[(i - 1 + n) % n] && sf[i]);
+  if (report) report.clearance = Math.min(...sm);
+  let result;
+  if (!free.some(Boolean)) result = B.map(([u, w]) => to3(u, w, D[0]));
+  else {
+    result = []; const start = free.indexOf(true); let i = start, replaced = 0;
+    do {
+      if (free[i]) { result.push(pts[i].slice()); i = (i + 1) % n; continue; }
+      let j = i; while (!free[j]) j = (j + 1) % n; // stuk i..j-1 vervangen; i-1 en j blijven
+      const A = (i - 1 + n) % n, ja = nearestB(P[A]), jc = nearestB(P[j]);
+      let len = cum[jc] - cum[ja]; if (len < 0) len += perim;
+      if (len > perim * 0.6) { for (let k = i; k !== j; k = (k + 1) % n) result.push(pts[k].slice()); } // onverwacht: laten staan (untangle vangt het op)
+      else for (let k = (ja + 1) % m, s = 0; k !== jc; k = (k + 1) % m) {
+        s += Math.hypot(B[k][0] - B[(k - 1 + m) % m][0], B[k][1] - B[(k - 1 + m) % m][1]);
+        if (s < 0.4 || len - s < 0.4) continue; // niet vlak op de blijvende punten
+        result.push(to3(B[k][0], B[k][1], D[A] + (D[j] - D[A]) * Math.min(1, s / len)));
+      }
+      replaced += (j - i + n) % n; i = j;
+    } while (i !== start);
+    if (report) report.replaced = replaced;
+  }
+  return flip ? result.reverse() : result;
+}
+
+// Afstand (in cellen) tot de dichtstbijzijnde cel met mask = 1 (8SSEDT, zoals footprintField). Buiten het raster: ver.
+function edt(mask, W, H) {
+  const nx = new Int32Array(W * H).fill(-1), ny = new Int32Array(W * H).fill(-1);
+  for (let i = 0; i < W * H; i++) if (mask[i]) { nx[i] = i % W; ny[i] = (i - i % W) / W; }
+  const dist = (i, x, y) => nx[i] < 0 ? Infinity : Math.hypot(nx[i] - x, ny[i] - y);
+  const relax = (i, j, x, y) => { if (nx[j] >= 0 && Math.hypot(nx[j] - x, ny[j] - y) < dist(i, x, y)) { nx[i] = nx[j]; ny[i] = ny[j]; } };
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) { const i = y * W + x; if (x > 0) relax(i, i - 1, x, y); if (y > 0) { relax(i, i - W, x, y); if (x > 0) relax(i, i - W - 1, x, y); if (x < W - 1) relax(i, i - W + 1, x, y); } }
+    for (let x = W - 2; x >= 0; x--) relax(y * W + x, y * W + x + 1, x, y);
+  }
+  for (let y = H - 1; y >= 0; y--) {
+    for (let x = W - 1; x >= 0; x--) { const i = y * W + x; if (x < W - 1) relax(i, i + 1, x, y); if (y < H - 1) { relax(i, i + W, x, y); if (x < W - 1) relax(i, i + W + 1, x, y); if (x > 0) relax(i, i + W - 1, x, y); } }
+    for (let x = 1; x < W; x++) relax(y * W + x, y * W + x - 1, x, y);
+  }
+  const d = new Float32Array(W * H); for (let i = 0; i < W * H; i++) d[i] = dist(i, i % W, (i - i % W) / W);
+  return d;
+}
+// morfologisch sluiten (uitzetten en weer krimpen, straal r cellen): inkepingen smaller dan 2r en holle hoeken dicht
+function closeMask(mask, W, H, r) {
+  const d1 = edt(mask, W, H), grown = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) grown[i] = d1[i] <= r ? 0 : 1; // grown = buiten na uitzetten
+  const d2 = edt(grown, W, H), out = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) out[i] = d2[i] > r || mask[i] ? 1 : 0;
+  return out;
+}
+
+// 2D-polyline (gesloten) herbemonsteren op gelijke afstand
+function resample2(P, step) {
+  const n = P.length, cum = [0]; for (let i = 1; i <= n; i++) cum.push(cum[i - 1] + Math.hypot(P[i % n][0] - P[i - 1][0], P[i % n][1] - P[i - 1][1]));
+  const L = cum[n], k = Math.max(8, Math.round(L / step)), out = []; let j = 0;
+  for (let s = 0; s < k; s++) { const t = L * s / k; while (cum[j + 1] < t) j++; const f = (t - cum[j]) / ((cum[j + 1] - cum[j]) || 1), a = P[j], c = P[(j + 1) % n]; out.push([a[0] + (c[0] - a[0]) * f, a[1] + (c[1] - a[1]) * f]); }
+  return out;
 }
 
 // ---------- v72: kap over de steg (CSG) ----------
@@ -279,8 +399,51 @@ export function barBlocks(partSoups, axis, { gap = 0, wall = 2, scan = null } = 
   // kap: bovenkant + gap + wall; onderkant 1 mm boven het pasvlak (tandvlees + gap): hij loopt midden in de plaatwand
   // over (een schone snijlijn, ook waar de plaatrand dun uitloopt), er hoeft niets onder het pasvlak weggesneden te
   // worden en bij een lepel blijft de afdrukruimte naast de steg. Waar geen plaatoppervlak is: 6 mm onder de steg.
+  // v73: onderkant van de kap midden in de plaatwand, ook op een helling: verticaal (ruimte + ½ wand) / cos(helling).
+  // Met een vaste 'tandvlees + ruimte + 1 mm' lag de onderkant op een helling van ± 50° precies op het pasvlak van een
+  // lepel (2 mm loodrecht = 3 mm verticaal): samenvallende vlakken, niet-manifold randen naast de steg.
+  const mid = gap + Math.min(wall * 0.5, 1.25), slope = new Float32Array(W * H).fill(1);
+  if (scan) {
+    const sm = filter2(filter2(gum, W, H, 2, Math.max), W, H, 2, Math.min); // licht gesloten: geen ruis van losse cellen
+    for (let y = 1; y + 1 < H; y++) for (let x = 1; x + 1 < W; x++) {
+      const i = y * W + x, a = sm[i - 1], c = sm[i + 1], d = sm[i - W], e = sm[i + W];
+      if (a > -Infinity && c > -Infinity && d > -Infinity && e > -Infinity) slope[i] = Math.min(2.5, Math.hypot((c - a) / (2 * g), (e - d) / (2 * g), 1));
+    }
+  }
   const kTop = ballDilate(G, wall, wall, rTop), kBot = new Float32Array(W * H);
-  for (let i = 0; i < W * H; i++) { if (kTop[i] === -Infinity) continue; const s = gum[i]; kBot[i] = s > -Infinity ? Math.min(s + gap + 1, kTop[i] - 0.5) : Math.max(deep, kTop[i] - (gap + wall) - 6); }
+  for (let i = 0; i < W * H; i++) {
+    if (kTop[i] === -Infinity) continue; const s = gum[i];
+    // ligt de kap hier lager dan het midden van de plaatwand (tandvlees dat naast de steg hoger oploopt dan de steg),
+    // dan zit hij helemaal in de plaat of zelfs in het weefsel: daar geen kap (anders stak hij in de afdrukruimte)
+    if (s > -Infinity && kTop[i] < s + mid * slope[i]) { kTop[i] = -Infinity; continue; }
+    kBot[i] = s > -Infinity ? Math.min(s + mid * slope[i], kTop[i] - 0.5) : Math.max(deep, kTop[i] - (gap + wall) - 6);
+  }
   const cap = prismSoup(G, kTop, kBot);
   return { cap, relief };
+}
+
+/** v73: hoeveel materiaal zit er rond de uitsparing voor de steg? Voor elk facet van het werkstuk dat op de uitsparing
+ *  ligt (de holte rond de steg) een straal recht het materiaal in (tegen de normaal in) tot hij er weer uitkomt: de
+ *  wanddikte daar. (De afstand tot het dichtstbijzijnde andere facet gaf 0 mm op elke snijrand.) Alleen de holte boven
+ *  het tandvlees (≥ aboveScan mm van de scan); 'top' = plafond (boven de steg), 'side' = zijwanden.
+ *  Geeft { top, side } met { min, p5, at } (mm, at = plek van het minimum) of null als er geen holte is. */
+export function wallAroundRelief(soup, relief, scan, axis, { onRelief = 0.02, aboveScan = 1 } = {}) {
+  const n = soup.length / 9; if (!n || !relief?.length) return null;
+  const N = axisBasis(axis).N, rb = new TriBVH(relief), sb = scan?.length ? new TriBVH(scan) : null;
+  const cen = t => { const o = t * 9; return [(soup[o] + soup[o + 3] + soup[o + 6]) / 3, (soup[o + 1] + soup[o + 4] + soup[o + 7]) / 3, (soup[o + 2] + soup[o + 5] + soup[o + 8]) / 3]; };
+  const on = new Uint8Array(n); let cnt = 0;
+  for (let t = 0; t < n; t++) { const c = cen(t); if (rb.closest(c[0], c[1], c[2], onRelief * 2) <= onRelief) { on[t] = 1; cnt++; } }
+  if (!cnt || cnt === n) return null;
+  const ob = new TriBVH(soup), top = [], side = [];
+  for (let t = 0; t < n; t++) {
+    if (!on[t]) continue;
+    const c = cen(t); if (sb && sb.closest(c[0], c[1], c[2], aboveScan) < aboveScan) continue; // bij het tandvlees: niet meten
+    const o = t * 9, ux = soup[o + 3] - soup[o], uy = soup[o + 4] - soup[o + 1], uz = soup[o + 5] - soup[o + 2], vx = soup[o + 6] - soup[o], vy = soup[o + 7] - soup[o + 1], vz = soup[o + 8] - soup[o + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, l = Math.hypot(nx, ny, nz); if (l < 1e-12) continue;
+    const cosN = (nx * N[0] + ny * N[1] + nz * N[2]) / l, d = ob.ray(c[0], c[1], c[2], -nx / l, -ny / l, -nz / l, 1e-4, 30);
+    if (!Number.isFinite(d) || d < 0.02) continue; // geen tegenkant gevonden of een naad: niet meten
+    if (cosN < -0.6) top.push([d, c]); else if (Math.abs(cosN) < 0.5) side.push([d, c]);
+  }
+  const stats = a => { if (!a.length) return null; a.sort((p, q) => p[0] - q[0]); return { min: a[0][0], p5: a[Math.floor(a.length * 0.05)][0], at: a[0][1], n: a.length }; };
+  return { top: stats(top), side: stats(side) };
 }

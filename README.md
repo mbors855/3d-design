@@ -18,6 +18,45 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 73: alles over de steg klopt — omtrek, scanrand, beetwal en prothese
+
+Getest op nagebootste kaken met een gefreesde steg op 2 en 4 implantaten (ook een scan die vlak naast de steg ophoudt, met een inham of zelfs een gat onder de steg). In v72 mislukte de lepel op de onderkaak met steg helemaal, en gaven lepel en beetplaat bij een scan die naast de steg ophoudt honderden niet-manifold randen.
+
+**Omtrek om de steg** (`keepOutlineClear` in `js/parts.js`). v72 schoof elk omtrekpunt dat te dicht bij de steg lag los opzij. Bij een frenulum-inkeping vlak naast een abutment raakte de volgorde van de punten dan door elkaar: *"De omtrek kruist zichzelf"* en geen lepel.
+- Nu wordt het plaatgebied verenigd met de voetafdruk van de steg, verbreed met de benodigde afstand (raster van 0,25 mm), met afgeronde hoeken. Alleen waar het gebied echt groter wordt, komt een nieuw stuk omtrek; de rest blijft punt voor punt gelijk. De nieuwe omtrek kan zichzelf niet kruisen.
+- **Afstand per werkstuk**: de kap (ruimte + 0,3 mm + wand) moet helemaal binnen de plaat passen. Lepel 6,5 mm, beetplaat 3,2 mm, basis 3,4 mm (was 3 mm voor alles: bij een lepel sneed de uitsparing dan door de zijkant van de kap).
+- **Geen overextensie**: de omtrek gaat niet verder naar buiten dan de omtrek zelf al liep (alleen een inkeping vlak naast de steg wordt opgevuld). Alleen het minimum (een kap met 1,5 mm wand) mag ook voorbij de plooi.
+
+**Scan houdt vlak naast de steg op** (`surroundParts` in `js/main.js`, `extendBorder` met gewicht in `js/prep.js`). Rond de steg was dan geen tandvlees om de plaat op te bouwen.
+- Bij *Scan voorbereiden* en vóór 🧭 Automatisch wordt de scanrand daar vloeiend verlengd (paars = ontworpen), met een zachte overgang naar de rest van de rand. Elders verandert niets.
+- De aanvulling mag zichzelf en de scan niet snijden; anders korter, en anders eerst losse flarden scan naast de steg weg en een gat onder de steg dicht (ook als het groter is dan 25 mm). Lukt het niet, dan zegt het programma dat (bij het voorbereiden en bij de plaat).
+
+**Beetwal boven de kap** (`capUnderRim` in `js/construct.js`). Bij een wal van 8 mm stak de kap over de steg tot 0,2 mm onder de bovenkant van de wal.
+- Nieuw veld *Wal boven de kap over de steg* (standaard 2 mm, alleen zichtbaar bij een steg). Ligt de kap hoger dan de walhoogte min die marge, dan gaat de hele wal evenveel omhoog: het occlusievlak blijft evenwijdig, geen bult in de wal. De melding noemt hoeveel en waarom; boven 3 mm een waarschuwing (weinig ruimte boven de steg).
+- Ligt de kap deels naast de wal en komt hij daar te hoog, dan meldt het programma dat ook.
+
+**Prothese over de steg.**
+- **Pasvlak**: de gingivaband bleef bij een steg tot 9 mm in het weefsel hangen (pasvlak 63 % binnen 0,05 mm). Het wegsnijden onder het pasvlak gebeurt nu in dezelfde stap als samenvoegen en uitsparen (`unionSubtractClip` in `js/csg.js`), zonder tussentijdse STL: 99,3 %. Ook zonder steg minder overlapjes (bovenkaak 313 → 224).
+- **Materiaal rond de steg**: na het opbouwen meet het programma de wanddikte rond de holte voor de steg, met een straal recht door het materiaal (`wallAroundRelief`, nieuwe `ray` in `js/bvh.js`). Te dun (boven < 1,5 mm of opzij < 1 mm): waarschuwing met het element.
+- **Losse elementen** (sockets en de export *Elementen*) worden ingekort waar de steg zit; bij sockets met de dunste plek per element.
+
+**Ook:**
+- **Kap op een helling**: de onderkant van de kap ligt midden in de plaatwand, ook op een steile helling ((ruimte + ½ wand) / cos helling). Op ± 50° lag hij precies op het pasvlak van de lepel: niet-manifold randen naast de steg. Waar het tandvlees naast de steg hoger oploopt dan de steg, komt geen kap meer in de afdrukruimte.
+- **Naaldjes**: punten die na de booleaanse bewerking binnen 0,01 mm van elkaar liggen maar net in een buurcel van het raster vielen, worden nu ook samengevoegd. Dat gaf losse niet-manifold randen.
+
+| Gemeten (⚡ Alles automatisch in Chrome) | v72 | v73 |
+|---|---|---|
+| Lepel onderkaak met steg | mislukt (omtrek kruist zichzelf) | gesloten, 0 niet-manifold |
+| Lepel, scan houdt 1 mm naast de steg op / inham onder de steg | mislukt (omtrek kruist zichzelf) / gaten naast de steg (de uitsparing sneed door de te smalle kap) | gesloten, 0 niet-manifold / gesloten, kap helemaal om de steg |
+| Lepel / beetplaat, scan mist onder én naast de steg | 244 / 576 niet-manifold, vlies over de tongruimte | 0 / 0 |
+| Beetplaat, wal 8 mm: wal boven de kap | 0,2 mm | 2,0 mm (wal 1,9 mm hoger, gemeld) |
+| Prothese bovenkaak met steg: pasvlak binnen 0,05 mm | 63 % | 99,3 % |
+| Prothese onderkaak met steg: niet-manifold / overlapjes | 2 / 362 | 0 / 47 |
+
+**Bekend:** de basis met sockets (losse tanden) op de demo-onderkaak heeft, ook zonder steg, duizenden overlapjes en een onvolledig pasvlak (de sockets komen door de basis heen). Dat zat er al in en is nog niet opgelost; monoblock werkt goed.
+
+**Getest:** 90 automatische tests, waarvan 8 nieuw (omtrek met inkeping naast de steg, geen overextensie, kap onder de wal, samenvoegen + wegsnijden in één keer, aanvullen met gewicht, BVH-straal, wanddikte, kap op een helling). In Chrome is ⚡ Alles automatisch voor 20 gevallen doorlopen zonder JS-fouten: lepel, beetplaat (met en zonder wal) en prothese (monoblock en sockets) op onder- en bovenkaak met steg, vier varianten van de scanrand bij de steg, en de demokaken zonder steg.
+
 ### Nieuw in 72: steg apart, rand strak, altijd terug, 3D-voorbeeld, handvat vormen
 
 **Steg en andere losse onderdelen.** Een STL uit exocad of 3Shape met een steg op implantaten bevat de steg als apart, gesloten deel naast de (open) kaakscan. Vroeger verdween de steg bij *losse delen weg*, of erger: *Scan voorbereiden* hield de steg over en gooide de kaak weg. Nu wordt elk gesloten deel bij het openen apart gezet (`js/parts.js`). Per onderdeel, bij Scan & mesh of in het paneel van het werkstuk:
@@ -319,6 +358,14 @@ mkdir -p node_modules/three && ln -sf ../../vendor/three.module.js node_modules/
 node tests/run.mjs
 ```
 
+In Chrome (v73, met Playwright; geen webserver nodig): testscans met een steg maken en ⚡ Alles automatisch per geval doorlopen. Per geval: gesloten, niet-manifold, losse delen, overlapjes, de meldingen en een schermafdruk (in `tests/browser/out/`).
+
+```bash
+node tests/browser/make-cases.mjs
+node tests/browser/e2e.mjs                 # alle gevallen uit tests/browser/cases.json
+ONLY='^A_' node tests/browser/e2e.mjs      # alleen een deel
+```
+
 Rekenmodules zonder browser (Node 20+; `three` wordt uit `vendor/` geladen via `node_modules/three`, zie hieronder): naamherkenning, OFF/eoff, WinZip-AES, bibliotheek sluiten en spiegelen, ideale standen, rij aansluiten ≤ 0,05 mm, articulatorbewegingen, inslijpen, 3ox/inf, controles, printsimulatie, ZIP, randopschoning, schaal, weefselzijde, kamlijn.
 
 Validatie van versie 61 op een echte lab-export (51 STL-bestanden, 3Shape DentalDesigner + losse beetwallen):
@@ -358,5 +405,6 @@ js/version.js               versienummer (scripts/stamp.mjs zet het in de import
 js/unzip.js, zip.js, handoff.js, stl.js, viewer.js
 vendor/                     three.js, three-mesh-bvh, manifold-3d (WebAssembly)
 tests/run.mjs               headless tests
+tests/browser/              Chrome-tests (Playwright) en testscans met steg
 legacy/v52.html             vorige versie (één bestand)
 ```

@@ -123,7 +123,7 @@ export function repairScan(soup, { minShare = 0.05, maxHoleEdges = 60, spikes = 
  * onlyWhere(punt) kan beperken tot randdelen waar het nodig is (bijv. waar de plooi niet gescand is).
  * Nieuwe facetten komen achteraan; report.designedFrom = eerste nieuwe facet.
  */
-export function extendBorder(soup, { length = 6, step = 0.6, bend = null, onlyWhere = null } = {}) {
+export function extendBorder(soup, { length = 6, step = 0.6, bend = null, onlyWhere = null, weight = null } = {}) {
   const mesh = weld(soup, 1e-6), p = mesh.positions, f = mesh.indices, edges = edgeMap(mesh);
   const { loops } = boundaryLoops(mesh, edges);
   if (!loops.length) return { soup, report: { extended: 0, designedFrom: soup.length / 9 } };
@@ -157,14 +157,16 @@ export function extendBorder(soup, { length = 6, step = 0.6, bend = null, onlyWh
     for (const sgn of [1, -1]) { let j = i, s = 0; for (let k = 0; k < m && s <= sigma * 3; k++) { const w = Math.exp(-(s * s) / (2 * sigma * sigma)) * (k === 0 && sgn < 0 ? 0 : 1); for (let q = 0; q < 3; q++) acc[q] += dirs[j][q] * w; const nj = (j + sgn + m) % m; s += Math.hypot(...sub(P(loop[nj]), P(loop[j]))); j = nj; } }
     return nrm(acc);
   });
-  const active = loop.map(v => onlyWhere ? onlyWhere(P(v)) : true);
+  // v73: weight(punt) ∈ [0, 1] = deel van de lengte (zachte overgang naar 0, bijv. alleen rond een steg)
+  const wt = loop.map(v => weight ? Math.max(0, Math.min(1, weight(P(v)) || 0)) : onlyWhere ? (onlyWhere(P(v)) ? 1 : 0) : 1), active = wt.map(x => x > 1e-3);
   const rings = [loop.map(P)], steps = Math.max(1, Math.round(length / step));
   for (let s = 1; s <= steps; s++) {
     const prev = rings[s - 1];
     rings.push(prev.map((q, i) => {
       if (!active[i]) return q;
       let d = D[i]; if (bend) d = nrm([0, 1, 2].map(k => d[k] + bend[k] * 0.06 * s)); // optioneel buigen (richting plooi)
-      return [q[0] + d[0] * step, q[1] + d[1] * step, q[2] + d[2] * step];
+      const st = step * wt[i];
+      return [q[0] + d[0] * st, q[1] + d[1] * st, q[2] + d[2] * st];
     }));
     // ring ontspannen: punten gelijkmatig tussen hun buren (geen plooien of kruisingen bij hoeken in de scanrand);
     // hoe verder van de scan, hoe gladder (de buitenrand van de aanvulling wordt een vloeiende lijn)
@@ -179,7 +181,7 @@ export function extendBorder(soup, { length = 6, step = 0.6, bend = null, onlyWh
     const tri = (x, y, z) => { const ar = Math.hypot(...crs(sub(y, x), sub(z, x))); if (ar > 1e-9) out.push(...x, ...y, ...z); };
     tri(b0, a0, a1); tri(b0, a1, b1);
   }
-  return { soup: Float32Array.from(out), report: { extended: active.filter(Boolean).length, rings: steps, designedFrom } };
+  return { soup: Float32Array.from(out), report: { extended: active.filter(Boolean).length, rings: steps, designedFrom, added: out.length / 9 - designedFrom } };
 }
 
 /** Alleen het samenhangende deel dat het punt bevat (bijv. de kamtop) houden: sokkel/tafel onder de kaak valt weg. */

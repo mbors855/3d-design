@@ -288,7 +288,7 @@ function faceKeys(soup) {
 
 // Alle binnenlussen (gaten in de scan, zoals de opening rond een implantaat of een niet gescand stukje tandvlees in het
 // front) tot maxSize mm doorsnede dichten met een glad vlak (zelfde vulling als bij de inhammen).
-export function fillInnerHoles(mesh, { maxSize = 25 } = {}) {
+export function fillInnerHoles(mesh, { maxSize = 25, near = null } = {}) {
   const { loops } = boundaryLoops(mesh, edgeMap(mesh)); if (loops.length < 2) return { mesh, filled: 0 };
   const P = mesh.positions, at = v => [P[v * 3], P[v * 3 + 1], P[v * 3 + 2]];
   const lens = loops.map(l => { let s = 0; for (let i = 0; i < l.length; i++) s += len(sub(at(l[i]), at(l[(i + 1) % l.length]))); return s; });
@@ -298,7 +298,10 @@ export function fillInnerHoles(mesh, { maxSize = 25 } = {}) {
     if (i === outer) return;
     const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
     for (const v of l) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], P[v * 3 + k]); mx[k] = Math.max(mx[k], P[v * 3 + k]); }
-    if (len(sub(mx, mn)) > maxSize) return;
+    // v73: een gat onder een steg (daar kan de scanner niet kijken) wordt ook gedicht als het groter is: de uitsparing
+    // haalt dat stuk later toch weg, maar zonder vulling hield de plaat daar een tweede rand en mislukte hij
+    const under = near && l.filter(v => near(at(v))).length >= 0.7 * l.length;
+    if (len(sub(mx, mn)) > maxSize && !under) return;
     patch(pos, idx, l, h); filled++;
   });
   return filled ? { mesh: { positions: Float32Array.from(pos), indices: Uint32Array.from(idx) }, filled } : { mesh, filled: 0 };
@@ -308,12 +311,12 @@ export function fillInnerHoles(mesh, { maxSize = 25 } = {}) {
  *  Geeft { soup, designedFrom, report: { fringeFaces, notches: [{ width, depth }], holes } }. Gedichte gaten en
  *  inhammen horen bij het scanoppervlak (een werkstuk 'langs de scanrand' gaat er dus overheen); alleen wat al
  *  ontworpen was blijft achteraan (paars). */
-export function tidyBorder(soup, { designedFrom = null, fringe = 1.5, notchWidth = 7, notchMinDepth = 1.5, protect = null, holeSize = 25 } = {}) {
+export function tidyBorder(soup, { designedFrom = null, fringe = 1.5, notchWidth = 7, notchMinDepth = 1.5, protect = null, holeSize = 25, holeNear = protect } = {}) {
   const nIn = soup.length / 9, inKeys = faceKeys(soup), designed = new Set();
   for (let t = designedFrom ?? nIn; t < nIn; t++) designed.add(inKeys[t]);
   let mesh = weld(soup, 1e-5);
   mesh = tidySheet(mesh).mesh;
-  const holes = fillInnerHoles(mesh, { maxSize: holeSize }); mesh = holes.mesh;
+  const holes = fillInnerHoles(mesh, { maxSize: holeSize, near: holeNear }); mesh = holes.mesh;
   const report = { fringeFaces: 0, notches: [], holes: holes.filled };
   if (fringe > 0) { const r = removeFringes(mesh, fringe, protect); mesh = r.mesh; report.fringeFaces = r.removed; }
   if (notchWidth > 0) { const r = fillNotches(mesh, { width: notchWidth, minDepth: notchMinDepth }); mesh = r.mesh; report.notches = r.notches.map(({ width, depth }) => ({ width, depth })); }

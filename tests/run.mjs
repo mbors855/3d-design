@@ -962,4 +962,114 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     assert.equal(tr('Rand strak: franjes weg (47.325 facetten) · 1 inham dicht (7,0 mm breed) · 2 gaten gedicht. ↶ Terug zet het terug.', 'en'), 'Edge tidied: fringes removed (47,325 faces) · 1 notch closed (7.0 mm wide) · 2 holes closed. ↶ Back restores it.');
   });
 }
+// ---------- v73 ----------
+{
+  const { keepOutlineClear, barBlocks, wallAroundRelief } = await import(J + 'parts.js');
+  const { axisBasis, outlinePolygon } = await import(J + 'trim.js');
+  const { capUnderRim } = await import(J + 'construct.js');
+  const { unionSubtractClip, loadManifold, fromManifold } = await import(J + 'csg.js');
+  const { extendBorder } = await import(J + 'prep.js');
+  const { TriBVH } = await import(J + 'bvh.js');
+  const { selfIntersections } = await import(J + 'meshcheck.js');
+  const { defaultFrame } = await import(J + 'setup.js');
+  const { formArch } = await import(J + 'teeth.js');
+  const box = (x0, x1, y0, y1, z0, z1, n = 6) => {
+    const out = [], L = [x0, y0, z0], H = [x1, y1, z1];
+    for (let ax = 0; ax < 3; ax++) for (const side of [0, 1]) {
+      const u = (ax + 1) % 3, v = (ax + 2) % 3, P = (i, j) => { const p = [0, 0, 0]; p[ax] = side ? H[ax] : L[ax]; p[u] = L[u] + (H[u] - L[u]) * i / n; p[v] = L[v] + (H[v] - L[v]) * j / n; return p; };
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { const a = P(i, j), b = P(i + 1, j), c = P(i + 1, j + 1), d = P(i, j + 1); if (side) out.push(...a, ...b, ...c, ...a, ...c, ...d); else out.push(...a, ...c, ...b, ...a, ...d, ...c); }
+    }
+    return Float32Array.from(out);
+  };
+  const barDist = (p, x0, x1, y0, y1) => Math.hypot(Math.max(0, x0 - p[0], p[0] - x1), Math.max(0, y0 - p[1], p[1] - y1));
+  const valid = (pts, b) => validContour(outlinePolygon(pts, b, { step: 1 }).map(q => [q[0] * 10, q[1] * 10]));
+
+  await test('v73 omtrek om de steg: inkeping (frenulum) vlak naast de steg → geldig, nergens te dicht, de rest onveranderd', () => {
+    const bar = box(-12, 12, -1.5, 1.5, 5, 8), b = axisBasis([0, 0, 1]), pts = [];
+    for (let k = 0; k < 120; k++) { const a = k / 120 * Math.PI * 2; pts.push([22 * Math.cos(a), 12 * Math.sin(a), -3]); }
+    // smalle inkeping vanaf linguaal (onder) tot 1,5 mm van de steg, 3 mm breed, zoals een tongriem naast een abutment
+    const i0 = pts.findIndex(p => p[0] > -2 && p[1] < 0); pts.splice(i0, 0, [-1.5, -12, -3], [-1.5, -3, -3], [0, -2.8, -3], [1.5, -3, -3], [1.5, -12, -3]);
+    const rep = {}, out = keepOutlineClear(pts, [bar], [0, 0, 1], 6.5, { minClear: 5, report: rep });
+    assert.ok(valid(out, b), 'kruist zichzelf niet');
+    for (const p of out) assert.ok(barDist(p, -12, 12, -1.5, 1.5) > 4.7, `punt ${p.map(v => v.toFixed(1))} te dicht bij de steg (${barDist(p, -12, 12, -1.5, 1.5).toFixed(2)})`);
+    const far = pts.filter(p => barDist(p, -12, 12, -1.5, 1.5) > 12);
+    for (const p of far) assert.ok(out.some(q => q[0] === p[0] && q[1] === p[1] && q[2] === p[2]), 'punten ver van de steg blijven precies gelijk');
+    assert.ok(rep.replaced > 0 && rep.clearance < 2, 'het stuk bij de inkeping is vervangen');
+  });
+
+  await test('v73 omtrek om de steg: niet verder naar buiten dan nodig (geen overextensie over de plooi)', () => {
+    const bar = box(-12, 12, -1.5, 1.5, 5, 8), pts = [];
+    for (let k = 0; k < 120; k++) { const a = k / 120 * Math.PI * 2; pts.push([22 * Math.cos(a), 6 * Math.sin(a), -3]); } // ≥ 3,5 mm naast de steg
+    assert.equal(keepOutlineClear(pts, [bar], [0, 0, 1], 6.5, { minClear: 3 }), pts, 'een bolle omtrek op ≥ 3,5 mm blijft staan (minstens 3 mm is genoeg)');
+    const out = keepOutlineClear(pts, [bar], [0, 0, 1], 6.5, { minClear: 5 });
+    assert.ok(out !== pts && valid(out, axisBasis([0, 0, 1])), 'met minstens 5 mm wel naar buiten, geldig');
+    for (const p of out) assert.ok(barDist(p, -12, 12, -1.5, 1.5) > 4.7, 'overal minstens 5 mm');
+  });
+
+  await test('v73 beetwal: hoogste kap onder de wal en naast de wal, per boogpositie', () => {
+    const frame = defaultFrame('lower', 50, 40), arch = formArch({ width: 50, depth: 40, form: 'oval' }), [fx, fy] = arch(0);
+    const under = box(fx - 3, fx + 3, fy - 1, fy + 1, 2, 7.5), beside = box(fx - 2, fx + 2, fy - 12, fy - 10, 2, 9);
+    const r = capUnderRim(frame, Float32Array.from([...under, ...beside]), { width: 8, anteriorWidth: 5, form: 'oval' });
+    const mid = r.ts.reduce((bi, t, i) => Math.abs(t) < Math.abs(r.ts[bi]) ? i : bi, 0);
+    assert.ok(Math.abs(r.top[mid] - 7.5) < 1e-3, `kap onder de wal ${r.top[mid]}`);
+    assert.ok(Math.max(...r.beside) > 8.99 && Math.max(...r.beside) < 9.01, 'kap naast de wal apart');
+    assert.equal(r.top[0], -Infinity, 'achteraan geen kap');
+  });
+
+  await test('v73 samenvoegen + uitsparen + weefselblok in één keer: gesloten, volume klopt', async () => {
+    await loadManifold();
+    const a = box(0, 10, 0, 10, 0, 4), b = box(5, 15, 0, 10, 0, 4), cut = box(2, 4, -1, 11, -1, 2), block = box(-1, 16, -1, 11, -2, 0.5);
+    const r = {}, out = await unionSubtractClip([a, b], [cut], [async () => { throw Error('eerste blok mislukt'); }, async () => block], r);
+    const q = quality(weld(out, 1e-6));
+    assert.ok(q.watertight && q.nonManifold === 0 && q.components === 1, JSON.stringify(q));
+    assert.equal(r.clip, 1, 'tweede weefselblok gebruikt');
+    assert.ok(Math.abs(q.volume - (15 * 10 * 3.5 - 2 * 10 * 1.5)) < 0.05, `volume ${q.volume}`);
+  });
+
+  await test('v73 rand aanvullen met gewicht: alleen waar het moet, zachte overgang, kruist niet', () => {
+    const out = []; for (let x = -10; x < 10; x += 0.5) for (let y = -10; y < 10; y += 0.5) out.push(x, y, 0, x + 0.5, y, 0, x + 0.5, y + 0.5, 0, x, y, 0, x + 0.5, y + 0.5, 0, x, y + 0.5, 0);
+    const sheet = Float32Array.from(out), w = p => p[1] > 9.9 ? Math.max(0, Math.min(1, (6 - Math.abs(p[0])) / 3)) : 0;
+    const e = extendBorder(sheet, { length: 4, step: 0.5, weight: w });
+    assert.ok(e.report.added > 0 && e.report.designedFrom === sheet.length / 9);
+    let maxY = -Infinity, maxYfar = -Infinity; for (let i = sheet.length; i < e.soup.length; i += 3) { const x = e.soup[i], y = e.soup[i + 1]; maxY = Math.max(maxY, y); if (Math.abs(x) > 6.5) maxYfar = Math.max(maxYfar, y); }
+    assert.ok(maxY > 13.5, `midden 4 mm verlengd (${maxY.toFixed(2)})`); assert.ok(maxYfar < 10.01, 'buiten het gewicht niets');
+    const m = weld(e.soup, 1e-6), si = selfIntersections(m), q = quality(m);
+    assert.equal(si.pairs, 0, 'geen zelfdoorsnijding'); assert.ok(q.nonManifold === 0 && q.components === 1, JSON.stringify(q));
+  });
+
+  await test('v73 BVH-straal: zelfde treffer als alle driehoeken aflopen', () => {
+    const soup = anatomicJaw({ jaw: 'upper', step: 1.2 }).soup, bvh = new TriBVH(soup);
+    let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let k = 0; k < 60; k++) {
+      const o = [rnd() * 60 - 30, rnd() * 50 - 15, 20], d = [rnd() * 0.4 - 0.2, rnd() * 0.4 - 0.2, -1], l = Math.hypot(...d); d.forEach((v, i) => d[i] = v / l);
+      let best = Infinity;
+      for (let f = 0; f < soup.length / 9; f++) { const s = f * 9, e1 = [0, 1, 2].map(i => soup[s + 3 + i] - soup[s + i]), e2 = [0, 1, 2].map(i => soup[s + 6 + i] - soup[s + i]);
+        const p = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]], det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2]; if (Math.abs(det) < 1e-14) continue;
+        const t0 = [0, 1, 2].map(i => o[i] - soup[s + i]), u = (t0[0] * p[0] + t0[1] * p[1] + t0[2] * p[2]) / det; if (u < 0 || u > 1) continue;
+        const qv = [t0[1] * e1[2] - t0[2] * e1[1], t0[2] * e1[0] - t0[0] * e1[2], t0[0] * e1[1] - t0[1] * e1[0]], v = (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]) / det; if (v < 0 || u + v > 1) continue;
+        const t = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) / det; if (t > 1e-6 && t < best) best = t; }
+      const got = bvh.ray(...o, ...d);
+      assert.ok(best === Infinity ? got === Infinity : Math.abs(got - best) < 1e-6, `straal ${k}: ${got} ≠ ${best}`);
+    }
+  });
+
+  await test('v73 wanddikte rond de uitsparing: plafond en zijwand gemeten door het materiaal', async () => {
+    await loadManifold();
+    const plate = box(-10, 10, -5, 5, 0, 6), relief = box(-12, 12, -1, 1, -1, 3);
+    const out = await unionSubtractClip([plate], [relief], []);
+    const w = wallAroundRelief(out, relief, null, [0, 0, 1]);
+    assert.ok(Math.abs(w.top.p5 - 3) < 0.02 && Math.abs(w.top.min - 3) < 0.02, `plafond ${JSON.stringify(w.top)}`);
+    assert.ok(Math.abs(w.side.p5 - 4) < 0.02, `zijwand ${JSON.stringify(w.side)}`);
+  });
+
+  await test('v73 kap op een helling: onderkant midden in de wand, nooit in de afdrukruimte', () => {
+    const k = 1.2, out = []; // helling van 50°: 2 mm loodrecht = 3,1 mm verticaal (v72 gebruikte vast 3 mm: in de afdrukruimte)
+    for (let x = -20; x < 20; x += 0.4) for (let y = -10; y < 10; y += 0.4) { const z = (a, b) => k * b; out.push(x, y, z(x, y), x + 0.4, y, z(x + 0.4, y), x + 0.4, y + 0.4, z(x + 0.4, y + 0.4), x, y, z(x, y), x + 0.4, y + 0.4, z(x + 0.4, y + 0.4), x, y + 0.4, z(x, y + 0.4)); }
+    const scan = Float32Array.from(out), bar = box(-8, 8, -1, 1, 3, 6);
+    const { cap } = barBlocks([bar], [0, 0, 1], { gap: 2, wall: 2.5, scan });
+    const inner = 2 * Math.hypot(1, k); let worst = Infinity;
+    for (let i = 0; i < cap.length; i += 3) { const x = cap[i], y = cap[i + 1], z = cap[i + 2]; if (Math.abs(x) > 6 || Math.abs(y) < 1.5 || Math.abs(y) > 8) continue; worst = Math.min(worst, z - k * y); }
+    assert.ok(worst > inner + 0.3, `onderkant ${worst.toFixed(2)} mm verticaal boven de helling, afdrukruimte ${inner.toFixed(2)}`);
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);
