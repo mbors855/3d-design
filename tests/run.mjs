@@ -1130,4 +1130,38 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     assert.ok(low > 0.3 * level && low < level, `onderkant ${low.toFixed(2)} mm: in de basiswand`);
   });
 }
+// ---------- v75: gladde kap over de steg ----------
+{
+  const { smoothCapSteps } = await import(J + 'capsmooth.js');
+  const { signedDistanceToSheet } = await import(J + 'gingiva.js');
+  const { barBlocks } = await import(J + 'parts.js');
+  const { unionSubtractClip, loadManifold } = await import(J + 'csg.js');
+  const { TriBVH } = await import(J + 'bvh.js');
+  const { selfIntersections } = await import(J + 'meshcheck.js');
+  const { toSoup } = await import(J + 'mesh.js');
+  await test('v75 kap over de steg: gesloten, overal ± wanddikte boven de uitsparing, hol afgerond in de plaat', async () => {
+    // kam (z = 3 − 0,08 y²), steg erop van 24 × 3 × 4 mm; beetplaat 0 / 2 mm
+    const ridge = (x, y) => 3 - 0.08 * y * y, out = [];
+    for (let x = -24; x < 24; x += 0.5) for (let y = -9; y < 9; y += 0.5) out.push(x, y, ridge(x, y), x + 0.5, y, ridge(x + 0.5, y), x + 0.5, y + 0.5, ridge(x + 0.5, y + 0.5), x, y, ridge(x, y), x + 0.5, y + 0.5, ridge(x + 0.5, y + 0.5), x, y + 0.5, ridge(x, y + 0.5));
+    const scan = Float32Array.from(out), gap = 0, wall = 2;
+    const bar = (() => { const b = [], P = (x, y, z) => [x, y, z], q = (a, c, d, e) => b.push(...a, ...c, ...d, ...a, ...d, ...e), [x0, x1, y0, y1, z0, z1] = [-12, 12, -1.5, 1.5, 4, 8];
+      q(P(x0, y0, z1), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z1)); q(P(x0, y0, z0), P(x0, y1, z0), P(x1, y1, z0), P(x1, y0, z0)); q(P(x0, y0, z0), P(x1, y0, z0), P(x1, y0, z1), P(x0, y0, z1));
+      q(P(x1, y0, z0), P(x1, y1, z0), P(x1, y1, z1), P(x1, y0, z1)); q(P(x1, y1, z0), P(x0, y1, z0), P(x0, y1, z1), P(x1, y1, z1)); q(P(x0, y1, z0), P(x0, y0, z0), P(x0, y0, z1), P(x0, y1, z1)); return Float32Array.from(b); })();
+    const plate = shell(scan, { gap, wall }).soup ?? shell(scan, { gap, wall });
+    const pb = barBlocks([bar], [0, 0, 1], { gap, wall, scan });
+    const g = smoothCapSteps({ relief: pb.relief, grid: pb.grid, plate, scanSd: signedDistanceToSheet(scan), gap, wall });
+    let r = g.next(); while (!r.done) r = g.next();
+    const m = { positions: r.value.positions, indices: r.value.indices }, q = quality(m);
+    assert.ok(q.watertight && q.nonManifold === 0 && q.components === 1, JSON.stringify(q));
+    // boven de steg: afstand van het kapoppervlak tot de uitsparing ± wall (niet dunner)
+    const rb = new TriBVH(pb.relief), P = m.positions; let thin = Infinity, n = 0;
+    for (let i = 0; i < P.length; i += 3) { if (P[i + 2] < 8.5 || Math.abs(P[i]) > 10) continue; thin = Math.min(thin, rb.closest(P[i], P[i + 1], P[i + 2], 10)); n++; }
+    assert.ok(n > 50 && thin > wall - 0.2, `dunste kap boven de steg ${thin.toFixed(2)} mm (${n} punten)`);
+    // samen met de plaat en zonder de uitsparing: één gesloten deel zonder overlap
+    await loadManifold();
+    const all = await unionSubtractClip([plate, toSoup(m)], [pb.relief], []), qa = quality(weld(all, 1e-6));
+    assert.ok(qa.watertight && qa.nonManifold === 0 && qa.components === 1, JSON.stringify(qa));
+    assert.equal(selfIntersections(weld(all, 1e-6)).pairs, 0);
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

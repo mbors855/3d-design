@@ -26,6 +26,7 @@ import { WaxLayer } from './wax.js';
 import { splitParts, partZone, keepOutlineClear, barBlocks, footprintField, wallAroundRelief } from './parts.js';
 import { tidyBorder } from './border.js';
 import { gingivaSteps, signedDistanceToSheet, footprintFields } from './gingiva.js';
+import { smoothCapSteps } from './capsmooth.js';
 import { orient, flipAll, vertexNormals } from './mesh.js';
 import { initSetupTools, geometrySoup } from './setup-tools.js';
 import { VERSION } from './version.js';
@@ -1006,7 +1007,7 @@ async function buildLepel() {
   const cutters = $('lepelPerforated').checked && needFrame('Perforaties') ? perforations(S.frame, { form: $('archForm').value }) : [];
   if (cutters.length) notes.push(cutters.length + ' perforaties');
   const pb = await partBlocks('lepel', surface, gap, wall); // v72: over de steg
-  if (pb) { extras.push(pb.cap); cutters.push(pb.relief); }
+  if (pb) { extras.push((await smoothCap(pb, soup, surface, gap, wall, reverse)) ?? pb.cap); cutters.push(pb.relief); } // v75: gladde kap
   if (extras.length || cutters.length) {
     await loadManifold();
     soup = await unionSubtract([soup, ...extras], cutters);
@@ -1054,7 +1055,7 @@ async function buildBeet() {
   }
   if ($('beetHandle').checked && needFrame('Handvat')) { extras.push(handleGeometry(S.frame, handleParams(), handleOpts('beetplaat'))); notes.push('handvat'); }
   const clip = extras.length > 0; // beetwal of handvat: wat door het pasvlak steekt wegsnijden (de kap raakt het pasvlak niet)
-  if (pb) extras.push(pb.cap);
+  if (pb) extras.push((await smoothCap(pb, soup, surf2, gap, wall, reverse)) ?? pb.cap); // v75: gladde kap
   if (extras.length) {
     await tick(`${notes.some(n => n.startsWith('beetwal')) ? 'Beetwal' : notes.includes('handvat') ? 'Handvat' : 'Kap'} samenvoegen met de plaat…`);
     await loadManifold();
@@ -1225,14 +1226,31 @@ function teethWorldSoups(list = S.teeth) { tools?.centric(); return list.map(t =
 // ---------- prothesebasis ----------
 // v74: anatomisch tandvlees voor de prothese (gingiva.js). base = de basisplaat (voor de rand), surface = het
 // plaatoppervlak (de afstand daartoe bepaalt de buitenkant van de basis), teeth = elementen in wereldcoördinaten.
+// getekende afstand tot het plaatoppervlak, positief aan de kant waar de plaat (of basis) ligt
+function plateSideDistance(surface, plate, reverse) {
+  const normalsOf = m => { let o = orient(m).mesh; if (reverse) o = flipAll(o); return vertexNormals(o); };
+  const raw = signedDistanceToSheet(surface, normalsOf);
+  let pos = 0, neg = 0; for (let i = 0; i < plate.length; i += 9 * 61) { const v = raw(plate[i], plate[i + 1], plate[i + 2], 10); if (v > 0.2) pos++; else if (v < -0.2) neg++; }
+  return neg > pos ? (x, y, z, b) => -raw(x, y, z, b) : raw;
+}
+// v75: gladde, afgeronde kap over de steg (capsmooth.js). Lukt dat niet: de prismakap van v73 (null).
+async function smoothCap(pb, plate, surface, gap, wall, reverse) {
+  if (!pb?.grid || !plate?.length) return null;
+  try {
+    await tick('Kap over de steg modelleren…');
+    const rep = {}, g = smoothCapSteps({ relief: pb.relief, grid: pb.grid, plate, scanSd: plateSideDistance(surface, plate, reverse), gap, wall }, rep);
+    let r = g.next(), last = performance.now();
+    while (!r.done) { if (performance.now() - last > 120) { await tick('Kap over de steg modelleren…'); last = performance.now(); } r = g.next(); }
+    const P = r.value.positions, I = r.value.indices; if (I.length < 300) return null;
+    const soup = new Float32Array(I.length * 3);
+    for (let i = 0; i < I.length; i++) { const v = I[i] * 3; soup[i * 3] = P[v]; soup[i * 3 + 1] = P[v + 1]; soup[i * 3 + 2] = P[v + 2]; }
+    return soup;
+  } catch (e) { console.warn('gladde kap', e); return null; }
+}
 async function anatomicGingiva(base, surface, gap, wall, reverse, teeth) {
   await tick('Tandvlees modelleren…');
   const level = gap + wall;
-  const normalsOf = m => { let o = orient(m).mesh; if (reverse) o = flipAll(o); return vertexNormals(o); };
-  const raw = signedDistanceToSheet(surface, normalsOf);
-  // kant controleren: de basis hoort aan de positieve kant van het plaatoppervlak te liggen
-  let pos = 0, neg = 0; for (let i = 0; i < base.length; i += 9 * 61) { const v = raw(base[i], base[i + 1], base[i + 2], 10); if (v > 0.2) pos++; else if (v < -0.2) neg++; }
-  const baseSd = neg > pos ? (x, y, z, b) => -raw(x, y, z, b) : raw;
+  const baseSd = plateSideDistance(surface, base, reverse);
   const footprint = footprintFields(base, S.frame);
   const T = S.teeth.map((t, i) => { t.updateMatrixWorld(); const e = t.matrixWorld.elements; return { fdi: t.userData.fdi, soup: teeth[i].soup, o: [e[12], e[13], e[14]], ax: [e[4], e[5], e[6]], bu: [e[8], e[9], e[10]] }; });
   const rep = {}, g = gingivaSteps({ frame: S.frame, teeth: T, baseSd, level, footprint, opts: { over: num('gingivaOver'), juga: num('gingivaJuga') / 100, papilla: num('gingivaPapilla') / 100 } }, rep);
