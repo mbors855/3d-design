@@ -33,7 +33,7 @@ for (const c of cases) {
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   const warns = [];
-  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); else if (m.type() === 'warning') warns.push(m.text()); });
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); else if (m.type() === 'warning' || (m.type() === 'info' && process.env.INFO)) warns.push(m.text()); });
   const t0 = Date.now();
   await page.goto('http://ddcad.test/index.html', { waitUntil: 'load' });
   await page.waitForFunction(() => window.ddcad && document.querySelector('#autoAll'));
