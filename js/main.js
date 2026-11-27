@@ -14,7 +14,7 @@ import { occlusalAxis, autoLandmarks, undercutMarks, vec } from './analysis.js';
 import { archFrame, defaultFrame, placeTeeth, autoOcclude, contactMap, clearContactMap, framePoint, archPoint } from './setup.js';
 import { FDI_UPPER, FDI_LOWER, formArch } from './teeth.js';
 import { biteRim, capUnderRim, gingivaBand, trayHandle, handleGeometry, HANDLE_DEFAULT, perforations, tissueStops } from './construct.js';
-import { unionSoups, subtractSoups, loadManifold, unionSubtract, unionSubtractClip, clipToOutline } from './csg.js';
+import { unionSoups, subtractSoups, loadManifold, unionSubtract, unionSubtractClip, clipToOutline, heal } from './csg.js';
 import { demoJaw, demoAntagonist, anatomicJaw } from './demo.js';
 import { makeZip } from './zip.js';
 import { extractIntaglio } from './intaglio.js';
@@ -25,6 +25,8 @@ import { trimByOutline, trimByEdge, axisBasis } from './trim.js';
 import { WaxLayer } from './wax.js';
 import { splitParts, partZone, keepOutlineClear, barBlocks, footprintField, wallAroundRelief } from './parts.js';
 import { tidyBorder } from './border.js';
+import { gingivaSteps, signedDistanceToSheet, footprintFields } from './gingiva.js';
+import { orient, flipAll, vertexNormals } from './mesh.js';
 import { initSetupTools, geometrySoup } from './setup-tools.js';
 import { VERSION } from './version.js';
 import { initScanTools } from './steps/scan-tools.js';
@@ -1221,6 +1223,37 @@ function freshSoup(t) { if (t.userData.soupDirty || !t.userData.soup) { t.userDa
 function teethWorldSoups(list = S.teeth) { tools?.centric(); return list.map(t => { freshSoup(t); t.updateMatrixWorld(); return { fdi: t.userData.fdi, soup: applyMatrixToSoup(t.userData.soup, t.matrixWorld.elements) }; }); }
 
 // ---------- prothesebasis ----------
+// v74: anatomisch tandvlees voor de prothese (gingiva.js). base = de basisplaat (voor de rand), surface = het
+// plaatoppervlak (de afstand daartoe bepaalt de buitenkant van de basis), teeth = elementen in wereldcoördinaten.
+async function anatomicGingiva(base, surface, gap, wall, reverse, teeth) {
+  await tick('Tandvlees modelleren…');
+  const level = gap + wall;
+  const normalsOf = m => { let o = orient(m).mesh; if (reverse) o = flipAll(o); return vertexNormals(o); };
+  const raw = signedDistanceToSheet(surface, normalsOf);
+  // kant controleren: de basis hoort aan de positieve kant van het plaatoppervlak te liggen
+  let pos = 0, neg = 0; for (let i = 0; i < base.length; i += 9 * 61) { const v = raw(base[i], base[i + 1], base[i + 2], 10); if (v > 0.2) pos++; else if (v < -0.2) neg++; }
+  const baseSd = neg > pos ? (x, y, z, b) => -raw(x, y, z, b) : raw;
+  const footprint = footprintFields(base, S.frame);
+  const T = S.teeth.map((t, i) => { t.updateMatrixWorld(); const e = t.matrixWorld.elements; return { fdi: t.userData.fdi, soup: teeth[i].soup, o: [e[12], e[13], e[14]], ax: [e[4], e[5], e[6]], bu: [e[8], e[9], e[10]] }; });
+  const rep = {}, g = gingivaSteps({ frame: S.frame, teeth: T, baseSd, level, footprint, opts: { over: num('gingivaOver'), juga: num('gingivaJuga') / 100, papilla: num('gingivaPapilla') / 100 } }, rep);
+  let r = g.next(); let last = performance.now();
+  while (!r.done) { if (performance.now() - last > 120) { await tick('Tandvlees modelleren…'); last = performance.now(); } r = g.next(); }
+  const P = r.value.positions, I = r.value.indices, soup = new Float32Array(I.length * 3);
+  for (let i = 0; i < I.length; i++) { const v = I[i] * 3; soup[i * 3] = P[v]; soup[i * 3 + 1] = P[v + 1]; soup[i * 3 + 2] = P[v + 2]; }
+  const worst = rep.teeth?.reduce((a, t) => (t.over > (a?.over ?? 0) ? t : a), null);
+  return { soup, overhang: worst?.over ?? 0, overFdi: worst?.fdi ?? null, report: rep };
+}
+// wortelstompen inkorten tot 'keep' mm onder het halsvlak (alleen voor het samenvoegen met het anatomische tandvlees)
+async function trimRoots(teeth, keep) {
+  const { toManifold, fromManifold } = await import('./csg.js');
+  const out = [];
+  for (let i = 0; i < teeth.length; i++) {
+    const t = S.teeth[i]; t.updateMatrixWorld(); const e = t.matrixWorld.elements, l = Math.hypot(e[4], e[5], e[6]) || 1, ax = [e[4] / l, e[5] / l, e[6] / l];
+    try { const m = await toManifold(teeth[i].soup), c = m.trimByPlane(ax, ax[0] * e[12] + ax[1] * e[13] + ax[2] * e[14] - keep); out.push({ ...teeth[i], soup: fromManifold(c) }); m.delete(); c.delete(); }
+    catch { out.push(teeth[i]); }
+  }
+  return out;
+}
 async function buildBasis() {
   ensureWorkableScan();
   const surface = surfaceFor('basis'), gap = num('basisGap'), wall = num('basisWall'), reverse = $('basisReverse').checked, rep = {};
@@ -1231,7 +1264,7 @@ async function buildBasis() {
   const pb = await partBlocks('basis', surface, gap, wall); // v72: over de steg (overkappingsprothese)
   if (pb) parts.push(pb.cap);
   const cut = pb ? [pb.relief] : [];
-  let gingivaFallback = null;
+  let gingivaFallback = null, gingivaAnat = null;
   const teeth = teethWorldSoups();
   if ($('gingivaOn').checked && teeth.length && S.frame) {
     const N = S.frame.N, O = S.frame.O;
@@ -1252,10 +1285,23 @@ async function buildBasis() {
     const fadeFrom = [0, 0];
     for (const q of T2) { let bi = 0, bd = Infinity; AP.forEach((p, i) => { const d = Math.hypot(p[0] - q.x, p[1] - q.y); if (d < bd) { bd = d; bi = i; } }); const t = -1 + 2 * bi / NS, dt = 2 * q.r / AL; if (t < 0) fadeFrom[0] = Math.max(fadeFrom[0], -t + dt); else fadeFrom[1] = Math.max(fadeFrom[1], t + dt); }
     const band = opts => gingivaBand(S.frame, { fadeFrom, width: num('gingivaWidth'), top: topAt, form: $('archForm').value === 'crest' ? 'oval' : $('archForm').value, arch: gArch, conform: conformTo(gap + wall * 0.5), samples: 320, ...opts });
-    parts.push(band({ embed: 9, flare: 3.5, bulge }));
-    // terugval als de anatomische vorm bij een grillige opstelling niet sluit: eenvoudiger profiel, altijd gesloten
-    gingivaFallback = { index: parts.length - 1, steps: [() => band({ embed: 3, simple: true })] };
-    notes.push(`gingiva met festoenen, papillen${jf > 0 ? ' en wortelreliëf' : ''} (rand ${fmt(over)} mm boven de halslijn)`);
+    // v74: anatomisch tandvlees (iso-oppervlak van een veld, zie gingiva.js); lukt dat niet, dan de band van v70
+    let anat = null;
+    if ($('gingivaStyle').value === 'anatomic') {
+      try { anat = await anatomicGingiva(base, surface, gap, wall, reverse, teeth); }
+      catch (e) { console.warn('tandvlees', e); }
+    }
+    if (anat) {
+      parts.push(anat.soup); gingivaAnat = anat;
+      gingivaFallback = { index: parts.length - 1, steps: [() => band({ embed: 9, flare: 3.5, bulge }), () => band({ embed: 3, simple: true })] };
+      notes.push((jf > 0 ? `anatomisch tandvlees: festoenen, papillen, wortelreliëf en een vloeiende flens (rand ${fmt(over)} mm boven de halslijn)` : `anatomisch tandvlees: festoenen, papillen en een vloeiende flens (rand ${fmt(over)} mm boven de halslijn)`)
+        + (anat.overhang > 1 ? ` · <span class="warn">element ${anat.overFdi} staat ${fmt(anat.overhang, 1)} mm buiten de basisrand: de flens loopt daar terug naar de rand; zet de elementen meer naar de kam of teken de omtrek ruimer</span>` : ''));
+    } else {
+      parts.push(band({ embed: 9, flare: 3.5, bulge }));
+      // terugval als de anatomische vorm bij een grillige opstelling niet sluit: eenvoudiger profiel, altijd gesloten
+      gingivaFallback = { index: parts.length - 1, steps: [() => band({ embed: 3, simple: true })] };
+      notes.push(`gingiva met festoenen, papillen${jf > 0 ? ' en wortelreliëf' : ''} (rand ${fmt(over)} mm boven de halslijn)`);
+    }
   } else if (!teeth.length) notes.push('zonder tanden (alleen basis)');
   let teethTrimmed = teeth;
   if ($('coupling').value === 'monoblock' || !teeth.length) {
@@ -1264,10 +1310,27 @@ async function buildBasis() {
     // v70: ook losse delen tellen als 'niet goed' (eerst alleen niet-manifold randen). De gingivaband steekt hier nog diep
     // onder de scan (embed); daarom bij de prothese het diepe weefselblok van v69.
     const makers = tissueMakers('basis', reverse, { deep: true }); // v73: één Manifold-sessie (zie unionSubtractClip)
-    const build = async () => { const r = {}; const m = await unionSubtractClip([...parts, ...teeth.map(t => t.soup)], cut, makers, r); if (makers.length && r.clip < 0) console.warn('weefselblok', r.clipError); const q = quality(weld(m, 1e-6)); return { m, ok: !r.loose && q.nonManifold === 0 && q.components === 1 && (r.clip >= 0 || !makers.length), clipped: r.clip >= 0 || !makers.length }; };
-    let res = await build(), simpler = 0;
-    while (!res.ok && gingivaFallback && simpler < gingivaFallback.steps.length) { parts[gingivaFallback.index] = gingivaFallback.steps[simpler++](); res = await build(); }
-    if (simpler) { const gi = notes.findIndex(n => n.startsWith('gingiva')); if (gi >= 0) notes[gi] = `gingiva met festoenen en papillen (eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling)`; if (!res.ok) notes.push('let op: delen raken elkaar; controleer in de slicer'); }
+    // v74: het anatomische tandvlees en de ingekorte wortelstompen steken niet diep in het weefsel: dan het dunne
+    // weefselblok (iso-oppervlak). Het diepe blok (normaal-offset) snijdt zichzelf op een echte scan duizenden keren.
+    const makersThin = gingivaAnat ? tissueMakers('basis', reverse) : makers;
+    const teethIn = gingivaAnat ? await trimRoots(teeth, 2.5) : teeth;
+    const build = async () => {
+      const anatNow = gingivaAnat && parts[gingivaFallback.index] === gingivaAnat.soup, r = {};
+      let m = await unionSubtractClip([...parts, ...(anatNow ? teethIn : teeth).map(t => t.soup)], cut, anatNow ? makersThin : makers, r); if (makers.length && r.clip < 0) console.warn('weefselblok', r.clipError);
+      let q = quality(weld(m, 1e-6));
+      // v74: een paar niet-manifold randen (samenvallende punten na het samenvoegen): plaatselijk herstellen
+      if (q.nonManifold > 0 && q.nonManifold <= 60 && q.components <= 2) { try { const hm = heal(m), hq = quality(weld(hm, 1e-6)); if (hq.nonManifold < q.nonManifold && hq.components <= q.components && hq.open === 0) { m = hm; q = hq; } } catch (e) { console.warn('herstel', e); } }
+      const clipped = r.clip >= 0 || !makers.length;
+      console.info('prothese', JSON.stringify({ anat: !!anatNow, nm: q.nonManifold, comp: q.components, loose: r.loose, clipped }));
+      return { m, ok: !r.loose && q.nonManifold === 0 && q.components === 1 && clipped, clipped, score: (r.loose ? 1e6 : 0) + (q.components - 1) * 1e5 + q.nonManifold + (clipped ? 0 : 5e4), step: simpler };
+    };
+    let simpler = 0, res = await build(), best = res;
+    // terugval: band, dan eenvoudig profiel; het beste resultaat telt (niet per se het laatste)
+    // het anatomische tandvlees met hooguit een paar losse randjes is beter dan elke terugval: dan houden
+    const goodEnough = r => r.ok || (gingivaAnat && r.step === 0 && r.score <= 5);
+    while (!goodEnough(res) && gingivaFallback && simpler < gingivaFallback.steps.length) { parts[gingivaFallback.index] = gingivaFallback.steps[simpler++](); res = await build(); if (res.score < best.score) best = res; }
+    if (best !== res) { res = best; simpler = best.step; parts[gingivaFallback.index] = simpler === 0 && gingivaAnat ? gingivaAnat.soup : gingivaFallback.steps[simpler - 1](); }
+    if (simpler) { const gi = notes.findIndex(n => n.startsWith('gingiva') || n.startsWith('anatomisch tandvlees')); if (gi >= 0) notes[gi] = gingivaAnat && simpler === 1 ? `gingiva met festoenen, papillen en wortelreliëf (band: het anatomische tandvlees sloot niet bij deze opstelling)` : `gingiva met festoenen en papillen (eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling)`; if (!res.ok) notes.push('let op: delen raken elkaar; controleer in de slicer'); }
     if (!res.clipped) clipWarn();
     const mono = res.m;
     S.plates.monoblock = { soup: mono, name: 'Monoblock prothese', file: `MONOBLOCK_${safe($('caseName').value)}${partSuffix()}.stl` };

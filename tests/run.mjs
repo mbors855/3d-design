@@ -1072,4 +1072,62 @@ await test('was: ondersnijdingen langs een schuine insteekas opvullen, bewerken,
     assert.ok(worst > inner + 0.3, `onderkant ${worst.toFixed(2)} mm verticaal boven de helling, afdrukruimte ${inner.toFixed(2)}`);
   });
 }
+// ---------- v74: iso-oppervlak van een veld en anatomisch tandvlees ----------
+{
+  const { isoFieldSync } = await import(J + 'isofield.js');
+  const { gingivaSteps, signedDistanceToSheet, footprintFields } = await import(J + 'gingiva.js');
+  const { anatomicTooth } = await import(J + 'crowns.js');
+  const { selfIntersections } = await import(J + 'meshcheck.js');
+  const { toSoup } = await import(J + 'mesh.js');
+  const run = g => { let r = g.next(); while (!r.done) r = g.next(); return r.value; };
+
+  await test('v74 iso-oppervlak: gesloten en manifold, ook bij bijna rakende bollen en een afgesneden lichaam', () => {
+    const cases = [
+      [(x, y, z) => Math.hypot(x, y, z) - 5, [-7, -7, -7], [7, 7, 7], 4 / 3 * Math.PI * 125],
+      [(x, y, z) => Math.min(Math.hypot(x - 3.05, y, z) - 3, Math.hypot(x + 3.05, y, z) - 3), [-8, -5, -5], [8, 5, 5], 2 * 4 / 3 * Math.PI * 27],
+      [(x, y, z) => Math.hypot(x, y, z) - 5, [-7, -7, -2], [7, 7, 7], null],
+    ];
+    for (const [f, lo, hi, vol] of cases) {
+      const r = isoFieldSync({ field: f, h: 0.25, lo, hi, starts: [{ p: [3, 0, 0], d: [0, 0, 1] }, { p: [-3, 0, 0], d: [0, 0, 1] }] });
+      const q = quality({ positions: r.positions, indices: r.indices });
+      assert.ok(q.watertight && q.nonManifold === 0 && q.open === 0, JSON.stringify(q));
+      if (vol) assert.ok(Math.abs(q.volume - vol) / vol < 0.01, `volume ${q.volume} ≠ ${vol}`);
+      assert.equal(selfIntersections(weld(toSoup({ positions: r.positions, indices: r.indices }), 1e-7)).pairs, 0);
+    }
+  });
+
+  await test('v74 tandvlees: gesloten lichaam, festoen bij het zenit, papil ertussen, flens tot in de basis', async () => {
+    // vlakke 'scan' (z = 0, normalen omhoog), basis 2,2 mm dik, twee centrale snijtanden 3 mm boven de basis
+    const scanArr = []; for (let x = -30; x < 30; x += 1) for (let y = -20; y < 20; y += 1) scanArr.push(x, y, 0, x + 1, y, 0, x + 1, y + 1, 0, x, y, 0, x + 1, y + 1, 0, x, y + 1, 0);
+    const scan = Float32Array.from(scanArr), level = 2.2;
+    const baseSoup = (() => { const b = [], q = (a, c, d, e) => b.push(...a, ...c, ...d, ...a, ...d, ...e), P = (x, y, z) => [x, y, z];
+      const [x0, x1, y0, y1, z0, z1] = [-30, 30, -20, 20, 0, level];
+      q(P(x0, y0, z1), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z1)); q(P(x0, y0, z0), P(x0, y1, z0), P(x1, y1, z0), P(x1, y0, z0));
+      q(P(x0, y0, z0), P(x1, y0, z0), P(x1, y0, z1), P(x0, y0, z1)); q(P(x1, y0, z0), P(x1, y1, z0), P(x1, y1, z1), P(x1, y0, z1));
+      q(P(x1, y1, z0), P(x0, y1, z0), P(x0, y1, z1), P(x1, y1, z1)); q(P(x0, y1, z0), P(x0, y0, z0), P(x0, y0, z1), P(x0, y1, z1));
+      return Float32Array.from(b); })();
+    const frame = { O: [0, 0, 0], X: [1, 0, 0], Y: [0, 1, 0], N: [0, 0, 1] }, h0 = level + 3;
+    const teeth = [[11, -4.3, false], [21, 4.3, true]].map(([fdi, cx]) => {
+      const t = anatomicTooth(fdi, { rootLength: 4 }), s = t.soup, w = new Float32Array(s.length);
+      for (let i = 0; i < s.length; i += 3) { w[i] = -s[i] + cx; w[i + 1] = s[i + 2]; w[i + 2] = s[i + 1] + h0; } // lokaal (x, y = kroon, z = buccaal) → wereld (een draaiing: x = N × buccaal)
+      return { fdi, soup: w, o: [cx, 0, h0], ax: [0, 0, 1], bu: [0, 1, 0] };
+    });
+    const r = run(gingivaSteps({ frame, teeth, baseSd: signedDistanceToSheet(scan), level, footprint: footprintFields(baseSoup, frame), opts: { over: 1 } }));
+    const m = { positions: r.positions, indices: r.indices }, q = quality(m);
+    assert.ok(q.watertight && q.nonManifold === 0 && q.components === 1, JSON.stringify(q));
+    // hoogste tandvlees labiaal (y > 2) bij het midden van 21 en tussen de tanden (x = 0)
+    // alleen punten buiten de kroon tellen (binnen de kroon loopt het lichaam onzichtbaar 1 mm door)
+    const { signedDistanceTo } = await import(J + 'gingiva.js'), sd21 = signedDistanceTo(teeth[1].soup), sd11 = signedDistanceTo(teeth[0].soup);
+    const P = r.positions; let zen = -Infinity, pap = -Infinity, low = Infinity;
+    for (let i = 0; i < P.length; i += 3) {
+      const x = P[i], y = P[i + 1], z = P[i + 2]; if (z < low) low = z;
+      if (Math.min(sd21(x, y, z, 2), sd11(x, y, z, 2)) < 0.05) continue;
+      if (y > 1.5 && y < 5 && Math.abs(x - 4.3) < 0.4) zen = Math.max(zen, z);
+      if (y > 0.5 && y < 5 && Math.abs(x) < 0.3) pap = Math.max(pap, z);
+    }
+    assert.ok(zen > h0 + 0.4 && zen < h0 + 1.6, `zenit ${(zen - h0).toFixed(2)} mm boven de hals (verwacht ± 1)`);
+    assert.ok(pap > zen + 1.2, `papil ${(pap - h0).toFixed(2)} mm, zenit ${(zen - h0).toFixed(2)} mm`);
+    assert.ok(low > 0.3 * level && low < level, `onderkant ${low.toFixed(2)} mm: in de basiswand`);
+  });
+}
 console.log(`\n${pass}/${pass + fail} geslaagd`); process.exit(fail ? 1 : 0);

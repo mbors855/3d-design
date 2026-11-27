@@ -18,6 +18,33 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 74: anatomisch tandvlees — festoenen, papillen, wortelreliëf, vloeiende flens
+
+Het tandvlees van de prothese wordt nu gemodelleerd zoals een tandtechnicus het in was zou doen, als één gesloten lichaam (`js/gingiva.js`). In v73 viel het programma bij de demokaken en bij een echte kaak altijd terug op een rechte band: *"eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling"*.
+
+**Hoe:** het tandvlees is het iso-oppervlak van een veld (`js/isofield.js`: surface nets met oplossing van dubbelzinnige cellen, dus altijd gesloten en manifold). Het veld bestaat uit:
+- **Festoen per element**: de rand van het tandvlees volgt de hals (*Over de hals*, standaard 1 mm), laag in het midden met het zenit iets distaal (centralen, hoektanden), en loopt tussen de elementen op tot een spitse papil (*Papillen*, standaard 100 %: front ± 3 mm, premolaren 2,2 mm, molaren 1,6 mm). Achter het laatste element en bij een lege plek loopt hij laag uit.
+- **Rand**: boven de festoenlijn ligt het tandvlees ín de kroon (onzichtbaar); eronder komt het vrij van de tand en wordt het binnen ± 2 mm 1,5 mm dik: een afgeronde, gerolde rand zonder trede.
+- **Onder de hals** loopt het tandvlees langs de halsdoorsnede naar de basis en wordt het met de diepte breder: mesiodistaal sluiten de buren aan (geen gaten tussen de wortels), palatinaal/linguaal een glooiing van ± 4 mm die daarna in het verhemelte overgaat, labiaal bijna recht.
+- **Wortelreliëf (juga)**: labiaal/buccaal een langgerekte welving boven elke wortel, de hoektand het sterkst, met vanzelf een holte ertussen (*Wortelreliëf*).
+- **Overgang naar de basis**: kraag en basis gaan met een afronding van ± 1,8 mm in elkaar over; labiaal is de flens iets voller.
+- **Elementen over de basisrand**: de flens loopt vanaf de hals bol terug naar de rand. Staat een element meer dan 1 mm buiten de rand, dan meldt het programma welk element en hoeveel.
+
+**Robuust samenvoegen.** De wortelstompen worden voor de monoblock tot 2,5 mm onder de hals ingekort (ze staken anders onder een flens uit), en het tandvlees stopt halverwege de basiswand. Daardoor is het diepe weefselblok niet meer nodig: het dunne blok (iso-oppervlak) volstaat. Het diepe blok sneed zichzelf op een echte scan duizenden keren. Lukt het anatomische tandvlees toch niet, dan probeert het programma de band van v70 en daarna het eenvoudige profiel, en houdt het beste resultaat (vroeger: het laatste). Een paar losse niet-manifold randen na het samenvoegen worden plaatselijk hersteld.
+
+**Instellingen** (Prothese → Tandvlees): *Tandvleesvorm* (anatomisch / band zoals in v73), *Over de hals*, *Papillen (%)*, *Wortelreliëf (%)*. *Bandbreedte* geldt alleen voor de band.
+
+| Gemeten (⚡ Alles automatisch in Chrome) | v73 | v74 |
+|---|---|---|
+| Demo-bovenkaak, monoblock | rechte band (terugval), 224 overlapjes | anatomisch, gesloten, 0 overlapjes |
+| Demo-onderkaak, monoblock | rechte band (terugval), 11 niet-manifold, 382 overlapjes | anatomisch, gesloten, 0 / 0 |
+| Onderkaak met steg, monoblock | gesloten, 47 overlapjes | anatomisch, gesloten, 0 overlapjes |
+| Echte bovenkaak (weefselzijde van een kopieprothese) | rechte band, 16.245 niet-manifold, 2 delen, 124.651 overlapjes | anatomisch, 0 niet-manifold, 1 deel, 1.998 overlapjes, pasvlak 100 % binnen 0,05 mm |
+
+**Bekend:** staan de elementen ver buiten de basisrand (bij die echte kaak tot 3,4 mm: de opstelling volgt de kam, de scan houdt op bij de oude flens), dan is de overgang van de flens naar de basisrand nog zichtbaar. Het programma meldt het; zet de elementen meer naar de kam of teken de omtrek ruimer. De basis met sockets had al vóór v74 een onvolledig pasvlak (de sockets komen door de basis heen).
+
+**Getest:** 92 automatische tests, waarvan 2 nieuw (iso-oppervlak gesloten en manifold, ook bij bijna rakende vormen; tandvlees met festoen, papil en flens op twee centralen). In Chrome alle 20 gevallen van ⚡ Alles automatisch zonder fouten, plus de demo-onderkaak en de echte bovenkaak met prothese.
+
 ### Nieuw in 73: alles over de steg klopt — omtrek, scanrand, beetwal en prothese
 
 Getest op nagebootste kaken met een gefreesde steg op 2 en 4 implantaten (ook een scan die vlak naast de steg ophoudt, met een inham of zelfs een gat onder de steg). In v72 mislukte de lepel op de onderkaak met steg helemaal, en gaven lepel en beetplaat bij een scan die naast de steg ophoudt honderden niet-manifold randen.
@@ -393,6 +420,8 @@ js/prep.js                  scan voorbereiden (analyse, reparatie, aanvullen)
 js/trim.js                  exacte uitsnede langs de omtrek (insteekas)
 js/wax.js                   waslaag (ondersnijdingen), penselen
 js/crowns.js                anatomische kronen (port van DentCraft, MIT/Apache-2.0)
+js/gingiva.js               anatomisch tandvlees (veld: festoenen, papillen, juga, flens)
+js/isofield.js              iso-oppervlak van een veld (surface nets, altijd gesloten)
 js/library.js, off.js, aes.js  tandenbibliotheek importeren (exocad .eoff + ToothBow, ZIP/AES), op het apparaat bewaren
 js/arrange.js               rij: boog, langs de boog schuiven, aansluiten, morphen, draaien
 js/setup-tools.js           opstelgereedschap: selectie, slepen, BK+OK, contact, articulator, inslijpen (UI)
