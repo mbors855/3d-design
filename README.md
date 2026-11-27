@@ -18,6 +18,25 @@ Het programma gebruikt JavaScript-modules en heeft dus een webserver nodig (dubb
 | `index.html` | CAD: opdrachtbon → scan → analyse → lepel / beetplaat → opstelling → basis → controle → productie |
 | `orders.html` | Orderoverzicht: 3Shape-export (ZIP of losse .3ox/.inf/.stl/.pts) inlezen, controleren, printsimulatie, naamgeving |
 
+### Nieuw in 75: de kap over de steg is glad en afgerond
+
+De kap over de steg (lepel, beetplaat) was een prisma op een raster van 0,2 mm: rechte, verticale wanden met fijne trapjes ('streepjes'), een scherpe hoek waar hij op de plaat stond en vlak bij de plaatrand een dun randje plaat onder een wand van 6 à 8 mm. Dat moest analoog worden afgewerkt.
+
+**Nu** (`js/capsmooth.js`) is de kap het iso-oppervlak van een veld, net als het tandvlees in v74:
+- **Koepel**: alles binnen de wanddikte van de uitsparing (steg + ruimte). Rond over de bovenkant; de zijkanten volgen de steg op wanddikte.
+- **Holle overgang** (± 1,6 mm) naar het buitenoppervlak van de plaat: geen scherpe hoek en geen trede meer.
+- **Bij de plaatrand** loopt de kap schuin (± 63°) af naar de rand, in plaats van als wand boven een dun randje te blijven staan. Rond de uitsparing blijft altijd minstens 1,5 mm (of de wanddikte).
+- Onder de plaat (halverwege de wand) en ver van de steg ligt het lichaam in de plaat; losse snippers bij de rand worden weggelaten. Daarna licht gladgemaakt (Taubin, krimpt niet), wat ook de rasterstreepjes van het tandvlees wegneemt.
+- Lukt het niet, dan valt het programma terug op de kap van v73/v74.
+
+| Gemeten (⚡ Alles automatisch in Chrome) | v74 | v75 |
+|---|---|---|
+| Kap over de steg | verticale wanden met trapjes, scherpe hoek op de plaat | rond, holle overgang, geen trapjes |
+| Beetplaat / lepel over de steg (7 gevallen) | gesloten, 0 niet-manifold | gesloten, 0 niet-manifold, 1 deel |
+| Facetten beetplaat met steg | ± 58.000 | ± 80.000 (de afgeronde kap) |
+
+**Getest:** 93 automatische tests (1 nieuw: gladde kap gesloten, overal minstens de wanddikte boven de uitsparing, samen met de plaat één deel zonder overlap). In Chrome alle 20 gevallen zonder fouten.
+
 ### Nieuw in 74: anatomisch tandvlees — festoenen, papillen, wortelreliëf, vloeiende flens
 
 Het tandvlees van de prothese wordt nu gemodelleerd zoals een tandtechnicus het in was zou doen, als één gesloten lichaam (`js/gingiva.js`). In v73 viel het programma bij de demokaken en bij een echte kaak altijd terug op een rechte band: *"eenvoudig profiel: de anatomische vorm sloot niet bij deze opstelling"*.
@@ -421,7 +440,8 @@ js/trim.js                  exacte uitsnede langs de omtrek (insteekas)
 js/wax.js                   waslaag (ondersnijdingen), penselen
 js/crowns.js                anatomische kronen (port van DentCraft, MIT/Apache-2.0)
 js/gingiva.js               anatomisch tandvlees (veld: festoenen, papillen, juga, flens)
-js/isofield.js              iso-oppervlak van een veld (surface nets, altijd gesloten)
+js/isofield.js              iso-oppervlak van een veld (surface nets, altijd gesloten), Taubin-gladmaken
+js/capsmooth.js             gladde, afgeronde kap over de steg (veld)
 js/library.js, off.js, aes.js  tandenbibliotheek importeren (exocad .eoff + ToothBow, ZIP/AES), op het apparaat bewaren
 js/arrange.js               rij: boog, langs de boog schuiven, aansluiten, morphen, draaien
 js/setup-tools.js           opstelgereedschap: selectie, slepen, BK+OK, contact, articulator, inslijpen (UI)

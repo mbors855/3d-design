@@ -14,7 +14,7 @@
 // het binnen de basis, dus na het samenvoegen is van die snijvlakken niets te zien.
 import { TriBVH } from './bvh.js';
 import { weld, vertexNormals } from './mesh.js';
-import { isoField } from './isofield.js';
+import { isoField, taubin } from './isofield.js';
 
 const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };
@@ -338,6 +338,7 @@ export function* gingivaSteps({ frame, teeth, baseSd, level, footprint = null, o
   const starts = [];
   for (const t of T) for (const s of [1, -1]) starts.push({ p: [0, 1, 2].map(k => t.o[k] + t.ax[k] * (over * 0.3) + t.bu[k] * t.vc), d: t.bu.map(v => v * s), len: 14 });
   const r = yield* isoField({ field, h, lo, hi, starts, due, label: 'tandvlees' });
+  taubin(r.positions, r.indices, { iterations: 2 }); // v75: rastertrapje weg (verplaatsing < 0,05 mm)
   report.stats = r.stats; report.ms = performance.now() - t0; report.teeth = T.map(t => ({ fdi: t.fdi, over: t.over }));
   return r;
 }

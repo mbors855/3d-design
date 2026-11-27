@@ -419,7 +419,7 @@ export function barBlocks(partSoups, axis, { gap = 0, wall = 2, scan = null } = 
     kBot[i] = s > -Infinity ? Math.min(s + mid * slope[i], kTop[i] - 0.5) : Math.max(deep, kTop[i] - (gap + wall) - 6);
   }
   const cap = prismSoup(G, kTop, kBot);
-  return { cap, relief };
+  return { cap, relief, grid: { G, rTop, deep } }; // v75: raster voor de gladde kap (capsmooth.js)
 }
 
 /** v73: hoeveel materiaal zit er rond de uitsparing voor de steg? Voor elk facet van het werkstuk dat op de uitsparing

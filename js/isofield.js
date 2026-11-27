@@ -152,3 +152,24 @@ function nrm(p, a, b, c, axis) {
 
 /** Synchrone variant (tests, Node). */
 export function isoFieldSync(opts) { const g = isoField(opts); let r = g.next(); while (!r.done) r = g.next(); return r.value; }
+
+/** Taubin-gladmaken (λ/μ, krimpt niet) van een gesloten mesh in place: haalt het rastertrapje en kleine rimpels weg
+ *  (verplaatsing doorgaans < 0,05 mm). */
+export function taubin(positions, indices, { iterations = 3, lambda = 0.5, mu = -0.53 } = {}) {
+  const nv = positions.length / 3, deg = new Uint32Array(nv), ofs = new Uint32Array(nv + 1);
+  for (let t = 0; t < indices.length; t++) deg[indices[t]] += 2;
+  for (let v = 0; v < nv; v++) ofs[v + 1] = ofs[v] + deg[v];
+  const nb = new Uint32Array(ofs[nv]), fill = ofs.slice(0, nv);
+  for (let t = 0; t < indices.length; t += 3) for (let k = 0; k < 3; k++) { const a = indices[t + k], b = indices[t + (k + 1) % 3]; nb[fill[a]++] = b; nb[fill[b]++] = a; }
+  const upd = new Float32Array(positions.length);
+  const step = w => {
+    for (let v = 0; v < nv; v++) {
+      const s = ofs[v], e = ofs[v + 1]; if (e === s) { upd[v * 3] = upd[v * 3 + 1] = upd[v * 3 + 2] = 0; continue; }
+      let x = 0, y = 0, z = 0; for (let i = s; i < e; i++) { const u = nb[i] * 3; x += positions[u]; y += positions[u + 1]; z += positions[u + 2]; }
+      const k = e - s; upd[v * 3] = (x / k - positions[v * 3]) * w; upd[v * 3 + 1] = (y / k - positions[v * 3 + 1]) * w; upd[v * 3 + 2] = (z / k - positions[v * 3 + 2]) * w;
+    }
+    for (let i = 0; i < positions.length; i++) positions[i] += upd[i];
+  };
+  for (let it = 0; it < iterations; it++) { step(lambda); step(mu); }
+  return positions;
+}
